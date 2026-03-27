@@ -1,0 +1,51 @@
+# 환경 변수 (API 키 포함 — 절대 커밋 금지)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# 가상환경
+.venv/
+venv/
+env/
+ENV/
+
+# 실험 결과 (용량 크고 재현 가능)
+results/*.json
+results/*.csv
+results/*.png
+results/*.pdf
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 데이터셋 (라이선스 및 용량 문제)
+data/raw/
+data/processed/
+*.jsonl
+*.parquet
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# 로그
+*.log
+logs/
