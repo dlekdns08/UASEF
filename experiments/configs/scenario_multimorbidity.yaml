@@ -1,0 +1,18 @@
+# 시나리오 C: 복잡 다중이환 (Complex Multimorbidity)
+# DM2+CKD+HFrEF+AFib, COPD+골다공증+스테로이드 등 복합 만성질환 고령 환자
+
+scenario:
+  name: multimorbidity
+  specialty: internal_medicine
+  scenario_type: multimorbidity
+  description: "시나리오 C — 복잡 다중이환: 3개 이상 만성질환 동시 관리"
+
+uqm:
+  alpha: 0.05
+
+data:
+  n_test_per_scenario: 10
+  distribution_source: medqa
+
+# 다중이환 시나리오: MedQA에서 3개+ 만성질환 키워드를 포함하는 질문 자동 필터링
+# MIMIC-III 데이터 사용 시: distribution_source: mimic3 으로 변경 + 재보정 필요

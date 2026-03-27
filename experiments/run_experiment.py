@@ -3,19 +3,35 @@ UASEF — 실험 실행기
 LMStudio(로컬) vs OpenAI를 3가지 시나리오에서 비교 평가합니다.
 
 실행 방법:
+    # 전체 실험 (base_config.yaml 사용)
     python experiments/run_experiment.py
+
+    # 특정 시나리오만 실행
+    python experiments/run_experiment.py --scenario emergency
+    python experiments/run_experiment.py --scenario rare_disease
+    python experiments/run_experiment.py --scenario multimorbidity
+
+    # 시나리오별 config 파일 적용
+    python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
+
+    # 논문 품질 실험 (n_calibration=500, n_per_scenario=50)
+    python experiments/run_experiment.py --n-cal 500 --n-test 50
 
 출력:
     results/experiment_results.json
     results/comparison_table.csv
 """
 
+import argparse
 import json
 import csv
 import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+
+import yaml
 
 # 프로젝트 루트를 PYTHONPATH에 추가
 ROOT = Path(__file__).parent.parent
@@ -39,43 +55,95 @@ from data.loader import (
 #   data/raw/medabstain_AP.jsonl
 #   data/raw/medabstain_NAP.jsonl
 
-def _build_datasets(
-    n_calibration: int = 30,
-    n_per_scenario: int = 3,
-    seed: int = 42,
-) -> tuple[list[str], dict]:
+_SPECIALTY_MAP = {
+    "emergency":      "emergency_medicine",
+    "rare_disease":   "neurology",
+    "multimorbidity": "internal_medicine",
+    "routine":        "general_practice",
+}
+
+
+# ── Config 로딩 ───────────────────────────────────────────────────────────────
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """override가 base의 nested 값을 재귀적으로 덮어씁니다."""
+    result = base.copy()
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def load_config(config_path: Optional[Path] = None) -> dict:
     """
-    Calibration 질문과 시나리오 케이스를 MedQA에서 로드합니다.
-    논문 품질 실험에는 n_calibration=500, n_per_scenario=50 권장.
+    base_config.yaml을 로드하고 추가 config로 오버라이드합니다.
+
+    Args:
+        config_path: 시나리오별 config 파일 (예: configs/scenario_emergency.yaml).
+                     None이면 base_config.yaml만 사용.
     """
+    base_path = ROOT / "experiments" / "configs" / "base_config.yaml"
+    with open(base_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    if config_path and config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            override = yaml.safe_load(f) or {}
+        config = _deep_merge(config, override)
+        print(f"[Config] {config_path.name} 적용됨")
+
+    return config
+
+
+def _build_datasets(cfg: dict) -> tuple[list[str], dict]:
+    """Config에 따라 MedQA / MedAbstain 데이터를 로드합니다."""
+    d = cfg["data"]
+    uqm_cfg = cfg["uqm"]
+    dist = d.get("distribution_source", "medqa")
+
     print("[Dataset] MedQA / MedAbstain 로드 중...")
-    cal_questions = load_calibration_questions(n=n_calibration, split="train", seed=seed)
+    cal_questions = load_calibration_questions(
+        n=d["n_calibration"], split=d["calibration_split"], seed=d["seed"]
+    )
 
-    scenario_map = load_scenarios(n_per_scenario=n_per_scenario, split="test", seed=seed)
-
-    # run_experiment.py의 SCENARIOS 포맷으로 변환
-    specialty_map = {
-        "emergency": "emergency_medicine",
-        "rare_disease": "neurology",
-        "multimorbidity": "internal_medicine",
-        "routine": "general_practice",
-    }
-    scenarios = {}
-    for scenario_type, cases in scenario_map.items():
-        scenarios[scenario_type] = {
-            "specialty": specialty_map.get(scenario_type, "internal_medicine"),
-            "scenario_type": scenario_type,
-            "cases": [case_to_experiment_dict(c) for c in cases],
+    scenario_cfg = cfg.get("scenario")
+    if scenario_cfg:
+        # 단일 시나리오 config
+        stype = scenario_cfg["scenario_type"]
+        scenario_map = load_scenarios(
+            n_per_scenario=d["n_test_per_scenario"],
+            split=d["test_split"],
+            seed=d["seed"],
+        )
+        scenarios = {
+            stype: {
+                "specialty": scenario_cfg["specialty"],
+                "scenario_type": stype,
+                "distribution_source": dist,
+                "cases": [case_to_experiment_dict(c) for c in scenario_map.get(stype, [])],
+            }
+        }
+    else:
+        # 전체 시나리오
+        scenario_map = load_scenarios(
+            n_per_scenario=d["n_test_per_scenario"],
+            split=d["test_split"],
+            seed=d["seed"],
+        )
+        scenarios = {
+            st: {
+                "specialty": _SPECIALTY_MAP.get(st, "internal_medicine"),
+                "scenario_type": st,
+                "distribution_source": dist,
+                "cases": [case_to_experiment_dict(c) for c in cases],
+            }
+            for st, cases in scenario_map.items()
         }
 
     return cal_questions, scenarios
 
-
-# 기본값: 빠른 실행용 (논문 실험 시 아래 값을 늘릴 것)
-CALIBRATION_QUESTIONS, SCENARIOS = _build_datasets(
-    n_calibration=30,
-    n_per_scenario=3,
-)
 
 BACKENDS = ["lmstudio", "openai"]
 
@@ -113,11 +181,16 @@ def compute_metrics(results: list[dict]) -> dict:
 
 # ── 메인 실험 루프 ─────────────────────────────────────────────────────────────
 
-def run_experiment() -> dict:
+def run_experiment(cfg: dict) -> dict:
     all_results = {}
     timestamp = datetime.now().isoformat()
 
-    for backend in BACKENDS:
+    calibration_questions, scenarios = _build_datasets(cfg)
+    backends = cfg.get("backends", BACKENDS)
+    uqm_cfg = cfg["uqm"]
+    dist_source = cfg["data"].get("distribution_source", "medqa")
+
+    for backend in backends:
         print(f"\n{'='*65}")
         print(f"  Backend: {backend.upper()}")
         print(f"{'='*65}")
