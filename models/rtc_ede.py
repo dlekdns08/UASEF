@@ -96,42 +96,57 @@ class RTC:
 
     def pareto_frontier(
         self,
+        sweep_results: Optional[list[dict]] = None,
         alphas: list[float] = None,
         specialties: list[str] = None,
-        experiment_results: Optional[dict] = None,
     ) -> list[dict]:
         """
         Coverage guarantee ↔ Escalation rate Pareto frontier 포인트를 반환합니다.
 
-        experiment_results가 제공되면 실험 데이터에서 escalation_rate를 추출합니다.
-        없으면 α와 specialty 배율만으로 추정합니다 (시뮬레이션).
-        """
-        alphas = alphas or [0.01, 0.05, 0.10, 0.15, 0.20]
-        specialties = specialties or ["emergency_medicine", "internal_medicine", "general_practice"]
-        results = []
+        sweep_results가 제공되면 pareto_sweep.py의 실측 데이터를 사용합니다.
+        없으면 α와 specialty 배율로 이론값(시뮬레이션)만 반환합니다.
 
+        Args:
+            sweep_results: pareto_sweep.py run_pareto_sweep()의 반환값.
+                           각 항목: {alpha, specialty, scenario_type,
+                                     actual_coverage, escalation_rate, ...}
+            alphas:        sweep_results 없을 때 사용할 α 값 목록.
+            specialties:   sweep_results 없을 때 사용할 전문과목 목록.
+        """
+        # ── 실측 데이터 경로 ────────────────────────────────────────────────────
+        if sweep_results:
+            enriched = []
+            for pt in sweep_results:
+                spec = pt.get("specialty", "internal_medicine")
+                st = pt.get("scenario_type", "routine")
+                cfg = RTCConfig(spec, st, self.base_threshold)
+                enriched.append({
+                    **pt,
+                    "risk_level": cfg.risk_level.value,
+                    # base_threshold가 달라도 배율 정보는 유지
+                    "adjusted_threshold": round(cfg.adjusted_threshold, 4),
+                })
+            return enriched
+
+        # ── 이론값 추정 (실측 없을 때) ──────────────────────────────────────────
+        # actual_coverage / escalation_rate = None 으로 표시:
+        # pareto_sweep.py를 실행하면 채워집니다.
+        alphas = alphas or [0.01, 0.05, 0.10, 0.15, 0.20]
+        specialties = specialties or [
+            "emergency_medicine", "internal_medicine", "general_practice"
+        ]
+        results = []
         for alpha in alphas:
             for spec in specialties:
                 cfg = RTCConfig(spec, "routine", self.base_threshold)
-                # 실험 데이터에서 escalation_rate 추출 시도
-                esc_rate = None
-                if experiment_results:
-                    for backend_data in experiment_results.values():
-                        for sc_data in backend_data.get("scenarios", {}).values():
-                            m = sc_data.get("metrics", {})
-                            if m:
-                                esc_rate = m.get("escalation_rate")
-                                break
-                        if esc_rate is not None:
-                            break
-
                 results.append({
                     "alpha": alpha,
                     "specialty": spec,
                     "risk_level": cfg.risk_level.value,
-                    "adjusted_threshold": cfg.adjusted_threshold,
-                    "estimated_coverage": 1 - alpha,
-                    "escalation_rate": esc_rate,   # None이면 실험 전
+                    "adjusted_threshold": round(cfg.adjusted_threshold, 4),
+                    "target_coverage": round(1 - alpha, 4),
+                    "actual_coverage": None,    # 미측정 — pareto_sweep.py 실행 필요
+                    "escalation_rate": None,    # 미측정 — pareto_sweep.py 실행 필요
                 })
         return results
 
