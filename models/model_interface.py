@@ -48,7 +48,7 @@ def query_model(
     system_prompt: str,
     user_prompt: str,
     temperature: float = 0.0,
-    max_tokens: int = 512,
+    max_completion_tokens: int = 512,
     logprobs: bool = True,
     top_logprobs: int = 5,
 ) -> ModelResponse:
@@ -68,7 +68,7 @@ def query_model(
             {"role": "user", "content": user_prompt},
         ],
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_completion_tokens,
     )
 
     # logprobs 요청 (지원 여부는 모델에 따라 다름)
