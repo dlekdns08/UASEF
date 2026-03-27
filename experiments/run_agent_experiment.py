@@ -94,9 +94,9 @@ def run_backend_experiment(backend: str) -> dict:
 
     # Step 1: UQM 보정 (한 번만 실행, 모든 시나리오 공유)
     print(f"\n[1/3] UQM 보정 중 ({len(CALIBRATION_QUESTIONS)}개)...")
-    uqm = UQM(backend=backend, alpha=0.05)
+    uqm = UQM(backend=backend, alpha=0.05, scoring_method="logprob")
     try:
-        coverage_report = uqm.calibrate(CALIBRATION_QUESTIONS)
+        coverage_report = uqm.calibrate(CALIBRATION_QUESTIONS, distribution_source="medqa")
     except Exception as e:
         print(f"  [SKIP] UQM 보정 실패: {e}")
         return {}
@@ -186,7 +186,7 @@ def run_backend_experiment(backend: str) -> dict:
         "timestamp": datetime.now().isoformat(),
         "base_threshold": base_threshold,
         "coverage_report": coverage_report,
-        "scoring_method": "self_consistency" if uqm._use_self_consistency else "logprob",
+        "scoring_method": uqm.active_scoring_method,
         "cases": case_results,
         "summary": _compute_summary(case_results),
     }

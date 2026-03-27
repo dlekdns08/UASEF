@@ -64,6 +64,7 @@ class AgentComponents:
     backend: str
     specialty: str = "internal_medicine"
     scenario_type: str = "routine"
+    distribution_source: str = "medqa"   # calibration과 동일한 소스를 유지해야 CP 보장
 
 
 # ── LLM 초기화 헬퍼 ──────────────────────────────────────────────────────────
@@ -161,8 +162,11 @@ def uasef_check(state: MedicalAgentState, components: AgentComponents) -> dict:
             response_text = msg.content if isinstance(msg.content, str) else ""
             break
 
-    # UQM 평가
-    unc = components.uqm.evaluate(state["question"])
+    # UQM 평가 (calibration과 동일한 distribution_source 유지 — CP exchangeability)
+    unc = components.uqm.evaluate(
+        state["question"],
+        distribution_source=components.distribution_source,
+    )
 
     # RTC 임계값 조정
     rtc_config = components.rtc.get_threshold(
