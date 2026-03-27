@@ -17,4 +17,6 @@ dependencies = [
     "langchain-openai>=0.1.0",
     "langchain-core>=0.2.0",
     "langsmith>=0.1.0",
+    # 데이터셋
+    "datasets>=2.14.0",
 ]

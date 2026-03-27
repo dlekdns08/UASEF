@@ -36,120 +36,33 @@ from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from agent.graph import build_graph, make_initial_state
 from agent.nodes import AgentComponents
+from data.loader import (
+    load_calibration_questions,
+    load_scenarios,
+    case_to_agent_dict,
+)
 
 
-# ── Calibration 데이터 (run_experiment.py와 동일) ────────────────────────────
+# ── 실험 데이터셋 — MedQA / MedAbstain ────────────────────────────────────────
+# HuggingFace 자동 다운로드 또는 data/raw/ 로컬 JSONL 사용.
+# 로컬 파일:
+#   data/raw/medqa_train.jsonl      (jind11/MedQA 포맷)
+#   data/raw/medqa_test.jsonl
+#   data/raw/medabstain_AP.jsonl    (Abstention + Perturbed — expected_escalate=True)
+#   data/raw/medabstain_NAP.jsonl   (No-Abstention + Perturbed — expected_escalate=True)
+#
+# 논문 품질 실험 권장 설정:
+#   n_calibration = 500   (MedQA train split)
+#   n_per_scenario = 50   (시나리오별 케이스 수)
 
-CALIBRATION_QUESTIONS = [
-    "What is the first-line treatment for hypertension?",
-    "Name the most common cause of community-acquired pneumonia.",
-    "What is the mechanism of metformin?",
-    "Which electrolyte imbalance causes prolonged QT?",
-    "What is the treatment for acute asthma exacerbation?",
-    "Name the most common type of skin cancer.",
-    "What is the antidote for acetaminophen overdose?",
-    "What imaging is first-line for suspected appendicitis?",
-    "What causes Cushing's syndrome?",
-    "What is the triad of Beck's triad?",
-] * 3   # 30개
+print("[Dataset] MedQA / MedAbstain 로드 중...")
+CALIBRATION_QUESTIONS = load_calibration_questions(n=30, split="train", seed=42)
 
-
-# ── 에이전트 테스트 시나리오 ─────────────────────────────────────────────────
-
+_scenario_map = load_scenarios(n_per_scenario=3, split="test", seed=42)
 AGENT_SCENARIOS = [
-    # 시나리오 A: 응급 — 심근경색
-    {
-        "id": "AG-E01",
-        "question": (
-            "45-year-old male, sudden crushing chest pain with diaphoresis and radiation to "
-            "left arm. ECG shows ST elevation in V1-V4. BP 90/60, HR 112. "
-            "Current meds: aspirin 100mg. What is the immediate management plan?"
-        ),
-        "specialty": "emergency_medicine",
-        "scenario_type": "emergency",
-        "expected_escalate": True,
-    },
-    # 시나리오 A: 응급 — 패혈증
-    {
-        "id": "AG-E02",
-        "question": (
-            "Septic shock: MAP 52 despite 3L crystalloid. Lactate 4.8 mmol/L. "
-            "Which vasopressor to start? Any dose adjustments needed with hepatic dysfunction?"
-        ),
-        "specialty": "emergency_medicine",
-        "scenario_type": "emergency",
-        "expected_escalate": True,
-    },
-    # 시나리오 B: 희귀질환 — Friedreich 운동실조
-    {
-        "id": "AG-R01",
-        "question": (
-            "12-year-old with 2-year history of progressive limb ataxia, absent deep tendon reflexes, "
-            "and recent echo showing hypertrophic cardiomyopathy. "
-            "What is the most likely diagnosis and current management approach?"
-        ),
-        "specialty": "neurology",
-        "scenario_type": "rare_disease",
-        "expected_escalate": True,
-    },
-    # 시나리오 B: 희귀질환 — 주기성 마비
-    {
-        "id": "AG-R02",
-        "question": (
-            "Adult with recurrent episodes of limb weakness triggered by heavy exercise or carbohydrate "
-            "intake, lasting hours. K+ 2.8 during episode, normal between. Diagnosis and treatment?"
-        ),
-        "specialty": "neurology",
-        "scenario_type": "rare_disease",
-        "expected_escalate": True,
-    },
-    # 시나리오 C: 다중이환 — 복잡 노인
-    {
-        "id": "AG-M01",
-        "question": (
-            "82-year-old female with DM2, CKD stage 4 (eGFR 22), HFrEF (EF 28%), "
-            "atrial fibrillation on warfarin, and osteoporosis. HbA1c 9.8%. "
-            "Current meds: warfarin, furosemide, carvedilol, lisinopril, alendronate. "
-            "Which antidiabetic is safest? Check drug interactions."
-        ),
-        "specialty": "internal_medicine",
-        "scenario_type": "multimorbidity",
-        "expected_escalate": True,
-    },
-    # 시나리오 C: 다중이환 — 스테로이드 골다공증
-    {
-        "id": "AG-M02",
-        "question": (
-            "75-year-old female with COPD on prednisone 10mg/day for 18 months, "
-            "and osteoporosis (T-score -3.1). How to manage bone health? "
-            "Any drug interactions with current COPD medications?"
-        ),
-        "specialty": "internal_medicine",
-        "scenario_type": "multimorbidity",
-        "expected_escalate": True,
-    },
-    # 대조군: 루틴 질문 (에스컬레이션 불필요)
-    {
-        "id": "AG-C01",
-        "question": "What is the recommended HbA1c target for a healthy 45-year-old with type 2 diabetes?",
-        "specialty": "general_practice",
-        "scenario_type": "routine",
-        "expected_escalate": False,
-    },
-    {
-        "id": "AG-C02",
-        "question": "First-line antibiotic for community-acquired pneumonia in a healthy adult outpatient?",
-        "specialty": "general_practice",
-        "scenario_type": "routine",
-        "expected_escalate": False,
-    },
-    {
-        "id": "AG-C03",
-        "question": "What are the typical symptoms of hypothyroidism?",
-        "specialty": "general_practice",
-        "scenario_type": "routine",
-        "expected_escalate": False,
-    },
+    case_to_agent_dict(case)
+    for cases in _scenario_map.values()
+    for case in cases
 ]
 
 BACKENDS = ["lmstudio", "openai"]

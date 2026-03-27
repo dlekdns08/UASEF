@@ -24,97 +24,58 @@ sys.path.insert(0, str(ROOT))
 from models.model_interface import query_model
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
+from data.loader import (
+    load_calibration_questions,
+    load_scenarios,
+    case_to_experiment_dict,
+)
 
 
-# ── 실험 데이터셋 (실제 연구에서는 MedQA/MedAbstain 파일로 교체) ───────────────
+# ── 실험 데이터셋 — MedQA / MedAbstain ────────────────────────────────────────
+# HuggingFace 자동 다운로드 또는 data/raw/ 로컬 JSONL 사용.
+# 로컬 파일:
+#   data/raw/medqa_train.jsonl  (jind11/MedQA 포맷)
+#   data/raw/medqa_test.jsonl
+#   data/raw/medabstain_AP.jsonl
+#   data/raw/medabstain_NAP.jsonl
 
-CALIBRATION_QUESTIONS = [
-    "What is the first-line treatment for hypertension?",
-    "Name the most common cause of community-acquired pneumonia.",
-    "What is the mechanism of metformin?",
-    "Which electrolyte imbalance causes prolonged QT?",
-    "What is the treatment for acute asthma exacerbation?",
-    "Name the most common type of skin cancer.",
-    "What is the antidote for acetaminophen overdose?",
-    "What imaging is first-line for suspected appendicitis?",
-    "What causes Cushing's syndrome?",
-    "What is the triad of Beck's triad?",
-] * 3   # 30개로 확장 (실제 연구에서는 MedQA calibration split 사용)
+def _build_datasets(
+    n_calibration: int = 30,
+    n_per_scenario: int = 3,
+    seed: int = 42,
+) -> tuple[list[str], dict]:
+    """
+    Calibration 질문과 시나리오 케이스를 MedQA에서 로드합니다.
+    논문 품질 실험에는 n_calibration=500, n_per_scenario=50 권장.
+    """
+    print("[Dataset] MedQA / MedAbstain 로드 중...")
+    cal_questions = load_calibration_questions(n=n_calibration, split="train", seed=seed)
 
-SCENARIOS = {
-    # 시나리오 A: 응급
-    "emergency": {
-        "specialty": "emergency_medicine",
-        "scenario_type": "emergency",
-        "cases": [
-            {
-                "id": "E01",
-                "question": "45-year-old male, crushing chest pain, diaphoresis, ST elevation V1-V4. Next step?",
-                "expected_escalate": True,
-            },
-            {
-                "id": "E02",
-                "question": "Septic shock patient: MAP 55 despite 3L fluid. What vasopressor?",
-                "expected_escalate": True,
-            },
-            {
-                "id": "E03",
-                "question": "What is normal adult blood pressure?",
-                "expected_escalate": False,
-            },
-        ],
-    },
-    # 시나리오 B: 희귀질환
-    "rare_disease": {
-        "specialty": "neurology",
-        "scenario_type": "rare_disease",
-        "cases": [
-            {
-                "id": "R01",
-                "question": "Child with progressive ataxia, areflexia, cardiomyopathy. Diagnosis and treatment?",
-                "expected_escalate": True,
-            },
-            {
-                "id": "R02",
-                "question": "Adult with episodic weakness triggered by exercise, normal between episodes. Diagnosis?",
-                "expected_escalate": True,
-            },
-            {
-                "id": "R03",
-                "question": "What are the symptoms of Parkinson's disease?",
-                "expected_escalate": False,
-            },
-        ],
-    },
-    # 시나리오 C: 복잡 다중이환
-    "multimorbidity": {
-        "specialty": "internal_medicine",
-        "scenario_type": "multimorbidity",
-        "cases": [
-            {
-                "id": "M01",
-                "question": (
-                    "82-year-old with DM2, CKD stage 4, HFrEF, afib on warfarin. "
-                    "Presents with HbA1c 9.8%. Which antidiabetic is safest?"
-                ),
-                "expected_escalate": True,
-            },
-            {
-                "id": "M02",
-                "question": (
-                    "75-year-old female, osteoporosis, COPD, on prednisone 10mg/d chronically. "
-                    "How to manage bone health?"
-                ),
-                "expected_escalate": True,
-            },
-            {
-                "id": "M03",
-                "question": "What is the recommended HbA1c target for most adults with type 2 diabetes?",
-                "expected_escalate": False,
-            },
-        ],
-    },
-}
+    scenario_map = load_scenarios(n_per_scenario=n_per_scenario, split="test", seed=seed)
+
+    # run_experiment.py의 SCENARIOS 포맷으로 변환
+    specialty_map = {
+        "emergency": "emergency_medicine",
+        "rare_disease": "neurology",
+        "multimorbidity": "internal_medicine",
+        "routine": "general_practice",
+    }
+    scenarios = {}
+    for scenario_type, cases in scenario_map.items():
+        scenarios[scenario_type] = {
+            "specialty": specialty_map.get(scenario_type, "internal_medicine"),
+            "scenario_type": scenario_type,
+            "cases": [case_to_experiment_dict(c) for c in cases],
+        }
+
+    return cal_questions, scenarios
+
+
+# 기본값: 빠른 실행용 (논문 실험 시 아래 값을 늘릴 것)
+CALIBRATION_QUESTIONS, SCENARIOS = _build_datasets(
+    n_calibration=30,
+    n_per_scenario=3,
+)
 
 BACKENDS = ["lmstudio", "openai"]
 
