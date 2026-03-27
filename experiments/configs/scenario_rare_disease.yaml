@@ -1,0 +1,19 @@
+# 시나리오 B: 희귀질환 (Rare Disease)
+# Friedreich 운동실조, 주기성 마비, 이온통로병증 등 근거가 희박한 케이스
+
+scenario:
+  name: rare_disease
+  specialty: neurology
+  scenario_type: rare_disease
+  description: "시나리오 B — 희귀질환: 유전질환, 이온통로병증, 희소 신경계 질환"
+
+uqm:
+  alpha: 0.05              # 희귀질환도 높은 coverage 유지
+
+data:
+  n_test_per_scenario: 10
+  # MedAbstain NAP/AP 변형 적극 활용 (희귀질환 → 모델 불확실성 높음)
+  distribution_source: medqa
+
+# 희귀질환 시나리오는 MedAbstain AP/NAP 변형이 주요 테스트 소스
+# data/raw/medabstain_AP.jsonl 및 medabstain_NAP.jsonl 제공 시 자동 병합

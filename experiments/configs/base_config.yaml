@@ -1,0 +1,23 @@
+# UASEF 기본 실험 설정
+# 시나리오별 config가 이 파일의 값을 선택적으로 오버라이드합니다.
+
+uqm:
+  alpha: 0.05                # 허용 오류율 (0.05 → 95% coverage 보장)
+  scoring_method: logprob    # "logprob" (논문 primary) | "self_consistency" (ablation) | "auto"
+  consistency_n: 5           # self_consistency 모드에서 사용할 반복 쿼리 수
+  holdout_fraction: 0.2      # calibration hold-out 비율 (coverage 검증용)
+
+data:
+  n_calibration: 30          # calibration 질문 수 (논문 권장: ≥500)
+  n_test_per_scenario: 3     # 시나리오별 테스트 케이스 수 (논문 권장: ≥50)
+  calibration_split: train
+  test_split: test
+  seed: 42
+  distribution_source: medqa # calibration 분포 식별자 (distribution shift 경고에 사용)
+
+backends:
+  - lmstudio
+  - openai
+
+output:
+  results_dir: results

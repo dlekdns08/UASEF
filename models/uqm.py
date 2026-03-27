@@ -1,19 +1,58 @@
 """
 UASEF — Module 1: Uncertainty Quantification Module (UQM)
-Conformal Prediction으로 통계적 Coverage 보장이 있는 불확실성을 측정합니다.
 
-핵심 아이디어:
-  1. Calibration set에서 각 샘플의 비적합 점수(nonconformity score)를 계산
-  2. 원하는 coverage (1-α)에 맞는 임계 분위수 q̂ 를 구함
-  3. 새 샘플의 점수가 q̂ 를 넘으면 → 불확실성이 높다 → 에스컬레이션 후보
+Conformal Prediction을 통해 통계적 Coverage 보장이 있는 불확실성을 측정합니다.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+비적합 점수(Nonconformity Score) 방식 — scoring_method 파라미터
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  LOGPROB (Primary — 논문 주요 기여):
+    s(x) = -mean(token logprobs)
+    Coverage guarantee: P(s_test ≤ q̂) ≥ 1-α  (Angelopoulos & Bates, 2021)
+    요건: 모델이 token-level logprobs를 지원해야 함
+          지원 모델: GPT-4o, GPT-4o-mini, llama.cpp (--logprobs 플래그)
+
+  SELF_CONSISTENCY (Ablation — ablation study 전용):
+    s(x) = Jaccard_diversity(responses × N)
+    Coverage guarantee: 수학적으로 동일하게 성립 (다른 비적합 함수 사용)
+    요건: logprobs 불필요. 단, N회 쿼리로 비용/지연 N배 증가.
+    ⚠ 논문에서 "ablation"으로 명시하지 않으면 심사 지적을 받을 수 있음:
+       "CP라고 주장했지만 실제론 majority voting"
+
+  AUTO (하위 호환 — 권장하지 않음):
+    런타임에 logprobs 지원 여부를 감지하여 자동 선택.
+    실험 재현성(reproducibility) 저하 위험.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Distribution Shift 처리
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  calibrate(distribution_source="medqa") 후 evaluate(distribution_source="mimic3")
+  호출 시 UserWarning 발생 — exchangeability 가정 위반 가능성 알림.
+
+  권고 대처 방법:
+    1. 도메인별 재보정: 각 도메인에 맞는 calibration set으로 UQM 재학습
+    2. Weighted CP: Tibshirani et al. (2019) "Conformal Prediction Under Covariate Shift"
+       중요도 가중치 w_i = p_test(x_i) / p_cal(x_i) 적용
 """
 
 import math
 import random
+import warnings
 import numpy as np
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 from typing import Optional
 from models.model_interface import query_model, ModelResponse
+
+
+# ── Scoring Method 열거형 ──────────────────────────────────────────────────────
+
+class ScoringMethod(str, Enum):
+    LOGPROB          = "logprob"           # Primary: logprob-based CP (논문 주요 기여)
+    SELF_CONSISTENCY = "self_consistency"  # Ablation: SC-based CP (다른 비적합 함수)
+    AUTO             = "auto"              # 런타임 감지 (하위 호환, 비권장)
 
 
 # ── 데이터 클래스 ──────────────────────────────────────────────────────────────
@@ -21,45 +60,59 @@ from models.model_interface import query_model, ModelResponse
 @dataclass
 class UncertaintyResult:
     nonconformity_score: float     # 클수록 불확실 (0~∞)
-    prediction_set_size: int       # Conformal Prediction Set 크기 (클수록 불확실)
-    confidence_entropy: float      # logprobs 기반 엔트로피 (클수록 불확실, nan=미지원)
-    should_escalate: bool          # 에스컬레이션 여부
-    threshold_used: float          # 적용된 임계값
+    prediction_set_size: int       # score/threshold 비율 기반 집합 크기
+    confidence_entropy: float      # logprobs 기반 Shannon 엔트로피 (nan=미지원)
+    should_escalate: bool
+    threshold_used: float
     raw_response: ModelResponse
-    scoring_method: str = "logprob"   # "logprob" | "self_consistency"
+    scoring_method: str = "logprob"   # 실제 사용된 방식 기록 (재현성)
+
+
+@dataclass
+class CalibrationMetadata:
+    """
+    Calibration 이력 — distribution shift 감지 및 실험 재현성 추적에 사용됩니다.
+    """
+    distribution_source: str = "unknown"   # "medqa" | "mimic3" | "pubmedqa" | "custom"
+    n_calibration: int = 0
+    n_holdout: int = 0
+    alpha: float = 0.05
+    threshold: float = 0.0
+    scoring_method: str = "logprob"
+    timestamp: str = ""
+    coverage_report: dict = field(default_factory=dict)
 
 
 # ── 비적합 점수 계산 ────────────────────────────────────────────────────────────
 
 def compute_entropy(logprobs: Optional[list[float]]) -> float:
-    """
-    토큰 수준 log probability → Shannon 엔트로피 (nats/token).
-    logprobs를 지원하지 않는 경우 nan 반환.
-    """
+    """토큰 수준 log probability → Shannon 엔트로피 (nats/token)."""
     if not logprobs:
         return float("nan")
     probs = [math.exp(lp) for lp in logprobs]
     entropy = -sum(p * math.log(p + 1e-12) for p in probs)
-    return entropy / len(probs)   # 토큰 수로 정규화
+    return entropy / len(probs)
 
 
 def compute_nonconformity_score(response: ModelResponse) -> float:
     """
-    logprobs 기반 비적합 점수: 평균 negative log-likelihood.
-    높을수록 모델이 불확실하다는 의미.
-    logprobs 미지원 시 ValueError → _get_score()에서 self-consistency로 전환.
+    LOGPROB 방식 비적합 점수: 평균 negative log-likelihood.
+    logprobs 미지원 시 ValueError — 명시적 오류로 방법 혼용 방지.
     """
     if not response.logprobs:
-        raise ValueError("logprobs not available — use self-consistency scoring")
+        raise ValueError(
+            "Backend이 logprobs를 반환하지 않습니다.\n"
+            "  옵션 1 (권장): logprobs 지원 백엔드 사용\n"
+            "                 - OpenAI: gpt-4o, gpt-4o-mini (기본 지원)\n"
+            "                 - LMStudio: llama.cpp 기반 모델 + logprobs=True 설정\n"
+            "  옵션 2 (Ablation): UQM(scoring_method='self_consistency')\n"
+            "                 논문에서 ablation study로 명시적으로 구분 필요"
+        )
     return -float(np.mean(response.logprobs))
 
 
 def _answer_diversity(texts: list[str]) -> float:
-    """
-    Jaccard 유사도 기반 답변 다양성 (0=완전일치, 1=완전다양).
-    n개 응답의 모든 쌍에 대해 token-level Jaccard 유사도를 계산하고
-    다양성 = 1 - 평균 유사도로 반환합니다.
-    """
+    """Jaccard 기반 답변 다양성 (0=완전일치, 1=완전다양)."""
     if len(texts) < 2:
         return 0.0
     similarities = []
@@ -70,8 +123,7 @@ def _answer_diversity(texts: list[str]) -> float:
             union = a | b
             sim = len(a & b) / len(union) if union else 1.0
             similarities.append(sim)
-    avg_sim = sum(similarities) / len(similarities)
-    return 1.0 - avg_sim   # 다양성 = 1 - 유사도
+    return 1.0 - sum(similarities) / len(similarities)
 
 
 def compute_self_consistency_score(
@@ -81,52 +133,36 @@ def compute_self_consistency_score(
     n: int = 5,
 ) -> float:
     """
-    Self-consistency 기반 비적합 점수.
-    동일 질문을 n회 (temperature=0.7) 쿼리해 답변 다양성으로 불확실성을 측정합니다.
-    다양성 높음 = 모델이 확신 없음 = 높은 점수 반환 (0~5 범위).
-
-    논문 권장: n=5 (calibration 속도와 신뢰성의 균형).
+    SELF_CONSISTENCY 방식 비적합 점수 (Ablation).
+    n회 쿼리 후 Jaccard 다양성 → 0~5 범위로 정규화.
+    Coverage guarantee는 성립하지만 logprob 방식과 직접 비교 불가.
     """
-    texts = []
-    for _ in range(n):
-        resp = query_model(
-            backend, system_prompt, question,
-            temperature=0.7, logprobs=False,
-        )
-        texts.append(resp.text.strip()[:200])   # 앞 200자만 비교
-    diversity = _answer_diversity(texts)
-    return diversity * 5.0   # 0~5 범위로 정규화 (logprob 점수 분포와 유사하게 스케일링)
+    texts = [
+        query_model(backend, system_prompt, question, temperature=0.7, logprobs=False).text.strip()[:200]
+        for _ in range(n)
+    ]
+    return _answer_diversity(texts) * 5.0
 
 
 # ── Conformal Prediction 임계값 보정 ───────────────────────────────────────────
 
 class ConformalCalibrator:
     """
-    Calibration set으로부터 Conformal 임계값 q̂ 를 계산합니다.
-
-    사용법:
-        cal = ConformalCalibrator(alpha=0.05)
-        cal.fit(scores)          # calibration set의 비적합 점수 목록
-        threshold = cal.threshold
-        cal.check_coverage(new_scores, true_labels)  # coverage 검증
+    Angelopoulos & Bates (2021) 공식에 따른 Conformal 임계값 q̂ 계산.
+    q̂ = ceil((n+1)(1-α))/n 번째 분위수
     """
 
     def __init__(self, alpha: float = 0.05):
-        self.alpha = alpha          # 허용 오류율 (0.05 → 95% coverage 보장)
+        self.alpha = alpha
         self.threshold: float = float("inf")
         self.calibration_scores: list[float] = []
 
     def fit(self, nonconformity_scores: list[float]) -> None:
-        """
-        분위수 기반 임계값 계산.
-        Angelopoulos & Bates (2021) 공식: q̂ = ceil((n+1)(1-α))/n 번째 분위수
-        """
         n = len(nonconformity_scores)
         if n == 0:
             raise ValueError("빈 calibration set입니다.")
         self.calibration_scores = sorted(nonconformity_scores)
-        level = math.ceil((n + 1) * (1 - self.alpha)) / n
-        level = min(level, 1.0)
+        level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
         self.threshold = float(np.quantile(self.calibration_scores, level))
         print(f"[UQM] Calibration 완료: n={n}, α={self.alpha}, q̂={self.threshold:.4f}")
 
@@ -135,20 +171,16 @@ class ConformalCalibrator:
         test_scores: list[float],
         test_labels_correct: list[bool],
     ) -> dict:
-        """
-        실제 coverage가 (1-α) 이상인지 검증합니다.
-        Conformal Prediction 이론에 따르면 hold-out set에서 score ≤ threshold인
-        비율이 1-α 이상이어야 합니다.
-        """
+        """Hold-out set에서 실제 coverage ≥ 1-α 검증."""
         if not test_scores:
             return {"error": "빈 test set"}
-        covered = sum(score <= self.threshold for score in test_scores)
-        actual_coverage = covered / len(test_scores)
-        target_coverage = 1 - self.alpha
+        covered = sum(s <= self.threshold for s in test_scores)
+        actual = covered / len(test_scores)
+        target = 1 - self.alpha
         return {
-            "target_coverage": target_coverage,
-            "actual_coverage": round(actual_coverage, 4),
-            "coverage_valid": actual_coverage >= target_coverage,
+            "target_coverage": target,
+            "actual_coverage": round(actual, 4),
+            "coverage_valid": actual >= target,
             "n_test": len(test_scores),
         }
 
@@ -159,14 +191,13 @@ class UQM:
     """
     Uncertainty Quantification Module.
 
-    workflow:
-        uqm = UQM(backend="lmstudio", alpha=0.05, consistency_n=5)
-        coverage_report = uqm.calibrate(calibration_questions)
-        result = uqm.evaluate(question)
+    권장 사용법 (논문 재현):
+        uqm = UQM(backend="openai", alpha=0.05, scoring_method="logprob")
+        report = uqm.calibrate(cal_questions, distribution_source="medqa")
+        result = uqm.evaluate(question, distribution_source="medqa")
 
-    scoring_method 자동 감지:
-        - logprobs 지원 모델 → 평균 negative log-likelihood
-        - logprobs 미지원 모델 → self-consistency (n회 반복 후 Jaccard 다양성)
+    Ablation 비교:
+        uqm_sc = UQM(backend="lmstudio", alpha=0.05, scoring_method="self_consistency")
     """
 
     SYSTEM_PROMPT = (
@@ -175,27 +206,60 @@ class UQM:
         "If you are not confident, say 'I am not certain' before your answer."
     )
 
-    def __init__(self, backend: str, alpha: float = 0.05, consistency_n: int = 5):
+    def __init__(
+        self,
+        backend: str,
+        alpha: float = 0.05,
+        consistency_n: int = 5,
+        scoring_method: str = "logprob",
+    ):
         self.backend = backend
         self.calibrator = ConformalCalibrator(alpha=alpha)
         self._calibrated = False
         self.consistency_n = consistency_n
-        self._use_self_consistency: Optional[bool] = None   # None = 미감지
+        self._scoring_method = ScoringMethod(scoring_method)
+        self._calibration_meta: Optional[CalibrationMetadata] = None
+
+        # _use_self_consistency 초기화
+        if self._scoring_method == ScoringMethod.LOGPROB:
+            self._use_self_consistency = False
+        elif self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
+            self._use_self_consistency = True
+        else:  # AUTO
+            self._use_self_consistency = None  # 런타임 감지
+
+        # Ablation 경고
+        if self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
+            warnings.warn(
+                "\n[UQM] scoring_method='self_consistency' 선택됨.\n"
+                "  CP coverage guarantee는 수학적으로 유효하지만,\n"
+                "  이 논문의 primary 기여(logprob-based CP)와 다른 비적합 함수를 사용합니다.\n"
+                "  논문에서 반드시 ablation study로 명시적으로 구분하여 보고하세요.\n"
+                "  Primary 방법과 직접 성능 비교 시 nonconformity 함수의 차이를 서술해야 합니다.",
+                UserWarning, stacklevel=2,
+            )
+
+        if self._scoring_method == ScoringMethod.AUTO:
+            warnings.warn(
+                "\n[UQM] scoring_method='auto' 사용 중.\n"
+                "  실험 재현성(reproducibility)을 위해 방법을 명시적으로 지정하세요:\n"
+                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')",
+                UserWarning, stacklevel=2,
+            )
 
     def _get_score(self, question: str) -> tuple[float, ModelResponse]:
-        resp = query_model(
-            self.backend,
-            self.SYSTEM_PROMPT,
-            question,
-            temperature=0.0,
-        )
+        resp = query_model(self.backend, self.SYSTEM_PROMPT, question, temperature=0.0)
 
-        # 최초 호출 시 logprob 지원 여부 자동 감지 후 캐싱
+        # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지
         if self._use_self_consistency is None:
             self._use_self_consistency = resp.logprobs is None
-            mode = "self-consistency" if self._use_self_consistency else "log-probability"
-            print(f"[UQM] 점수 산출 방식 감지 → {mode} 모드"
-                  + (f" (n={self.consistency_n})" if self._use_self_consistency else ""))
+            if self._use_self_consistency:
+                warnings.warn(
+                    "\n[UQM] AUTO: logprobs 미지원 감지 → self-consistency 모드로 전환.\n"
+                    "  scoring_method='self_consistency'를 명시적으로 설정하고\n"
+                    "  논문에서 ablation으로 보고하세요.",
+                    UserWarning, stacklevel=3,
+                )
 
         if self._use_self_consistency:
             score = compute_self_consistency_score(
@@ -206,70 +270,114 @@ class UQM:
 
         return score, resp
 
+    @property
+    def active_scoring_method(self) -> str:
+        """실제 사용 중인 scoring method 문자열 반환 (재현성 추적용)."""
+        if self._scoring_method == ScoringMethod.AUTO:
+            if self._use_self_consistency is None:
+                return "auto(undecided)"
+            return "self_consistency" if self._use_self_consistency else "logprob"
+        return self._scoring_method.value
+
     def calibrate(
         self,
         questions: list[str],
         holdout_fraction: float = 0.2,
+        distribution_source: str = "unknown",
     ) -> dict:
         """
-        Calibration set으로 임계값을 학습합니다.
-        holdout_fraction만큼을 hold-out해 conformal coverage를 검증합니다.
+        Calibration set으로 임계값을 학습하고 hold-out으로 coverage를 검증합니다.
 
-        Returns:
-            coverage_report: {"target_coverage", "actual_coverage", "coverage_valid", "n_test"}
+        Args:
+            distribution_source: 데이터 출처. evaluate() 호출 시 다른 분포가 감지되면
+                                  distribution shift 경고가 발생합니다.
+                                  예: "medqa", "mimic3", "pubmedqa", "custom"
         """
         n_total = len(questions)
         n_holdout = max(1, int(n_total * holdout_fraction))
         n_cal = n_total - n_holdout
 
-        # 재현 가능한 셔플
         rng = random.Random(42)
-        indices = list(range(n_total))
-        rng.shuffle(indices)
-        holdout_set = set(indices[:n_holdout])
+        idx = list(range(n_total))
+        rng.shuffle(idx)
+        holdout_set = set(idx[:n_holdout])
 
-        print(f"[UQM] Calibration 시작 "
-              f"({n_cal}개 학습 / {n_holdout}개 hold-out 검증, backend={self.backend})")
+        print(
+            f"[UQM] Calibration 시작 | "
+            f"n_cal={n_cal}, n_holdout={n_holdout}, "
+            f"backend={self.backend}, method={self._scoring_method.value}, "
+            f"distribution={distribution_source}"
+        )
 
-        cal_scores: list[float] = []
-        holdout_scores: list[float] = []
-
+        cal_scores, holdout_scores = [], []
         for i, q in enumerate(questions):
             score, _ = self._get_score(q)
-            if i in holdout_set:
-                holdout_scores.append(score)
-            else:
-                cal_scores.append(score)
+            (holdout_scores if i in holdout_set else cal_scores).append(score)
             if (i + 1) % 10 == 0:
                 print(f"  [{i+1}/{n_total}] score={score:.4f}")
 
         self.calibrator.fit(cal_scores)
         self._calibrated = True
 
-        # Hold-out으로 Coverage 검증
         coverage_report = self.calibrator.check_coverage(
-            holdout_scores,
-            [True] * len(holdout_scores),   # 정답 레이블 없이 점수 분포만 검증
+            holdout_scores, [True] * len(holdout_scores)
         )
-        status = "✓" if coverage_report.get("coverage_valid") else "✗"
-        print(f"[UQM] Coverage 검증: "
-              f"{coverage_report['actual_coverage']:.3f} "
-              f"(목표 {coverage_report['target_coverage']:.2f}) {status}")
+        ok = "✓" if coverage_report.get("coverage_valid") else "✗"
+        print(
+            f"[UQM] Coverage 검증: "
+            f"{coverage_report['actual_coverage']:.3f} "
+            f"(목표 {coverage_report['target_coverage']:.2f}) {ok}"
+        )
 
+        self._calibration_meta = CalibrationMetadata(
+            distribution_source=distribution_source,
+            n_calibration=n_cal,
+            n_holdout=n_holdout,
+            alpha=self.calibrator.alpha,
+            threshold=self.calibrator.threshold,
+            scoring_method=self.active_scoring_method,
+            timestamp=datetime.now().isoformat(),
+            coverage_report=coverage_report,
+        )
         return coverage_report
 
-    def evaluate(self, question: str) -> UncertaintyResult:
+    def evaluate(
+        self,
+        question: str,
+        distribution_source: Optional[str] = None,
+    ) -> UncertaintyResult:
         """
-        단일 질문의 불확실성을 측정하고 에스컬레이션 여부를 반환합니다.
+        단일 질문의 불확실성을 측정합니다.
+
+        Args:
+            distribution_source: 이 질문의 데이터 출처.
+                                  calibration 분포와 다르면 distribution shift 경고 발생.
         """
         if not self._calibrated:
             raise RuntimeError("calibrate()를 먼저 호출하세요.")
+
+        # Distribution shift 경고
+        if (
+            distribution_source
+            and self._calibration_meta
+            and self._calibration_meta.distribution_source not in ("unknown", distribution_source)
+        ):
+            warnings.warn(
+                f"\n[CP Warning] Distribution shift 감지!\n"
+                f"  Calibration: '{self._calibration_meta.distribution_source}'\n"
+                f"  Evaluation:  '{distribution_source}'\n"
+                f"  CP exchangeability 가정이 위반될 수 있습니다.\n"
+                f"  권고:\n"
+                f"    1. 타깃 도메인 데이터로 재보정 (도메인별 calibration)\n"
+                f"    2. Weighted CP 적용 (Tibshirani et al., 2019)\n"
+                f"  이 경고를 논문의 limitation 섹션에 서술하세요.",
+                UserWarning, stacklevel=2,
+            )
+
         score, resp = self._get_score(question)
         entropy = compute_entropy(resp.logprobs)
         threshold = self.calibrator.threshold
         should_escalate = score > threshold
-
-        # Prediction set 크기: score/threshold 비율로 추정 (클수록 불확실)
         prediction_set_size = max(1, round(score / threshold)) if threshold > 0 else 1
 
         return UncertaintyResult(
@@ -279,37 +387,25 @@ class UQM:
             should_escalate=should_escalate,
             threshold_used=threshold,
             raw_response=resp,
-            scoring_method="self_consistency" if self._use_self_consistency else "logprob",
+            scoring_method=self.active_scoring_method,
         )
 
 
 # ── 빠른 확인 ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # 임시 calibration 데이터 (실제 연구에서는 MedQA calibration split 사용)
-    CAL_QUESTIONS = [
-        "What is the first-line treatment for type 2 diabetes?",
-        "What antibiotic is used for community-acquired pneumonia?",
-        "What is the mechanism of beta-blockers?",
-    ] * 5   # 데모용 반복
+    import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
+    CAL = ["What is the first-line treatment for type 2 diabetes?"] * 5 + \
+          ["What antibiotic is used for community-acquired pneumonia?"] * 5 + \
+          ["What is the mechanism of beta-blockers?"] * 5
 
-    TEST_QUESTIONS = [
-        "A 3-year-old with recurrent infections, absent lymph nodes. Diagnosis?",  # 희귀 → 어려움
-        "What is aspirin used for?",                                                # 쉬움
-    ]
-
-    for backend in ["lmstudio", "openai"]:
-        print(f"\n{'='*60}\nBackend: {backend.upper()}")
+    for sm in [ScoringMethod.LOGPROB, ScoringMethod.SELF_CONSISTENCY]:
+        print(f"\n{'='*55}\nscoring_method={sm.value}")
         try:
-            uqm = UQM(backend=backend, alpha=0.05)
-            report = uqm.calibrate(CAL_QUESTIONS)
-            print(f"  Coverage 검증: {report}")
-            for q in TEST_QUESTIONS:
-                result = uqm.evaluate(q)
-                status = "ESCALATE" if result.should_escalate else "AUTO"
-                print(f"\n  Q: {q[:60]}...")
-                print(f"  → Score={result.nonconformity_score:.3f}, "
-                      f"Threshold={result.threshold_used:.3f}, "
-                      f"PredSet={result.prediction_set_size}, "
-                      f"Method={result.scoring_method}, {status}")
+            uqm = UQM(backend="openai", alpha=0.05, scoring_method=sm.value)
+            uqm.calibrate(CAL, distribution_source="medqa")
+            r = uqm.evaluate("What is aspirin used for?", distribution_source="medqa")
+            print(f"Score={r.nonconformity_score:.3f}, Escalate={r.should_escalate}, Method={r.scoring_method}")
+            # Distribution shift 테스트
+            r2 = uqm.evaluate("Rare mitochondrial disease presentation.", distribution_source="mimic3")
         except Exception as e:
             print(f"[SKIP] {e}")

@@ -1,0 +1,17 @@
+# 시나리오 A: 응급 (Emergency)
+# STEMI, 패혈증 쇼크, 아나필락시스 등 즉각 처치가 필요한 케이스
+
+scenario:
+  name: emergency
+  specialty: emergency_medicine
+  scenario_type: emergency
+  description: "시나리오 A — 응급: STEMI, 패혈증, 아나필락시스"
+
+uqm:
+  alpha: 0.05              # 응급은 높은 coverage 유지 (낮은 alpha)
+
+data:
+  n_test_per_scenario: 10
+  distribution_source: medqa
+
+# 응급 시나리오는 RTC에서 CRITICAL 배율(×0.60 × 0.85) 적용 → 매우 보수적 threshold
