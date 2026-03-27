@@ -197,11 +197,20 @@ def run_experiment(cfg: dict) -> dict:
 
         backend_results = {}
 
-        # Step 1: UQM 보정 (hold-out coverage 검증 포함)
-        print(f"\n[1/4] UQM 보정 중 ({len(CALIBRATION_QUESTIONS)}개 질문, hold-out 20%)...")
+        # Step 1: UQM 보정
+        print(f"\n[1/4] UQM 보정 중 ({len(calibration_questions)}개 질문, hold-out 20%)...")
         try:
-            uqm = UQM(backend=backend, alpha=0.05)
-            coverage_report = uqm.calibrate(CALIBRATION_QUESTIONS)
+            uqm = UQM(
+                backend=backend,
+                alpha=uqm_cfg["alpha"],
+                scoring_method=uqm_cfg.get("scoring_method", "logprob"),
+                consistency_n=uqm_cfg.get("consistency_n", 5),
+            )
+            coverage_report = uqm.calibrate(
+                calibration_questions,
+                holdout_fraction=uqm_cfg.get("holdout_fraction", 0.2),
+                distribution_source=dist_source,
+            )
             base_threshold = uqm.calibrator.threshold
         except Exception as e:
             print(f"  [SKIP] UQM 보정 실패: {e}")
@@ -212,7 +221,7 @@ def run_experiment(cfg: dict) -> dict:
         rtc = RTC(base_threshold=base_threshold)
 
         # Step 3: 각 시나리오 실험
-        for scenario_name, scenario_cfg in SCENARIOS.items():
+        for scenario_name, scenario_cfg in scenarios.items():
             print(f"\n[3/4] 시나리오: {scenario_name}")
             ede = EDE()
             case_results = []
@@ -226,7 +235,7 @@ def run_experiment(cfg: dict) -> dict:
 
             for case in scenario_cfg["cases"]:
                 try:
-                    unc = uqm.evaluate(case["question"])
+                    unc = uqm.evaluate(case["question"], distribution_source=dist_source)
                     decision = ede.decide(unc, rtc_config, unc.raw_response.text)
 
                     case_results.append({
@@ -275,7 +284,9 @@ def run_experiment(cfg: dict) -> dict:
             "timestamp": timestamp,
             "base_threshold": base_threshold,
             "coverage_report": coverage_report,
-            "scoring_method": uqm._use_self_consistency and "self_consistency" or "logprob",
+            "scoring_method": uqm.active_scoring_method,
+            "distribution_source": dist_source,
+            "uqm_config": uqm_cfg,
             "scenarios": backend_results,
         }
 
@@ -334,5 +345,51 @@ def save_results(results: dict) -> None:
 
 
 if __name__ == "__main__":
-    results = run_experiment()
+    parser = argparse.ArgumentParser(description="UASEF 실험 실행기")
+    parser.add_argument(
+        "--config", type=str, default=None,
+        help="시나리오별 YAML config 경로 (예: experiments/configs/scenario_emergency.yaml)",
+    )
+    parser.add_argument(
+        "--scenario", type=str, default=None,
+        choices=["emergency", "rare_disease", "multimorbidity"],
+        help="실행할 단일 시나리오 (config 파일 대신 사용 가능)",
+    )
+    parser.add_argument(
+        "--n-cal", type=int, default=None,
+        help="Calibration 질문 수 (논문 권장: 500)",
+    )
+    parser.add_argument(
+        "--n-test", type=int, default=None,
+        help="시나리오별 테스트 케이스 수 (논문 권장: 50)",
+    )
+    parser.add_argument(
+        "--scoring-method", type=str, default=None,
+        choices=["logprob", "self_consistency", "auto"],
+        help="비적합 점수 산출 방식 (logprob=primary, self_consistency=ablation)",
+    )
+    args = parser.parse_args()
+
+    # Config 결정
+    cfg_path = None
+    if args.config:
+        cfg_path = Path(args.config)
+    elif args.scenario:
+        cfg_path = ROOT / "experiments" / "configs" / f"scenario_{args.scenario}.yaml"
+
+    cfg = load_config(cfg_path)
+
+    # CLI 인자로 오버라이드
+    if args.n_cal:
+        cfg["data"]["n_calibration"] = args.n_cal
+    if args.n_test:
+        cfg["data"]["n_test_per_scenario"] = args.n_test
+    if args.scoring_method:
+        cfg["uqm"]["scoring_method"] = args.scoring_method
+
+    print(f"\n[Config] scoring_method={cfg['uqm']['scoring_method']}, "
+          f"n_cal={cfg['data']['n_calibration']}, "
+          f"n_test={cfg['data']['n_test_per_scenario']}")
+
+    results = run_experiment(cfg)
     save_results(results)
