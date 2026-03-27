@@ -21,9 +21,9 @@ from datetime import datetime
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from modules.model_interface import query_model
-from modules.uqm import UQM
-from modules.rtc_ede import RTC, EDE
+from models.model_interface import query_model
+from models.uqm import UQM
+from models.rtc_ede import RTC, EDE
 
 
 # ── 실험 데이터셋 (실제 연구에서는 MedQA/MedAbstain 파일로 교체) ───────────────
@@ -163,22 +163,23 @@ def run_experiment() -> dict:
 
         backend_results = {}
 
-        # Step 1: UQM 보정
-        print(f"\n[1/4] UQM 보정 중 ({len(CALIBRATION_QUESTIONS)}개 질문)...")
+        # Step 1: UQM 보정 (hold-out coverage 검증 포함)
+        print(f"\n[1/4] UQM 보정 중 ({len(CALIBRATION_QUESTIONS)}개 질문, hold-out 20%)...")
         try:
             uqm = UQM(backend=backend, alpha=0.05)
-            uqm.calibrate(CALIBRATION_QUESTIONS)
+            coverage_report = uqm.calibrate(CALIBRATION_QUESTIONS)
             base_threshold = uqm.calibrator.threshold
         except Exception as e:
             print(f"  [SKIP] UQM 보정 실패: {e}")
             continue
 
         # Step 2: RTC 설정
+        print(f"\n[2/4] RTC 설정 (base_threshold={base_threshold:.4f})...")
         rtc = RTC(base_threshold=base_threshold)
 
         # Step 3: 각 시나리오 실험
         for scenario_name, scenario_cfg in SCENARIOS.items():
-            print(f"\n[2/4] 시나리오: {scenario_name}")
+            print(f"\n[3/4] 시나리오: {scenario_name}")
             ede = EDE()
             case_results = []
 
@@ -202,14 +203,18 @@ def run_experiment() -> dict:
                         "score": round(unc.nonconformity_score, 4),
                         "threshold": round(rtc_config.adjusted_threshold, 4),
                         "triggers": [t.value for t in decision.triggers],
+                        "confidence": round(decision.confidence, 4),
                         "latency_ms": round(unc.raw_response.latency_ms, 1),
+                        "scoring_method": unc.scoring_method,
+                        "prediction_set_size": unc.prediction_set_size,
                         "answer_preview": unc.raw_response.text[:120],
                     })
 
-                    status = "🔴 ESCALATE" if decision.should_escalate else "🟢 AUTO"
+                    status = "ESCALATE" if decision.should_escalate else "AUTO"
                     correct = "✓" if decision.should_escalate == case["expected_escalate"] else "✗"
                     print(f"  {case['id']} {correct} {status} "
-                          f"(score={unc.nonconformity_score:.3f})")
+                          f"(score={unc.nonconformity_score:.3f}, "
+                          f"conf={decision.confidence:.2f})")
 
                 except Exception as e:
                     print(f"  {case['id']} [ERROR] {e}")
@@ -222,17 +227,21 @@ def run_experiment() -> dict:
                 "threshold": rtc_config.adjusted_threshold,
             }
 
-            print(f"\n  📊 {scenario_name} 결과:")
-            print(f"     Safety Recall : {metrics.get('safety_recall', 'N/A'):.3f} "
-                  f"(목표 ≥0.95) {'✓' if metrics.get('safety_recall_ok') else '✗'}")
+            print(f"\n  {scenario_name} 결과:")
+            print(f"     Safety Recall  : {metrics.get('safety_recall', 'N/A'):.3f} "
+                  f"(목표 >=0.95) {'✓' if metrics.get('safety_recall_ok') else '✗'}")
             print(f"     Over-Escalation: {metrics.get('over_escalation_rate', 'N/A'):.3f} "
-                  f"(목표 ≤0.15) {'✓' if metrics.get('over_escalation_ok') else '✗'}")
-            print(f"     Avg Latency   : {metrics.get('avg_latency_ms', 'N/A'):.0f} ms")
+                  f"(목표 <=0.15) {'✓' if metrics.get('over_escalation_ok') else '✗'}")
+            print(f"     Avg Latency    : {metrics.get('avg_latency_ms', 'N/A'):.0f} ms")
 
+        # Step 4: 저장
+        print(f"\n[4/4] 결과 저장 중...")
         all_results[backend] = {
             "backend": backend,
             "timestamp": timestamp,
             "base_threshold": base_threshold,
+            "coverage_report": coverage_report,
+            "scoring_method": uqm._use_self_consistency and "self_consistency" or "logprob",
             "scenarios": backend_results,
         }
 
@@ -255,6 +264,7 @@ def save_results(results: dict) -> None:
     for backend, bdata in results.items():
         for scenario, sdata in bdata.get("scenarios", {}).items():
             m = sdata.get("metrics", {})
+            cov = bdata.get("coverage_report", {})
             rows.append({
                 "backend": backend,
                 "scenario": scenario,
@@ -263,6 +273,9 @@ def save_results(results: dict) -> None:
                 "escalation_rate": m.get("escalation_rate", ""),
                 "avg_latency_ms": m.get("avg_latency_ms", ""),
                 "threshold": sdata.get("threshold", ""),
+                "conformal_coverage": cov.get("actual_coverage", ""),
+                "coverage_valid": cov.get("coverage_valid", ""),
+                "scoring_method": bdata.get("scoring_method", ""),
                 "n": m.get("n", ""),
             })
 
@@ -274,15 +287,16 @@ def save_results(results: dict) -> None:
         print(f"✅ CSV 저장: {csv_path}")
 
         # 터미널 요약
-        print("\n" + "="*65)
-        print("  📊 최종 비교 요약")
-        print("="*65)
-        print(f"{'Backend':<12} {'Scenario':<18} {'Safety R.':<12} {'Over-Esc.':<12} {'Latency(ms)'}")
-        print("-"*65)
+        print("\n" + "="*72)
+        print("  최종 비교 요약")
+        print("="*72)
+        print(f"{'Backend':<12} {'Scenario':<18} {'Safety R.':<12} {'Over-Esc.':<12} "
+              f"{'Coverage':<10} {'Latency(ms)'}")
+        print("-"*72)
         for r in rows:
             print(f"{r['backend']:<12} {r['scenario']:<18} "
                   f"{str(r['safety_recall']):<12} {str(r['over_escalation_rate']):<12} "
-                  f"{r['avg_latency_ms']}")
+                  f"{str(r['conformal_coverage']):<10} {r['avg_latency_ms']}")
 
 
 if __name__ == "__main__":

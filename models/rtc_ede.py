@@ -3,15 +3,16 @@ UASEF — Module 2: Risk-Threshold Calibrator (RTC)
          Module 3: Escalation Decision Engine (EDE)
 
 RTC: 전문과목·시나리오별 동적 임계값 조정
-EDE: 3가지 트리거 기반 Human-in-the-Loop 에스컬레이션 결정
+EDE: 3가지 트리거 + 엔트로피 가중치 기반 Human-in-the-Loop 에스컬레이션 결정
 """
 
 from __future__ import annotations
 import json
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
-from modules.uqm import UncertaintyResult
+from models.uqm import UncertaintyResult
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -68,7 +69,7 @@ class RTCConfig:
     def __post_init__(self):
         self.risk_level = SPECIALTY_RISK_MAP.get(self.specialty, RiskLevel.MODERATE)
         multiplier = RISK_THRESHOLD_MULTIPLIER[self.risk_level]
-        # 시나리오 보정: 응급·희귀질환은 추가로 낮춤
+        # 시나리오 보정: 응급·희귀질환은 추가로 낮춤 (더 보수적)
         if self.scenario_type in ("emergency", "rare_disease"):
             multiplier *= 0.85
         self.adjusted_threshold = self.base_threshold * multiplier
@@ -80,7 +81,7 @@ class RTC:
 
     사용법:
         rtc = RTC(base_threshold=2.31)  # UQM.calibrator.threshold
-        threshold = rtc.get_threshold("emergency_medicine", "emergency")
+        config = rtc.get_threshold("emergency_medicine", "emergency")
     """
 
     def __init__(self, base_threshold: float):
@@ -97,25 +98,40 @@ class RTC:
         self,
         alphas: list[float] = None,
         specialties: list[str] = None,
+        experiment_results: Optional[dict] = None,
     ) -> list[dict]:
         """
         Coverage guarantee ↔ Escalation rate Pareto frontier 포인트를 반환합니다.
-        실제 연구에서는 calibration set을 순회하며 계산해야 합니다.
-        여기서는 시뮬레이션 값을 반환합니다.
+
+        experiment_results가 제공되면 실험 데이터에서 escalation_rate를 추출합니다.
+        없으면 α와 specialty 배율만으로 추정합니다 (시뮬레이션).
         """
         alphas = alphas or [0.01, 0.05, 0.10, 0.15, 0.20]
         specialties = specialties or ["emergency_medicine", "internal_medicine", "general_practice"]
         results = []
+
         for alpha in alphas:
             for spec in specialties:
                 cfg = RTCConfig(spec, "routine", self.base_threshold)
+                # 실험 데이터에서 escalation_rate 추출 시도
+                esc_rate = None
+                if experiment_results:
+                    for backend_data in experiment_results.values():
+                        for sc_data in backend_data.get("scenarios", {}).values():
+                            m = sc_data.get("metrics", {})
+                            if m:
+                                esc_rate = m.get("escalation_rate")
+                                break
+                        if esc_rate is not None:
+                            break
+
                 results.append({
                     "alpha": alpha,
                     "specialty": spec,
                     "risk_level": cfg.risk_level.value,
                     "adjusted_threshold": cfg.adjusted_threshold,
                     "estimated_coverage": 1 - alpha,
-                    # escalation_rate는 실험 후 채워야 함
+                    "escalation_rate": esc_rate,   # None이면 실험 전
                 })
         return results
 
@@ -141,23 +157,38 @@ class EscalationDecision:
     log: dict = field(default_factory=dict)
 
 
-# 고위험 키워드 목록 (실제 연구에서는 의료 온톨로지로 확장)
+# 고위험 키워드 목록 (실제 연구에서는 SNOMED CT 등 의료 온톨로지로 확장)
 HIGH_RISK_KEYWORDS = {
-    "intubate", "intubation", "code blue", "emergency surgery",
-    "thrombolysis", "tpa", "vasopressor", "epinephrine", "defibrillate",
+    "intubate", "intubation", "mechanical ventilation",
+    "code blue", "emergency surgery",
+    "thrombolysis", "tpa", "alteplase",
+    "vasopressor", "norepinephrine", "epinephrine",
+    "defibrillate", "defibrillation",
     "do not resuscitate", "dnr", "withdraw care", "comfort measures only",
 }
 
 NO_EVIDENCE_PHRASES = {
-    "i am not certain", "i don't know", "insufficient evidence",
-    "no clear guideline", "limited data", "unknown etiology",
-    "case report only", "experimental",
+    "i am not certain", "i'm not certain",
+    "i don't know", "i do not know",
+    "insufficient evidence", "no clear guideline",
+    "limited data", "unknown etiology",
+    "case report only", "experimental", "off-label",
 }
+
+# 엔트로피 기반 불확실성 판단 임계값 (nats/token)
+# GPT-4 수준 모델에서 통상 0.5~1.5 nats/token; 2.0 이상은 높은 불확실성
+ENTROPY_HIGH_THRESHOLD = 2.0
 
 
 class EDE:
     """
     Escalation Decision Engine.
+
+    트리거 구조:
+        Trigger 1 — UNCERTAINTY_EXCEEDED: nonconformity_score > adjusted_threshold
+        Trigger 2 — HIGH_RISK_ACTION:     고위험 임상 키워드 감지
+        Trigger 3 — NO_EVIDENCE:          근거 부재 표현 감지
+        Entropy 가중치 (Trigger 아님): logprobs 기반 entropy가 높으면 confidence +0.15
 
     사용법:
         ede = EDE()
@@ -191,11 +222,24 @@ class EDE:
             triggers.append(EscalationTrigger.NO_EVIDENCE)
 
         should_escalate = len(triggers) > 0
-        confidence = min(1.0, len(triggers) / 3 + (
-            0.4 if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers else 0.0
-        ))
 
-        explanation = self._build_explanation(triggers, rtc_config, uncertainty_result)
+        # Confidence 계산:
+        #   - 기본: trigger 수 / 3
+        #   - UNCERTAINTY_EXCEEDED 포함 시 +0.4 (주 트리거이므로 가중치)
+        #   - logprobs 기반 entropy가 높으면 +0.15 (2차 신호)
+        entropy = uncertainty_result.confidence_entropy
+        entropy_boost = (
+            0.15
+            if not math.isnan(entropy) and entropy > ENTROPY_HIGH_THRESHOLD
+            else 0.0
+        )
+        confidence = min(1.0,
+            len(triggers) / 3
+            + (0.4 if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers else 0.0)
+            + entropy_boost
+        )
+
+        explanation = self._build_explanation(triggers, rtc_config, uncertainty_result, entropy)
 
         decision = EscalationDecision(
             should_escalate=should_escalate,
@@ -210,6 +254,9 @@ class EDE:
                 "specialty": rtc_config.specialty,
                 "risk_level": rtc_config.risk_level.value,
                 "trigger_count": len(triggers),
+                "entropy": entropy if not math.isnan(entropy) else None,
+                "entropy_boost": entropy_boost,
+                "scoring_method": uncertainty_result.scoring_method,
             },
         )
         self.escalation_log.append(decision)
@@ -220,6 +267,7 @@ class EDE:
         triggers: list[EscalationTrigger],
         rtc_config: RTCConfig,
         unc: UncertaintyResult,
+        entropy: float,
     ) -> str:
         parts = []
         if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers:
@@ -231,6 +279,8 @@ class EDE:
             parts.append("고위험 임상 행동 키워드 감지")
         if EscalationTrigger.NO_EVIDENCE in triggers:
             parts.append("근거 부재 표현 감지")
+        if not math.isnan(entropy) and entropy > ENTROPY_HIGH_THRESHOLD:
+            parts.append(f"높은 토큰 엔트로피({entropy:.2f} nats/token)")
         if not parts:
             return "에스컬레이션 불필요 — 자율 행동 가능"
         return " | ".join(parts)
@@ -253,17 +303,19 @@ class EDE:
 
 # ── 빠른 확인 ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from modules.uqm import UncertaintyResult, ModelResponse
+    from models.model_interface import ModelResponse
+    from models.uqm import UncertaintyResult
 
     # 가상 UncertaintyResult
     fake_resp = ModelResponse("Unknown rare disease.", None, 300, "test", 20, 10)
     unc = UncertaintyResult(
         nonconformity_score=3.5,
         prediction_set_size=5,
-        confidence_entropy=float("nan"),
+        confidence_entropy=2.5,   # 높은 엔트로피
         should_escalate=True,
         threshold_used=2.31,
         raw_response=fake_resp,
+        scoring_method="logprob",
     )
 
     rtc = RTC(base_threshold=2.31)
@@ -274,5 +326,6 @@ if __name__ == "__main__":
     decision = ede.decide(unc, cfg, "I am not certain. Consider intubation.")
     print(f"Escalate: {decision.should_escalate}")
     print(f"Triggers: {[t.value for t in decision.triggers]}")
+    print(f"Confidence: {decision.confidence:.3f}")
     print(f"Explanation: {decision.explanation}")
     print(json.dumps(ede.summary(), indent=2, ensure_ascii=False))
