@@ -107,18 +107,25 @@ def plot_comparison_bar(results: dict, out_dir: Path) -> None:
 
 
 def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
-    """Coverage ↔ Escalation Rate Pareto frontier 산점도."""
+    """
+    Escalation Rate ↔ Conformal Coverage Pareto frontier 산점도.
+
+    Y축: conformal_coverage — calibration hold-out에서 검증된 실제 coverage (1-α 보장).
+    X축: escalation_rate — (TP+FP)/total (낮을수록 효율적).
+    """
     if not HAS_MPL:
         return
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.set_title("Pareto Frontier: Coverage ↔ Escalation Rate", fontsize=13)
+    ax.set_title("Pareto Frontier: Conformal Coverage ↔ Escalation Rate", fontsize=13)
     ax.set_xlabel("Escalation Rate (낮을수록 효율적)")
-    ax.set_ylabel("Coverage (높을수록 안전)")
+    ax.set_ylabel("Conformal Coverage (높을수록 안전, 목표 ≥0.95)")
 
     # 목표 영역 음영
-    ax.axvline(0.15, color="#D85A30", linestyle="--", linewidth=1, alpha=0.6, label="목표 Escalation ≤0.15")
-    ax.axhline(0.95, color="#1D9E75", linestyle="--", linewidth=1, alpha=0.6, label="목표 Coverage ≥0.95")
+    ax.axvline(0.15, color="#D85A30", linestyle="--", linewidth=1, alpha=0.6,
+               label="목표 Escalation ≤0.15")
+    ax.axhline(0.95, color="#1D9E75", linestyle="--", linewidth=1, alpha=0.6,
+               label="목표 Coverage ≥0.95")
     ax.fill_betweenx([0.95, 1.05], 0, 0.15, alpha=0.08, color="#1D9E75", label="이상적 영역")
 
     markers = {"lmstudio": "o", "openai": "s"}
@@ -126,11 +133,19 @@ def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
 
     for backend, bdata in results.items():
         esc_rates, coverages, labels = [], [], []
+
+        # conformal_coverage는 backend 전체의 calibration 결과 (시나리오별 동일)
+        cal_coverage = bdata.get("coverage_report", {}).get("actual_coverage")
+
         for sc in scenarios:
             try:
                 m = bdata["scenarios"][sc]["metrics"]
                 esc_rates.append(float(m.get("escalation_rate", 0)))
-                coverages.append(1 - float(m.get("over_escalation_rate", 0)))
+                # conformal_coverage 우선 사용; 없으면 safety_recall로 대체 (레이블 명시)
+                if cal_coverage is not None:
+                    coverages.append(float(cal_coverage))
+                else:
+                    coverages.append(float(m.get("safety_recall", 0)))
                 labels.append(SCENARIO_LABELS[sc])
             except (KeyError, TypeError):
                 pass
