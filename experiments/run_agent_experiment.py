@@ -18,6 +18,7 @@ LangSmith 트레이싱 (선택):
         LANGCHAIN_PROJECT=UASEF-agent
 """
 
+import argparse
 import json
 import csv
 import sys
@@ -55,16 +56,6 @@ from data.loader import (
 #   n_calibration = 500   (MedQA train split)
 #   n_per_scenario = 50   (시나리오별 케이스 수)
 
-print("[Dataset] MedQA / MedAbstain 로드 중...")
-CALIBRATION_QUESTIONS = load_calibration_questions(n=30, split="train", seed=42)
-
-_scenario_map = load_scenarios(n_per_scenario=3, split="test", seed=42)
-AGENT_SCENARIOS = [
-    case_to_agent_dict(case)
-    for cases in _scenario_map.values()
-    for case in cases
-]
-
 BACKENDS = ["lmstudio", "openai"]
 
 
@@ -87,16 +78,24 @@ def _count_react_iterations(messages: list) -> int:
 
 # ── 단일 백엔드 실험 ──────────────────────────────────────────────────────────
 
-def run_backend_experiment(backend: str) -> dict:
+def run_backend_experiment(
+    backend: str,
+    cal_questions: list[str],
+    agent_scenarios: list[dict],
+    scoring_method: str = "logprob",
+    alpha: float = 0.05,
+    distribution_source: str = "medqa",
+) -> dict:
     print(f"\n{'='*65}")
     print(f"  UASEF Agent Experiment — Backend: {backend.upper()}")
+    print(f"  scoring={scoring_method}, α={alpha}, dist={distribution_source}")
     print(f"{'='*65}")
 
     # Step 1: UQM 보정 (한 번만 실행, 모든 시나리오 공유)
-    print(f"\n[1/3] UQM 보정 중 ({len(CALIBRATION_QUESTIONS)}개)...")
-    uqm = UQM(backend=backend, alpha=0.05, scoring_method="logprob")
+    print(f"\n[1/3] UQM 보정 중 ({len(cal_questions)}개)...")
+    uqm = UQM(backend=backend, alpha=alpha, scoring_method=scoring_method)
     try:
-        coverage_report = uqm.calibrate(CALIBRATION_QUESTIONS, distribution_source="medqa")
+        coverage_report = uqm.calibrate(cal_questions, distribution_source=distribution_source)
     except Exception as e:
         print(f"  [SKIP] UQM 보정 실패: {e}")
         return {}
@@ -105,10 +104,10 @@ def run_backend_experiment(backend: str) -> dict:
     print(f"\n[2/3] 에이전트 그래프 준비 완료 (base_threshold={base_threshold:.4f})")
 
     # Step 3: 시나리오별 실행
-    print(f"\n[3/3] {len(AGENT_SCENARIOS)}개 시나리오 실행...")
+    print(f"\n[3/3] {len(agent_scenarios)}개 시나리오 실행...")
     case_results = []
 
-    for scenario in AGENT_SCENARIOS:
+    for scenario in agent_scenarios:
         sid = scenario["id"]
         specialty = scenario["specialty"]
         scenario_type = scenario["scenario_type"]
@@ -125,6 +124,7 @@ def run_backend_experiment(backend: str) -> dict:
             backend=backend,
             specialty=specialty,
             scenario_type=scenario_type,
+            distribution_source=distribution_source,
         )
 
         graph = build_graph(components)
@@ -281,6 +281,24 @@ def save_results(all_results: dict) -> None:
 
 if __name__ == "__main__":
     import os
+
+    parser = argparse.ArgumentParser(description="UASEF Agent Experiment (LangGraph)")
+    parser.add_argument(
+        "--backend", type=str, default=None,
+        choices=["lmstudio", "openai"],
+        help="단일 백엔드만 실행 (기본: 양쪽 모두)",
+    )
+    parser.add_argument("--n-cal", type=int, default=30, help="Calibration 질문 수 (권장: 500)")
+    parser.add_argument("--n-test", type=int, default=3, help="시나리오별 테스트 케이스 수 (권장: 50)")
+    parser.add_argument(
+        "--scoring-method", type=str, default="logprob",
+        choices=["logprob", "self_consistency"],
+        help="비적합 점수 방식 (logprob=primary, self_consistency=ablation)",
+    )
+    parser.add_argument("--alpha", type=float, default=0.05, help="Conformal prediction α (기본: 0.05)")
+    parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
+    args = parser.parse_args()
+
     tracing = os.getenv("LANGCHAIN_TRACING_V2", "false").lower()
     project = os.getenv("LANGCHAIN_PROJECT", "UASEF-agent")
     if tracing == "true":
@@ -288,10 +306,32 @@ if __name__ == "__main__":
     else:
         print("[LangSmith] 트레이싱 비활성화 (.env에 LANGCHAIN_TRACING_V2=true 설정 시 활성화)")
 
+    print(f"\n[Config] scoring={args.scoring_method}, α={args.alpha}, "
+          f"n_cal={args.n_cal}, n_test={args.n_test}, seed={args.seed}")
+
+    print("\n[Dataset] MedQA / MedAbstain 로드 중...")
+    cal_questions = load_calibration_questions(n=args.n_cal, split="train", seed=args.seed)
+    scenario_map = load_scenarios(n_per_scenario=args.n_test, split="test", seed=args.seed)
+    agent_scenarios = [
+        case_to_agent_dict(case)
+        for cases in scenario_map.values()
+        for case in cases
+    ]
+    print(f"  Calibration: {len(cal_questions)}개 | 시나리오: {len(agent_scenarios)}개")
+
+    backends = [args.backend] if args.backend else BACKENDS
+
     all_results = {}
-    for backend in BACKENDS:
+    for backend in backends:
         try:
-            result = run_backend_experiment(backend)
+            result = run_backend_experiment(
+                backend=backend,
+                cal_questions=cal_questions,
+                agent_scenarios=agent_scenarios,
+                scoring_method=args.scoring_method,
+                alpha=args.alpha,
+                distribution_source="medqa",
+            )
             if result:
                 all_results[backend] = result
         except Exception as e:
