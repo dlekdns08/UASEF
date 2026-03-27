@@ -66,6 +66,7 @@ class UncertaintyResult:
     threshold_used: float
     raw_response: ModelResponse
     scoring_method: str = "logprob"   # 실제 사용된 방식 기록 (재현성)
+    weighted_cp_used: bool = False    # Weighted CP 적용 여부 (Tibshirani et al., 2019)
 
 
 @dataclass
@@ -185,6 +186,102 @@ class ConformalCalibrator:
         }
 
 
+# ── Weighted Conformal Calibrator ──────────────────────────────────────────────
+
+class WeightedConformalCalibrator:
+    """
+    Tibshirani et al. (2019) Weighted Conformal Prediction.
+
+    분포 이동(distribution shift) 상황에서 CP coverage 보장을 복원합니다.
+
+    핵심 아이디어:
+        표준 CP: 모든 calibration 포인트에 동일 가중치 → i.i.d. 가정 필요
+        Weighted CP: w_i ∝ p_test(x_i) / p_cal(x_i) 로 calibration 분포를 재구성
+                     → 테스트 분포와 유사한 calibration 포인트에 높은 가중치 부여
+
+    가중치 근사 (이 구현):
+        w_i = 1 + k * jaccard(cal_text_i, test_text)
+        실용적 대안: TF-IDF 코사인 유사도, 임베딩 코사인 유사도
+
+    Coverage 보장:
+        P(s_test ≤ q̂_w) ≥ 1 - α  (Theorem 1, Tibshirani et al., 2019)
+        단, 가중치가 실제 밀도비 p_test/p_cal를 정확히 근사할수록 보장이 타이트해짐.
+        Jaccard 근사는 보수적 (over-coverage 가능) — 논문에서 limitation으로 기술.
+
+    참고문헌:
+        Tibshirani, R. J. et al. (2019). Conformal Prediction Under Covariate Shift.
+        NeurIPS 2019. arXiv:1904.06019
+    """
+
+    def __init__(self, alpha: float = 0.05, similarity_scale: float = 5.0):
+        self.alpha = alpha
+        self.similarity_scale = similarity_scale  # Jaccard 가중치 배율
+        self.threshold: float = float("inf")      # 참고용 표준 CP 임계값
+        self._cal_scores: list[float] = []
+        self._cal_texts: list[str] = []
+
+    def fit(self, scores: list[float], texts: list[str]) -> None:
+        """Calibration set 저장. predict()에서 테스트 포인트별 q̂_w를 계산합니다."""
+        if len(scores) != len(texts):
+            raise ValueError(f"scores({len(scores)})와 texts({len(texts)}) 길이가 다릅니다.")
+        if not scores:
+            raise ValueError("빈 calibration set입니다.")
+        self._cal_scores = scores
+        self._cal_texts = texts
+        # 참고용: 표준 CP 임계값 (Weighted CP와 비교 기준)
+        n = len(scores)
+        level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
+        self.threshold = float(np.quantile(sorted(scores), level))
+        print(
+            f"[WeightedCP] Fit 완료: n={n}, α={self.alpha}, "
+            f"표준 q̂={self.threshold:.4f} (비교 기준)"
+        )
+
+    def predict(self, test_text: str) -> float:
+        """
+        test_text에 대한 개인화된 weighted quantile q̂_w를 반환합니다.
+        evaluate()에서 threshold 대신 이 값을 사용합니다.
+        """
+        weights = self._compute_weights(test_text)
+        return self._weighted_quantile(self._cal_scores, weights, 1 - self.alpha)
+
+    def _compute_weights(self, test_text: str) -> list[float]:
+        """
+        Jaccard 단어 유사도 기반 importance weight.
+
+        논문 품질 연구에서는 다음으로 교체 권장:
+          - TF-IDF 코사인 유사도 (sklearn.feature_extraction.text.TfidfVectorizer)
+          - 문장 임베딩 코사인 유사도 (sentence-transformers)
+          - BM25 유사도 (rank_bm25)
+        """
+        test_tokens = set(test_text.lower().split())
+        weights = []
+        for cal_text in self._cal_texts:
+            cal_tokens = set(cal_text.lower().split())
+            union = cal_tokens | test_tokens
+            jaccard = len(cal_tokens & test_tokens) / len(union) if union else 0.0
+            weights.append(1.0 + self.similarity_scale * jaccard)
+        return weights
+
+    @staticmethod
+    def _weighted_quantile(
+        scores: list[float],
+        weights: list[float],
+        level: float,
+    ) -> float:
+        """
+        Weighted quantile: inf{q : Σ_{i: s_i ≤ q} w_i / Σ_i w_i ≥ level}
+        """
+        total_w = sum(weights)
+        pairs = sorted(zip(scores, weights), key=lambda x: x[0])
+        cumulative = 0.0
+        for score, w in pairs:
+            cumulative += w / total_w
+            if cumulative >= level:
+                return score
+        return pairs[-1][0]  # 모든 포인트 통과 → 최대값 반환 (보수적)
+
+
 # ── UQM 메인 클래스 ────────────────────────────────────────────────────────────
 
 class UQM:
@@ -212,6 +309,7 @@ class UQM:
         alpha: float = 0.05,
         consistency_n: int = 5,
         scoring_method: str = "logprob",
+        use_weighted_cp: bool = False,
     ):
         self.backend = backend
         self.calibrator = ConformalCalibrator(alpha=alpha)
@@ -219,6 +317,9 @@ class UQM:
         self.consistency_n = consistency_n
         self._scoring_method = ScoringMethod(scoring_method)
         self._calibration_meta: Optional[CalibrationMetadata] = None
+        self.use_weighted_cp = use_weighted_cp
+        self._weighted_calibrator: Optional[WeightedConformalCalibrator] = None
+        self._cal_texts: list[str] = []
 
         # _use_self_consistency 초기화
         if self._scoring_method == ScoringMethod.LOGPROB:
@@ -310,14 +411,26 @@ class UQM:
         )
 
         cal_scores, holdout_scores = [], []
+        cal_texts: list[str] = []
         for i, q in enumerate(questions):
             score, _ = self._get_score(q)
-            (holdout_scores if i in holdout_set else cal_scores).append(score)
+            if i in holdout_set:
+                holdout_scores.append(score)
+            else:
+                cal_scores.append(score)
+                cal_texts.append(q)
             if (i + 1) % 10 == 0:
                 print(f"  [{i+1}/{n_total}] score={score:.4f}")
 
+        self._cal_texts = cal_texts
         self.calibrator.fit(cal_scores)
         self._calibrated = True
+
+        # Weighted CP 보정 (use_weighted_cp=True 또는 나중에 evaluate()에서 분포 이동 감지 시 사용)
+        self._weighted_calibrator = WeightedConformalCalibrator(alpha=self.calibrator.alpha)
+        self._weighted_calibrator.fit(cal_scores, cal_texts)
+        if self.use_weighted_cp:
+            print("[UQM] WeightedCP 활성화 — evaluate()에서 weighted q̂_w 사용")
 
         coverage_report = self.calibrator.check_coverage(
             holdout_scores, [True] * len(holdout_scores)
@@ -376,7 +489,31 @@ class UQM:
 
         score, resp = self._get_score(question)
         entropy = compute_entropy(resp.logprobs)
-        threshold = self.calibrator.threshold
+
+        # 분포 이동 감지 여부
+        is_shift = bool(
+            distribution_source
+            and self._calibration_meta
+            and self._calibration_meta.distribution_source not in ("unknown", distribution_source)
+        )
+
+        # Weighted CP 임계값 결정:
+        #   - use_weighted_cp=True: 항상 weighted q̂_w 사용
+        #   - 분포 이동 감지: 자동으로 weighted q̂_w로 전환
+        #   - 그 외: 표준 q̂ 사용
+        use_weighted = self._weighted_calibrator is not None and (
+            self.use_weighted_cp or is_shift
+        )
+        if use_weighted:
+            threshold = self._weighted_calibrator.predict(question)
+            if is_shift and not self.use_weighted_cp:
+                print(
+                    f"[WeightedCP] 분포 이동 감지 → weighted q̂_w={threshold:.4f} 자동 사용 "
+                    f"(표준 q̂={self.calibrator.threshold:.4f})"
+                )
+        else:
+            threshold = self.calibrator.threshold
+
         should_escalate = score > threshold
         prediction_set_size = max(1, round(score / threshold)) if threshold > 0 else 1
 
@@ -388,6 +525,7 @@ class UQM:
             threshold_used=threshold,
             raw_response=resp,
             scoring_method=self.active_scoring_method,
+            weighted_cp_used=use_weighted,
         )
 
 

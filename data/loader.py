@@ -485,6 +485,197 @@ def load_scenarios(
     return result
 
 
+# ── MedAbstain 공개 API ───────────────────────────────────────────────────────
+
+def load_medabstain_cases(
+    variants: Optional[list[str]] = None,
+    n: Optional[int] = None,
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    MedAbstain 케이스를 로드합니다.
+
+    Args:
+        variants: 로드할 변형 목록. 기본값: ["AP", "NAP"] (expected_escalate=True 케이스).
+                  전체 평가: ["AP", "NAP", "A", "NA"]
+        n:        변형별 최대 케이스 수 (None = 전체)
+        seed:     셔플 시드
+
+    Returns:
+        list[MedQACase]: 모든 변형을 합친 케이스 목록
+    """
+    variants = variants or ["AP", "NAP"]
+    all_cases: list[MedQACase] = []
+
+    for variant in variants:
+        path = _RAW_DIR / f"medabstain_{variant}.jsonl"
+        if not path.exists():
+            if verbose:
+                print(
+                    f"[DataLoader] MedAbstain {variant} 없음: {path}\n"
+                    f"  → GitHub에서 다운로드: https://github.com/HowieSiao/medabstain\n"
+                    f"     cp /tmp/medabstain/data/{variant}.jsonl {path}"
+                )
+            continue
+        cases = _load_medabstain_jsonl(path, variant)
+        if n is not None:
+            rng = random.Random(seed)
+            rng.shuffle(cases)
+            cases = cases[:n]
+        all_cases.extend(cases)
+        if verbose:
+            esc = sum(1 for c in cases if c.expected_escalate)
+            print(
+                f"[DataLoader] MedAbstain {variant}: {len(cases)}개 "
+                f"(에스컬레이션 예상: {esc}개)"
+            )
+
+    return all_cases
+
+
+# ── MIMIC-III 로더 ────────────────────────────────────────────────────────────
+
+_MIMIC_NOTE_TEMPLATE = (
+    "Patient clinical note:\n{text}\n\n"
+    "Based on this note, what is the most appropriate immediate clinical management decision?"
+)
+
+
+def _load_mimic_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
+    """
+    MIMIC-III 임상 기록 JSONL 로드.
+
+    예상 포맷 (한 줄 = 한 기록):
+        {
+          "note_id": "12345",
+          "note_type": "Discharge summary",
+          "text": "Patient is a 72-year-old...",
+          "icd_codes": ["I50.9", "N18.3"],
+          "expected_escalate": true
+        }
+
+    icd_codes가 있으면 분류에 활용. expected_escalate가 없으면 _classify_case()로 추정.
+    """
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    rows = rows[:min(n, len(rows))]
+
+    cases = []
+    for row in rows:
+        text = row.get("text", "")
+        # 임상 기록 → 질문 형태로 변환 (UQM의 SYSTEM_PROMPT와 호환)
+        question = _MIMIC_NOTE_TEMPLATE.format(text=text[:800])
+        icd_str = " ".join(row.get("icd_codes", []))
+        specialty, scenario_type, inferred_esc = _classify_case(question, icd_str)
+
+        # 레이블: 파일에 명시된 값 우선, 없으면 추정값
+        expected_escalate = row.get("expected_escalate", inferred_esc)
+
+        cases.append(MedQACase(
+            question=question,
+            options={},          # MIMIC 기록은 선택지 없음
+            answer_idx="",
+            answer="",
+            meta_info=f"note_type={row.get('note_type', 'unknown')} icd={icd_str}",
+            expected_escalate=expected_escalate,
+            source="mimic3",
+            specialty=specialty,
+            scenario_type=scenario_type,
+        ))
+
+    return cases
+
+
+def load_mimic_calibration(
+    n: int = 30,
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[str]:
+    """
+    MIMIC-III 임상 기록 기반 calibration 질문 목록을 반환합니다.
+
+    MIMIC-III 도메인 내 실험 시 MedQA 대신 이 함수로 보정해야
+    CP exchangeability 가정이 유지됩니다.
+
+    데이터 위치:
+        data/raw/mimic_notes_sample.jsonl   (PhysioNet DUA 필요)
+
+    PhysioNet 신청:
+        1. https://physionet.org/register/ 에서 계정 생성
+        2. CITI Biomedical Research 교육 이수
+        3. MIMIC-III DUA 서명: https://physionet.org/content/mimiciii/1.4/
+        4. NOTEEVENTS.csv.gz 다운로드 후 샘플 추출
+
+    Returns:
+        list[str]: 질문 텍스트 목록 (MedQA 로더와 동일한 형식)
+    """
+    path = _RAW_DIR / "mimic_notes_sample.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"MIMIC-III 데이터를 찾을 수 없습니다: {path}\n"
+            f"  PhysioNet DUA가 필요한 데이터입니다.\n"
+            f"  신청: https://physionet.org/content/mimiciii/1.4/\n"
+            f"  다운로드 후 data/raw/mimic_notes_sample.jsonl 에 위치시키세요.\n"
+            f"  포맷: 한 줄 = {{\"text\": \"...\", \"expected_escalate\": true/false}}"
+        )
+
+    cases = _load_mimic_jsonl(path, n, seed)
+    if verbose:
+        print(f"[DataLoader] MIMIC-III calibration 로드: {len(cases)}개 ({path.name})")
+    return [c.question for c in cases]
+
+
+def load_mimic_scenarios(
+    n_per_scenario: int = 10,
+    seed: int = 42,
+    verbose: bool = True,
+) -> dict[str, list[MedQACase]]:
+    """
+    MIMIC-III 기록을 시나리오별로 분류하여 반환합니다.
+
+    load_scenarios()와 동일한 반환 형식이므로 run_experiment.py에서 대체 가능.
+    """
+    path = _RAW_DIR / "mimic_notes_sample.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"MIMIC-III 데이터를 찾을 수 없습니다: {path}\n"
+            f"  load_mimic_calibration() 독스트링의 신청 절차를 참고하세요."
+        )
+
+    n_load = max(n_per_scenario * 10, 100)
+    all_cases = _load_mimic_jsonl(path, n_load, seed)
+
+    buckets: dict[str, list[MedQACase]] = {
+        "emergency": [],
+        "rare_disease": [],
+        "multimorbidity": [],
+        "routine": [],
+    }
+    for case in all_cases:
+        bucket = case.scenario_type if case.scenario_type in buckets else "routine"
+        buckets[bucket].append(case)
+
+    rng = random.Random(seed)
+    result = {}
+    for scenario_type, cases in buckets.items():
+        rng.shuffle(cases)
+        result[scenario_type] = cases[:n_per_scenario]
+        if verbose and cases:
+            esc = sum(1 for c in cases[:n_per_scenario] if c.expected_escalate)
+            print(f"  MIMIC {scenario_type:<18}: {min(len(cases), n_per_scenario)}개 "
+                  f"(에스컬레이션 예상: {esc}개)")
+
+    return result
+
+
 def case_to_experiment_dict(case: MedQACase) -> dict:
     """MedQACase → run_experiment.py SCENARIOS 포맷으로 변환."""
     return {
