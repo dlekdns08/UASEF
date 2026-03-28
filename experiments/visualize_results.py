@@ -46,7 +46,7 @@ def plot_comparison_bar(results: dict, out_dir: Path) -> None:
     if not HAS_MPL:
         return
 
-    scenarios = list(SCENARIOS_ORDER := ["emergency", "rare_disease", "multimorbidity"])
+    scenarios = ["emergency", "rare_disease", "multimorbidity"]
     backends = list(results.keys())
     metrics_keys = ["safety_recall", "over_escalation_rate"]
     titles = ["Safety Recall (↑ 목표 ≥0.95)", "Over-Escalation Rate (↓ 목표 ≤0.15)"]
@@ -106,12 +106,37 @@ def plot_comparison_bar(results: dict, out_dir: Path) -> None:
     print(f"✅ 비교 바차트 저장: {path}")
 
 
+def _pareto_frontier_indices(points: list[tuple[float, float]]) -> list[int]:
+    """
+    Non-dominated point 인덱스를 반환합니다.
+    목표: escalation_rate는 낮을수록, coverage는 높을수록 좋음.
+    j가 i를 지배: esc_j ≤ esc_i AND cov_j ≥ cov_i (둘 중 하나는 엄격한 부등호)
+    """
+    n = len(points)
+    dominated = [False] * n
+    for i in range(n):
+        if dominated[i]:
+            continue
+        for j in range(n):
+            if i == j or dominated[j]:
+                continue
+            esc_i, cov_i = points[i]
+            esc_j, cov_j = points[j]
+            if esc_j <= esc_i and cov_j >= cov_i and (esc_j < esc_i or cov_j > cov_i):
+                dominated[i] = True
+                break
+    return [i for i in range(n) if not dominated[i]]
+
+
 def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
     """
-    Escalation Rate ↔ Conformal Coverage Pareto frontier 산점도.
+    Escalation Rate ↔ Conformal Coverage Pareto frontier.
 
     Y축: conformal_coverage — calibration hold-out에서 검증된 실제 coverage (1-α 보장).
     X축: escalation_rate — (TP+FP)/total (낮을수록 효율적).
+
+    conformal_coverage 데이터가 없는 백엔드는 제외합니다.
+    safety_recall은 다른 지표이므로 혼용하지 않습니다.
     """
     if not HAS_MPL:
         return
@@ -121,7 +146,6 @@ def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
     ax.set_xlabel("Escalation Rate (낮을수록 효율적)")
     ax.set_ylabel("Conformal Coverage (높을수록 안전, 목표 ≥0.95)")
 
-    # 목표 영역 음영
     ax.axvline(0.15, color="#D85A30", linestyle="--", linewidth=1, alpha=0.6,
                label="목표 Escalation ≤0.15")
     ax.axhline(0.95, color="#1D9E75", linestyle="--", linewidth=1, alpha=0.6,
@@ -130,25 +154,27 @@ def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
 
     markers = {"lmstudio": "o", "openai": "s"}
     scenarios = ["emergency", "rare_disease", "multimorbidity"]
+    all_pts: list[tuple[float, float]] = []
+    skipped_backends: list[str] = []
 
     for backend, bdata in results.items():
-        esc_rates, coverages, labels = [], [], []
-
-        # conformal_coverage는 backend 전체의 calibration 결과 (시나리오별 동일)
         cal_coverage = bdata.get("coverage_report", {}).get("actual_coverage")
+        if cal_coverage is None:
+            skipped_backends.append(backend)
+            continue
 
+        esc_rates, coverages, labels = [], [], []
         for sc in scenarios:
             try:
                 m = bdata["scenarios"][sc]["metrics"]
                 esc_rates.append(float(m.get("escalation_rate", 0)))
-                # conformal_coverage 우선 사용; 없으면 safety_recall로 대체 (레이블 명시)
-                if cal_coverage is not None:
-                    coverages.append(float(cal_coverage))
-                else:
-                    coverages.append(float(m.get("safety_recall", 0)))
+                coverages.append(float(cal_coverage))
                 labels.append(SCENARIO_LABELS[sc])
             except (KeyError, TypeError):
                 pass
+
+        if not esc_rates:
+            continue
 
         ax.scatter(
             esc_rates, coverages,
@@ -161,6 +187,19 @@ def plot_pareto_frontier(results: dict, out_dir: Path) -> None:
             ax.annotate(lbl, (x, y), textcoords="offset points",
                         xytext=(8, 4), fontsize=9,
                         color=COLORS.get(backend, "#888"))
+        all_pts.extend(zip(esc_rates, coverages))
+
+    # 실제 Pareto frontier: non-dominated points를 연결
+    if len(all_pts) >= 2:
+        frontier_idx = _pareto_frontier_indices(all_pts)
+        frontier_pts = sorted([all_pts[i] for i in frontier_idx], key=lambda p: p[0])
+        fx, fy = zip(*frontier_pts)
+        ax.step(fx, fy, where="post", color="#444", lw=1.8, ls="-",
+                label="Pareto frontier", zorder=4, alpha=0.7)
+
+    if skipped_backends:
+        print(f"[WARNING] conformal_coverage 없어 제외된 백엔드: {skipped_backends}")
+        print("  coverage_report.actual_coverage 필드가 있는 실험 결과가 필요합니다.")
 
     ax.set_xlim(-0.02, 1.02)
     ax.set_ylim(0.5, 1.05)
