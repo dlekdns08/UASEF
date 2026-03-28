@@ -458,9 +458,7 @@ class UQM:
         if self.use_weighted_cp:
             print("[UQM] WeightedCP 활성화 — evaluate()에서 weighted q̂_w 사용")
 
-        coverage_report = self.calibrator.check_coverage(
-            holdout_scores, [True] * len(holdout_scores)
-        )
+        coverage_report = self.calibrator.check_coverage(holdout_scores)
         ok = "✓" if coverage_report.get("coverage_valid") else "✗"
         print(
             f"[UQM] Coverage 검증: "
