@@ -182,11 +182,7 @@ class ConformalCalibrator:
         self.threshold = float(np.quantile(self.calibration_scores, level))
         print(f"[UQM] Calibration 완료: n={n}, α={self.alpha}, q̂={self.threshold:.4f}")
 
-    def check_coverage(
-        self,
-        test_scores: list[float],
-        test_labels_correct: list[bool],
-    ) -> dict:
+    def check_coverage(self, test_scores: list[float]) -> dict:
         """Hold-out set에서 실제 coverage ≥ 1-α 검증."""
         if not test_scores:
             return {"error": "빈 test set"}
