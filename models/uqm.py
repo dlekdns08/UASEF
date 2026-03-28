@@ -482,13 +482,17 @@ class UQM:
         self,
         question: str,
         distribution_source: Optional[str] = None,
+        pre_computed_response: Optional[ModelResponse] = None,
     ) -> UncertaintyResult:
         """
         단일 질문의 불확실성을 측정합니다.
 
         Args:
-            distribution_source: 이 질문의 데이터 출처.
-                                  calibration 분포와 다르면 distribution shift 경고 발생.
+            distribution_source:     이 질문의 데이터 출처.
+                                     calibration 분포와 다르면 distribution shift 경고 발생.
+            pre_computed_response:   이미 얻은 ModelResponse가 있으면 전달.
+                                     logprob 모드에서 LLM 재호출을 건너뜁니다.
+                                     self_consistency 모드에서는 무시됩니다.
         """
         if not self._calibrated:
             raise RuntimeError("calibrate()를 먼저 호출하세요.")
@@ -511,8 +515,13 @@ class UQM:
                 UserWarning, stacklevel=2,
             )
 
-        score, resp = self._get_score(question)
-        entropy = compute_entropy(resp.logprobs)
+        # logprob 모드에서 pre_computed_response가 있으면 LLM 재호출 생략
+        if pre_computed_response is not None and self._use_self_consistency is False:
+            resp = pre_computed_response
+            score = compute_nonconformity_score(resp)
+        else:
+            score, resp = self._get_score(question)
+        entropy = compute_entropy(resp)
 
         # 분포 이동 감지 여부
         is_shift = bool(
@@ -539,11 +548,11 @@ class UQM:
             threshold = self.calibrator.threshold
 
         should_escalate = score > threshold
-        prediction_set_size = max(1, round(score / threshold)) if threshold > 0 else 1
+        margin = threshold - score   # 양수=임계값 이하(안전), 음수=초과(에스컬레이션)
 
         return UncertaintyResult(
             nonconformity_score=score,
-            prediction_set_size=prediction_set_size,
+            margin=margin,
             confidence_entropy=entropy,
             should_escalate=should_escalate,
             threshold_used=threshold,
@@ -566,7 +575,7 @@ if __name__ == "__main__":
             uqm = UQM(backend="openai", alpha=0.05, scoring_method=sm.value)
             uqm.calibrate(CAL, distribution_source="medqa")
             r = uqm.evaluate("What is aspirin used for?", distribution_source="medqa")
-            print(f"Score={r.nonconformity_score:.3f}, Escalate={r.should_escalate}, Method={r.scoring_method}")
+            print(f"Score={r.nonconformity_score:.3f}, Margin={r.margin:.3f}, Escalate={r.should_escalate}, Method={r.scoring_method}")
             # Distribution shift 테스트
             r2 = uqm.evaluate("Rare mitochondrial disease presentation.", distribution_source="mimic3")
         except Exception as e:
