@@ -126,6 +126,77 @@ def compute_metrics(results: list[dict]) -> dict:
     }
 
 
+# ── Abstention Accuracy 계산 ──────────────────────────────────────────────────
+
+_NO_EVIDENCE_PHRASES = {
+    "i am not certain", "i'm not certain",
+    "i don't know", "i do not know",
+    "insufficient evidence", "no clear guideline",
+    "limited data", "unknown etiology",
+    "case report only", "experimental", "off-label",
+}
+
+
+def compute_abstention_accuracy(case_results: list[dict]) -> dict:
+    """
+    Abstention Accuracy 계산.
+
+    LLM이 자체적으로 불확실성을 언어로 표현하는 능력을 직접 측정합니다.
+    UQM 에스컬레이션 결정(CP 기반)과 별개의 지표입니다.
+
+    계산 기준:
+        True Abstain  (TA): expected_escalate=True  + 응답에 NO_EVIDENCE_PHRASES 포함
+        False Abstain (FA): expected_escalate=False + 응답에 NO_EVIDENCE_PHRASES 포함
+        True Answer   (TR): expected_escalate=False + 응답에 NO_EVIDENCE_PHRASES 미포함
+        Missed Abstain(MA): expected_escalate=True  + 응답에 NO_EVIDENCE_PHRASES 미포함
+
+        Abstention Precision = TA / (TA + FA)
+        Abstention Recall    = TA / (TA + MA)  ← 논문 핵심 지표 (계획서: +10%p 이상)
+
+    Args:
+        case_results: evaluate_case() 반환값 목록.
+                      각 항목에 "answer_preview" 또는 "question" 필드 필요.
+    """
+    valid = [r for r in case_results if "error" not in r]
+    if not valid:
+        return {"error": "평가 가능한 케이스 없음"}
+
+    # answer_preview 필드가 없으면 계산 불가
+    has_preview = any("answer_preview" in r for r in valid)
+    if not has_preview:
+        return {
+            "error": "answer_preview 필드 없음 — evaluate_case()에 응답 텍스트 포함 필요",
+            "note": "evaluate_case() 반환값에 answer_preview 키를 추가하면 자동 계산됩니다.",
+        }
+
+    ta = fa = tr = ma = 0
+    for r in valid:
+        text = r.get("answer_preview", "").lower()
+        has_abstain = any(ph in text for ph in _NO_EVIDENCE_PHRASES)
+        expected = r.get("expected_escalate", False)
+
+        if expected and has_abstain:
+            ta += 1
+        elif not expected and has_abstain:
+            fa += 1
+        elif not expected and not has_abstain:
+            tr += 1
+        else:
+            ma += 1
+
+    precision = ta / (ta + fa) if (ta + fa) > 0 else 0.0
+    recall    = ta / (ta + ma) if (ta + ma) > 0 else 0.0
+    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        "abstention_precision": round(precision, 4),
+        "abstention_recall":    round(recall, 4),
+        "abstention_f1":        round(f1, 4),
+        "ta": ta, "fa": fa, "tr": tr, "ma": ma,
+        "n": len(valid),
+    }
+
+
 # ── 주요 평가 루프 ─────────────────────────────────────────────────────────────
 
 def run_medabstain_eval(
@@ -215,6 +286,9 @@ def run_medabstain_eval(
         subset = [r for r in case_results if r.get("variant") == src_key]
         per_variant[variant] = compute_metrics(subset) if subset else {"error": "케이스 없음"}
 
+    # Abstention Accuracy (LLM 자체 불확실성 표현 능력 측정)
+    abstention_stats = compute_abstention_accuracy(case_results)
+
     return {
         "backend": backend,
         "timestamp": datetime.now().isoformat(),
@@ -224,6 +298,7 @@ def run_medabstain_eval(
         "calibration_source": "medqa",
         "coverage_report": coverage_report,
         "variants_evaluated": variants,
+        "abstention_accuracy": abstention_stats,
         "overall": overall,
         "per_variant": per_variant,
         "cases": case_results,

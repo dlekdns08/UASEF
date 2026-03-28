@@ -236,6 +236,7 @@ def escalate(state: MedicalAgentState, components: AgentComponents) -> dict:
     """
     score = state.get("uasef_score", 0)
     threshold = state.get("uasef_threshold", 0)
+    margin = threshold - score  # 음수일수록 임계값을 많이 초과한 것
     triggers = state.get("uasef_triggers") or []
     confidence = state.get("uasef_confidence", 0)
     explanation = state.get("uasef_explanation", "")
@@ -247,6 +248,8 @@ def escalate(state: MedicalAgentState, components: AgentComponents) -> dict:
         f"질문: {question[:120]}\n"
         f"{'─'*50}\n"
         f"불확실성 점수: {score:.4f} (임계값: {threshold:.4f})\n"
+        f"임계값 초과 마진: {abs(margin):.4f} "
+        f"({'높은' if abs(margin) > 0.5 else '낮은'} 초과)\n"
         f"에스컬레이션 확신도: {confidence:.2f}\n"
         f"활성 트리거:\n"
         + "\n".join(f"  • {t}" for t in triggers)
