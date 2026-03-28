@@ -314,6 +314,15 @@ class UQM:
     """
     Uncertainty Quantification Module.
 
+    ⚠ LLM 지원 요건:
+        LOGPROB (Primary): token-level logprobs 지원 필수.
+            지원: GPT-4o, GPT-4o-mini, llama.cpp 기반 (LMStudio)
+            미지원: Claude API, Gemini API, Cohere 등
+            → logprobs 없으면 compute_nonconformity_score()가 ValueError 발생.
+            → "블랙박스 LLM에 적용 가능" 설명은 SELF_CONSISTENCY 방식에만 해당.
+        SELF_CONSISTENCY (Ablation): logprobs 불필요. 모든 LLM에 적용 가능.
+            → 단, N회 쿼리로 비용/지연 N배 증가. 논문에서 ablation으로 명시 필수.
+
     권장 사용법 (논문 재현):
         uqm = UQM(backend="openai", alpha=0.05, scoring_method="logprob")
         report = uqm.calibrate(cal_questions, distribution_source="medqa")

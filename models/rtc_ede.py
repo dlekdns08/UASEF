@@ -79,6 +79,16 @@ class RTC:
     """
     Risk-Threshold Calibrator.
 
+    base_threshold(UQM calibration의 q̂)에 전문과목·시나리오별 배율을 적용합니다.
+
+    ⚠ 계획서와의 차이:
+        계획서: "전문의 레이블 기반 retrospective 데이터로 임계값 조정"
+        실제:   MedQA calibration에서 산출된 q̂에 RISK_THRESHOLD_MULTIPLIER 적용만 수행.
+                전문의 레이블 데이터는 현재 사용되지 않음.
+        향후 연구 방향:
+            1. 전문의 레이블 데이터를 수집하여 배율 자체를 학습
+            2. 각 전문과목별 독립 calibration set으로 q̂를 직접 산출
+
     사용법:
         rtc = RTC(base_threshold=2.31)  # UQM.calibrator.threshold
         config = rtc.get_threshold("emergency_medicine", "emergency")
