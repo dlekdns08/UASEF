@@ -391,18 +391,20 @@ def load_scenarios(
     seed: int = 42,
     medabstain_ap_path: Optional[Path] = None,
     medabstain_nap_path: Optional[Path] = None,
+    include_pubmedqa: bool = False,
     verbose: bool = True,
 ) -> dict[str, list[MedQACase]]:
     """
     시나리오별 테스트 케이스를 반환합니다.
 
     시나리오 구성:
-      emergency     — 응급 키워드 포함 MedQA 질문
-      rare_disease  — 희귀질환 키워드 포함 MedQA 질문
+      emergency      — 응급 키워드 포함 MedQA 질문
+      rare_disease   — 희귀질환 키워드 포함 MedQA 질문 (+ PubMedQA "maybe" 케이스)
       multimorbidity — 3가지+ 만성질환 동시 언급 MedQA 질문
-      routine       — 기타 (에스컬레이션 불필요)
+      routine        — 기타 (에스컬레이션 불필요)
 
     MedAbstain AP/NAP가 제공되면 해당 케이스를 expected_escalate=True로 포함합니다.
+    include_pubmedqa=True 시 PubMedQA "maybe" 응답 케이스를 rare_disease 버킷에 병합합니다.
 
     Args:
         n_per_scenario:   시나리오별 최소 케이스 수
@@ -410,6 +412,7 @@ def load_scenarios(
         seed:             재현성 시드
         medabstain_ap_path:  data/raw/medabstain_AP.jsonl 경로 (선택)
         medabstain_nap_path: data/raw/medabstain_NAP.jsonl 경로 (선택)
+        include_pubmedqa: True이면 PubMedQA "maybe" 케이스를 rare_disease에 추가
 
     Returns:
         dict: {scenario_type: list[MedQACase]}
@@ -447,6 +450,15 @@ def load_scenarios(
         all_cases.extend(nap_cases)
         if verbose:
             print(f"[DataLoader] MedAbstain NAP 로드: {len(nap_cases)}개")
+
+    # PubMedQA "maybe" 케이스 → rare_disease 버킷에 병합
+    if include_pubmedqa:
+        pubmed_cases = load_pubmedqa(n=n_per_scenario * 2, split=split, seed=seed, verbose=verbose)
+        # "maybe" 케이스만 (expected_escalate=True) rare_disease에 추가
+        rare_pubmed = [c for c in pubmed_cases if c.expected_escalate]
+        all_cases.extend(rare_pubmed)
+        if verbose and rare_pubmed:
+            print(f"[DataLoader] PubMedQA 'maybe' rare_disease 추가: {len(rare_pubmed)}개")
 
     # 시나리오별 분류
     buckets: dict[str, list[MedQACase]] = {
