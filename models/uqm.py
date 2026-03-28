@@ -60,8 +60,8 @@ class ScoringMethod(str, Enum):
 @dataclass
 class UncertaintyResult:
     nonconformity_score: float     # 클수록 불확실 (0~∞)
-    prediction_set_size: int       # score/threshold 비율 기반 집합 크기
-    confidence_entropy: float      # logprobs 기반 Shannon 엔트로피 (nan=미지원)
+    margin: float                  # threshold - score (양수=임계값 아래(안전), 음수=초과(에스컬레이션))
+    confidence_entropy: float      # 위치별 조건부 엔트로피 추정 (nats/token); top_logprobs 없으면 nan
     should_escalate: bool
     threshold_used: float
     raw_response: ModelResponse
