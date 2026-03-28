@@ -297,6 +297,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--alpha", type=float, default=0.05, help="Conformal prediction α (기본: 0.05)")
     parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
+    parser.add_argument(
+        "--include-pubmedqa", action="store_true",
+        help="PubMedQA 'maybe' 케이스를 rare_disease 버킷에 추가",
+    )
     args = parser.parse_args()
 
     tracing = os.getenv("LANGCHAIN_TRACING_V2", "false").lower()
@@ -311,7 +315,8 @@ if __name__ == "__main__":
 
     print("\n[Dataset] MedQA / MedAbstain 로드 중...")
     cal_questions = load_calibration_questions(n=args.n_cal, split="train", seed=args.seed)
-    scenario_map = load_scenarios(n_per_scenario=args.n_test, split="test", seed=args.seed)
+    scenario_map = load_scenarios(n_per_scenario=args.n_test, split="test", seed=args.seed,
+                                  include_pubmedqa=args.include_pubmedqa)
     agent_scenarios = [
         case_to_agent_dict(case)
         for cases in scenario_map.values()

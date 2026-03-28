@@ -111,7 +111,7 @@ cp /tmp/medabstain/data/NAP.jsonl data/raw/medabstain_NAP.jsonl
 
 `"maybe"` 케이스가 UASEF의 NO_EVIDENCE 트리거(Trigger 3) 검증에 핵심적으로 활용됩니다.
 
-### HuggingFace 자동 다운로드 (권장)
+### PubMedQA HuggingFace 자동 다운로드 (권장)
 
 `load_pubmedqa()`가 자동으로 시도합니다:
 
@@ -135,10 +135,9 @@ data:
 python experiments/run_experiment.py --n-cal 500 --n-test 50
 ```
 
-### 로컬 JSONL 수동 설치 (오프라인 환경)
+### PubMedQA 로컬 JSONL 수동 설치 (오프라인 환경)
 
-HuggingFace 자동 다운로드가 실패하면 `load_pubmedqa()`는 빈 목록을 반환합니다.
-오프라인 환경에서는 아래와 같이 수동 설치 후 `data/raw/`에 위치시키세요:
+HuggingFace 자동 다운로드가 실패하면 `load_pubmedqa()`는 빈 목록을 반환합니다. 오프라인 환경에서는 아래와 같이 수동 설치 후 `data/raw/`에 위치시키세요:
 
 ```bash
 # HuggingFace에서 pqa_labeled를 JSONL로 변환하여 저장
