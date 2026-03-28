@@ -136,7 +136,8 @@ def run_baseline_comparison(
 
     # 테스트 케이스 로드
     print(f"\n[2/3] 테스트 케이스 로드 중 (n_per_scenario={n_test})...")
-    scenario_map = load_scenarios(n_per_scenario=n_test, split="test", seed=seed)
+    scenario_map = load_scenarios(n_per_scenario=n_test, split="test", seed=seed,
+                                  include_pubmedqa=False)
 
     # 세 가지 전략에 대한 결과 수집
     strategy_results: dict[str, list[dict]] = {

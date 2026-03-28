@@ -117,6 +117,8 @@ def _build_datasets(cfg: dict) -> tuple[list[str], dict]:
         n=d["n_calibration"], split=d["calibration_split"], seed=d["seed"]
     )
 
+    include_pubmedqa = d.get("include_pubmedqa", False)
+
     scenario_cfg = cfg.get("scenario")
     if scenario_cfg:
         # 단일 시나리오 config
@@ -125,6 +127,7 @@ def _build_datasets(cfg: dict) -> tuple[list[str], dict]:
             n_per_scenario=d["n_test_per_scenario"],
             split=d["test_split"],
             seed=d["seed"],
+            include_pubmedqa=include_pubmedqa,
         )
         scenarios = {
             stype: {
@@ -140,6 +143,7 @@ def _build_datasets(cfg: dict) -> tuple[list[str], dict]:
             n_per_scenario=d["n_test_per_scenario"],
             split=d["test_split"],
             seed=d["seed"],
+            include_pubmedqa=include_pubmedqa,
         )
         scenarios = {
             st: {

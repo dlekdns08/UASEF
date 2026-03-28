@@ -14,6 +14,7 @@ data:
   test_split: test
   seed: 42
   distribution_source: medqa # calibration 분포 식별자 (distribution shift 경고에 사용)
+  include_pubmedqa: false    # true 설정 시 PubMedQA "maybe" 케이스를 rare_disease에 추가
 
 backends:
   - lmstudio

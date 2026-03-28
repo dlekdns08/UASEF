@@ -6,16 +6,17 @@
 
 ## 디렉토리 구조
 
-```
+```text
 data/
 ├── __init__.py
-├── loader.py          # 데이터 로딩 API (load_calibration_questions, load_scenarios)
+├── loader.py          # 데이터 로딩 API (load_calibration_questions, load_scenarios, load_pubmedqa)
 ├── README.md          # 이 파일
 └── raw/               # 로컬 JSONL 파일 (git 제외, .gitignore에 등록)
     ├── medqa_train.jsonl
     ├── medqa_test.jsonl
     ├── medabstain_AP.jsonl
-    └── medabstain_NAP.jsonl
+    ├── medabstain_NAP.jsonl
+    └── pubmedqa_test.jsonl    # 선택 — load_pubmedqa() 오프라인 사용 시
 ```
 
 `data/raw/` 는 `.gitignore`에 포함되어야 합니다 (라이선스 및 용량 이유).
