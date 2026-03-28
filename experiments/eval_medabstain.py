@@ -78,6 +78,7 @@ def evaluate_case(
         "triggers": [t.value for t in decision.triggers],
         "uasef_confidence": decision.confidence,
         "scoring_method": unc.scoring_method,
+        "answer_preview": unc.raw_response.text[:200],
     }
 
 
