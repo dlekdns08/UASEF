@@ -15,11 +15,12 @@ from openai import OpenAI
 @dataclass
 class ModelResponse:
     text: str
-    logprobs: Optional[list[float]]   # token-level log probabilities (None if unavailable)
+    logprobs: Optional[list[float]]              # 각 토큰의 log P(t_i | context) — nonconformity score용
     latency_ms: float
     model_name: str
     prompt_tokens: int
     completion_tokens: int
+    top_logprobs: Optional[list[list[float]]] = None  # 위치별 상위 k개 logprob — 엔트로피 계산용
     raw: dict = field(default_factory=dict)
 
 
