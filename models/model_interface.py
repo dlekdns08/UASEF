@@ -86,12 +86,20 @@ def query_model(
 
     # logprob 추출 (없으면 None)
     lp_list = None
+    top_lp_list = None
     if choice.logprobs and choice.logprobs.content:
         lp_list = [tok.logprob for tok in choice.logprobs.content]
+        raw_top = [
+            [alt.logprob for alt in tok.top_logprobs]
+            for tok in choice.logprobs.content
+            if tok.top_logprobs
+        ]
+        top_lp_list = raw_top if raw_top else None
 
     return ModelResponse(
         text=text,
         logprobs=lp_list,
+        top_logprobs=top_lp_list,
         latency_ms=latency_ms,
         model_name=model_name,
         prompt_tokens=response.usage.prompt_tokens,
@@ -114,6 +122,6 @@ if __name__ == "__main__":
             print(f"Latency : {resp.latency_ms:.0f} ms")
             print(f"Tokens  : {resp.prompt_tokens}→{resp.completion_tokens}")
             print(f"Answer  : {resp.text[:200]}")
-            print(f"Logprobs: {'available' if resp.logprobs else 'unavailable'}")
+            print(f"Logprobs: {'available' if resp.logprobs else 'unavailable'} | TopLogprobs: {'available' if resp.top_logprobs else 'unavailable'}")
         except Exception as e:
             print(f"[SKIP] {e}")
