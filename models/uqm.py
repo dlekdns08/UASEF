@@ -86,13 +86,28 @@ class CalibrationMetadata:
 
 # ── 비적합 점수 계산 ────────────────────────────────────────────────────────────
 
-def compute_entropy(logprobs: Optional[list[float]]) -> float:
-    """토큰 수준 log probability → Shannon 엔트로피 (nats/token)."""
-    if not logprobs:
+def compute_entropy(response: ModelResponse) -> float:
+    """
+    위치별 조건부 엔트로피 추정 (nats/token).
+
+    top_logprobs 있음: 각 토큰 위치의 상위 k개 확률로 per-position H 계산 후 평균.
+                       어휘 전체가 아닌 top-k 분포이므로 실제 엔트로피의 하한.
+    top_logprobs 없음: nan 반환. 개별 토큰 logprob으로는 Shannon 엔트로피를
+                       계산할 수 없음 (각 logprob이 완전한 분포를 구성하지 않음).
+    """
+    if not response.top_logprobs:
         return float("nan")
-    probs = [math.exp(lp) for lp in logprobs]
-    entropy = -sum(p * math.log(p + 1e-12) for p in probs)
-    return entropy / len(probs)
+    entropies = []
+    for pos_logprobs in response.top_logprobs:
+        if not pos_logprobs:
+            continue
+        # top-k logprob을 정규화하여 조건부 분포 근사
+        max_lp = max(pos_logprobs)
+        probs = [math.exp(lp - max_lp) for lp in pos_logprobs]
+        total = sum(probs)
+        probs = [p / total for p in probs]
+        entropies.append(-sum(p * math.log(p + 1e-12) for p in probs))
+    return sum(entropies) / len(entropies) if entropies else float("nan")
 
 
 def compute_nonconformity_score(response: ModelResponse) -> float:
