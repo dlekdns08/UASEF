@@ -182,10 +182,21 @@ class EscalationDecision:
     log: dict = field(default_factory=dict)
 
 
-# ── 고위험 키워드 — 두 단계로 분리 ──────────────────────────────────────────
+# ── Trigger 2: HIGH_RISK_ACTION — 2단계 맥락 인식 구조 ──────────────────────
 #
-# CRITICAL_KEYWORDS: 문맥 무관하게 항상 에스컬레이션.
-#   EOL 결정·위기 상황처럼 AI가 단독으로 판단해서는 안 되는 영역.
+# [Stage 1] CRITICAL_KEYWORDS: EOL·위기 결정 → 문맥 무관 무조건 트리거
+#   이 범주는 AI가 단독으로 판단해서는 안 되는 결정 영역.
+#   응급 소생 여부(DNR), 연명치료 중단(withdraw care) 등이 해당.
+#   키워드가 발견되면 나머지 조건 없이 즉시 트리거.
+#
+# [Stage 2] PROCEDURAL_KEYWORDS + UNCERTAINTY_MODIFIERS: 맥락 조건부 트리거
+#   처치 자체(intubation, epinephrine 등)는 지침 권고일 수 있음.
+#   → "give epinephrine for anaphylaxis"   → 트리거 안 함 (명확한 처치)
+#   → "consider intubation if deteriorates" → 트리거   (불확실 맥락)
+#   불확실 표현(UNCERTAINTY_MODIFIERS)이 동반될 때만 HIGH_RISK_ACTION 발동.
+#
+# 이 설계는 과-에스컬레이션(over-escalation)을 줄이기 위한 핵심 구조임.
+# 논문 방법론 섹션에 반드시 수식 또는 의사코드로 명시해야 재현 가능.
 CRITICAL_KEYWORDS = {
     "code blue",
     "do not resuscitate", "dnr",

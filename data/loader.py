@@ -1,5 +1,5 @@
 """
-UASEF Data Loader — MedQA + MedAbstain
+UASEF Data Loader — MedQA + MedAbstain + PubMedQA
 
 로딩 우선순위:
   1. HuggingFace datasets (자동 다운로드)
@@ -9,6 +9,8 @@ UASEF Data Loader — MedQA + MedAbstain
 MedQA 출처:   GBaker/MedQA-USMLE-4-options  (HuggingFace)
               jind11/MedQA                   (GitHub, 로컬 JSONL)
 MedAbstain:   sravanthi6m/MedAbstain         (GitHub, 로컬 JSONL 필요)
+PubMedQA:     pubmed_qa / pqa_labeled        (HuggingFace)
+              "maybe" 응답 = 불확실 → expected_escalate=True
 
 로컬 JSONL 경로:
   data/raw/medqa_train.jsonl
@@ -674,6 +676,64 @@ def load_mimic_scenarios(
                   f"(에스컬레이션 예상: {esc}개)")
 
     return result
+
+
+def load_pubmedqa(
+    n: int = 100,
+    split: str = "test",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    PubMedQA 로드 (Biomedical Yes/No/Maybe QA).
+
+    HuggingFace: pubmed_qa / pqa_labeled (1,000 expert-labeled)
+    논문에서 '근거 부재' 시나리오 및 NO_EVIDENCE 트리거 검증에 활용.
+
+    응답 매핑:
+        "yes"   → expected_escalate=False (명확한 근거 있음)
+        "no"    → expected_escalate=False (명확한 근거 있음)
+        "maybe" → expected_escalate=True  (불확실 → 에스컬레이션 대상)
+    """
+    try:
+        from datasets import load_dataset  # type: ignore
+        ds = load_dataset("pubmed_qa", "pqa_labeled", split=split, trust_remote_code=True)
+    except ImportError:
+        if verbose:
+            print("[DataLoader] PubMedQA 로드 실패: datasets 미설치 → pip install datasets")
+        return []
+    except Exception as e:
+        if verbose:
+            print(f"[DataLoader] PubMedQA 로드 실패: {e} → 빈 목록 반환")
+        return []
+
+    rng = random.Random(seed)
+    indices = list(range(len(ds)))
+    rng.shuffle(indices)
+
+    cases = []
+    for idx in indices[:min(n, len(indices))]:
+        row = ds[idx]
+        question = row.get("question", "")
+        final_decision = row.get("final_decision", "maybe")
+        # "maybe" → 불확실 → 에스컬레이션 대상
+        expected_escalate = (final_decision == "maybe")
+
+        cases.append(MedQACase(
+            question=question,
+            options={"A": "yes", "B": "no", "C": "maybe"},
+            answer_idx={"yes": "A", "no": "B", "maybe": "C"}.get(final_decision, "C"),
+            answer=final_decision,
+            expected_escalate=expected_escalate,
+            source="pubmedqa",
+            specialty="internal_medicine",
+            scenario_type="rare_disease" if expected_escalate else "routine",
+        ))
+
+    if verbose:
+        esc = sum(1 for c in cases if c.expected_escalate)
+        print(f"[DataLoader] PubMedQA 로드: {len(cases)}개 (에스컬레이션 예상: {esc}개)")
+    return cases
 
 
 def case_to_experiment_dict(case: MedQACase) -> dict:

@@ -54,6 +54,15 @@ from data.loader import (
 #   data/raw/medqa_test.jsonl
 #   data/raw/medabstain_AP.jsonl
 #   data/raw/medabstain_NAP.jsonl
+#
+# ── 시나리오별 데이터 소스 ─────────────────────────────────────────────────────
+# emergency:      MedQA 응급 키워드 필터 + MedAbstain AP/NAP
+# rare_disease:   MedQA 희귀질환 키워드 필터 + MedAbstain AP/NAP
+#                 ⚠ 계획서의 'PubMedQA 기반'은 현재 미구현 상태.
+#                    PubMedQA를 추가하려면 data/loader.py의 load_pubmedqa() 구현 후
+#                    load_scenarios()의 rare_disease 버킷에 병합 필요.
+# multimorbidity: MedQA 3개+ 만성질환 키워드 동시 언급 필터 + MedAbstain AP/NAP
+# routine:        MedQA 기타 (expected_escalate=False)
 
 _SPECIALTY_MAP = {
     "emergency":      "emergency_medicine",
