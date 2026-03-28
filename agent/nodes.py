@@ -16,12 +16,13 @@ import os
 import json
 import functools
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import (
     AIMessage, HumanMessage, SystemMessage, ToolMessage,
 )
+from models.model_interface import ModelResponse
 
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
@@ -70,20 +71,56 @@ class AgentComponents:
 # ── LLM 초기화 헬퍼 ──────────────────────────────────────────────────────────
 
 def _make_llm(backend: str, bind_tools: bool = True) -> ChatOpenAI:
+    # logprobs=True: uasef_check에서 LLM 재호출 없이 응답을 재사용하기 위해 활성화.
+    # LMStudio가 지원하지 않으면 response_metadata에서 조용히 None이 됩니다.
+    logprobs_kwargs = {"logprobs": True, "top_logprobs": 5}
     if backend == "lmstudio":
         llm = ChatOpenAI(
             base_url="http://localhost:1234/v1",
             api_key="lm-studio",
             model=os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct"),
             temperature=0.0,
+            model_kwargs=logprobs_kwargs,
         )
     else:
         llm = ChatOpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             temperature=0.0,
+            model_kwargs=logprobs_kwargs,
         )
     return llm.bind_tools(MEDICAL_TOOLS) if bind_tools else llm
+
+
+def _extract_model_response(msg: AIMessage, backend: str) -> Optional[ModelResponse]:
+    """
+    AIMessage의 response_metadata에서 ModelResponse를 재구성합니다.
+    uasef_check에서 LLM 재호출 없이 logprobs를 재사용하기 위해 사용됩니다.
+    logprobs가 없으면 None을 반환하고 호출부는 LLM을 재호출합니다.
+    """
+    try:
+        meta = msg.response_metadata or {}
+        logprobs_data = (meta.get("logprobs") or {}).get("content") or []
+        if not logprobs_data:
+            return None
+        lp_list = [tok["logprob"] for tok in logprobs_data]
+        top_lp_list = [
+            [alt["logprob"] for alt in (tok.get("top_logprobs") or [])]
+            for tok in logprobs_data
+        ]
+        top_lp_list = [tlp for tlp in top_lp_list if tlp] or None
+        usage = meta.get("token_usage") or {}
+        return ModelResponse(
+            text=msg.content if isinstance(msg.content, str) else "",
+            logprobs=lp_list,
+            top_logprobs=top_lp_list,
+            latency_ms=0.0,
+            model_name=meta.get("model_name", backend),
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+        )
+    except Exception:
+        return None
 
 
 # ── 노드 함수들 ────────────────────────────────────────────────────────────────
@@ -155,17 +192,21 @@ def uasef_check(state: MedicalAgentState, components: AgentComponents) -> dict:
     UQM은 내부적으로 query_model()을 재호출하므로 LangGraph 히스토리와 독립적.
     이 설계가 의도적: UASEF는 에이전트 출력을 외부에서 감사(audit)하는 구조.
     """
-    # 최신 AIMessage 텍스트 (EDE trigger 2, 3 분석용)
+    # 최신 AIMessage 텍스트 + 가능하면 logprobs 추출 (LLM 재호출 방지)
     response_text = ""
+    pre_resp = None
     for msg in reversed(state["messages"]):
         if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
             response_text = msg.content if isinstance(msg.content, str) else ""
+            pre_resp = _extract_model_response(msg, components.backend)
             break
 
     # UQM 평가 (calibration과 동일한 distribution_source 유지 — CP exchangeability)
+    # pre_resp가 있으면 logprob 모드에서 LLM 재호출 생략
     unc = components.uqm.evaluate(
         state["question"],
         distribution_source=components.distribution_source,
+        pre_computed_response=pre_resp,
     )
 
     # RTC 임계값 조정
