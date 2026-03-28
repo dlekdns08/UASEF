@@ -160,14 +160,18 @@ def drug_interaction_checker(drug_a: str, drug_b: str) -> str:
     drug_a: 첫 번째 약물 (예: 'warfarin', 'metformin')
     drug_b: 두 번째 약물 (예: 'aspirin', 'iv_contrast')
     """
-    key = frozenset([drug_a.lower().strip(), drug_b.lower().strip()])
+    a_lower = drug_a.lower().strip()
+    b_lower = drug_b.lower().strip()
+    key = frozenset([a_lower, b_lower])
     if key in _INTERACTIONS:
         return f"[약물상호작용] {drug_a} + {drug_b}: {_INTERACTIONS[key]}"
-    # 부분 일치 검색
+    # 부분 일치 검색: frozenset 원소 문자열에 대해 substring 체크
     for db_key, interaction in _INTERACTIONS.items():
-        if drug_a.lower() in db_key or drug_b.lower() in db_key:
-            pair = " + ".join(db_key)
-            return f"[약물상호작용] {pair}: {interaction}\n(참고: '{drug_a}'/''{drug_b}' 포함 조합)"
+        db_drugs = sorted(db_key)   # 결정적 순서
+        if any(a_lower in d or d in a_lower for d in db_drugs) or \
+           any(b_lower in d or d in b_lower for d in db_drugs):
+            pair = " + ".join(db_drugs)
+            return f"[약물상호작용] {pair}: {interaction}\n(참고: '{drug_a}'/'{drug_b}' 포함 조합)"
     return (
         f"'{drug_a}'과 '{drug_b}'의 주요 상호작용이 데이터베이스에 없습니다. "
         "복잡한 병용 처방 시 임상약사 협의 및 Lexicomp/Micromedex 확인을 권장합니다."
