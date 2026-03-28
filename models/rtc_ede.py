@@ -172,14 +172,33 @@ class EscalationDecision:
     log: dict = field(default_factory=dict)
 
 
-# 고위험 키워드 목록 (실제 연구에서는 SNOMED CT 등 의료 온톨로지로 확장)
-HIGH_RISK_KEYWORDS = {
+# ── 고위험 키워드 — 두 단계로 분리 ──────────────────────────────────────────
+#
+# CRITICAL_KEYWORDS: 문맥 무관하게 항상 에스컬레이션.
+#   EOL 결정·위기 상황처럼 AI가 단독으로 판단해서는 안 되는 영역.
+CRITICAL_KEYWORDS = {
+    "code blue",
+    "do not resuscitate", "dnr",
+    "withdraw care", "comfort measures only",
+}
+
+# PROCEDURAL_KEYWORDS: 시술/처치 자체는 지침 권고일 수 있으므로 맥락 필요.
+#   UNCERTAINTY_MODIFIERS와 함께 나타날 때만 에스컬레이션.
+#   예) "give epinephrine for anaphylaxis" → 미트리거
+#       "consider intubation if patient deteriorates" → 트리거
+PROCEDURAL_KEYWORDS = {
     "intubate", "intubation", "mechanical ventilation",
-    "code blue", "emergency surgery",
+    "emergency surgery",
     "thrombolysis", "tpa", "alteplase",
     "vasopressor", "norepinephrine", "epinephrine",
     "defibrillate", "defibrillation",
-    "do not resuscitate", "dnr", "withdraw care", "comfort measures only",
+}
+
+# PROCEDURAL_KEYWORDS 트리거를 활성화하는 불확실 표현
+UNCERTAINTY_MODIFIERS = {
+    "consider", "may need", "might require", "possibly",
+    "if deteriorates", "if worsens", "borderline", "unclear",
+    "not certain", "uncertain", "limited evidence", "off-label",
 }
 
 NO_EVIDENCE_PHRASES = {
@@ -228,8 +247,15 @@ class EDE:
         if uncertainty_result.nonconformity_score > rtc_config.adjusted_threshold:
             triggers.append(EscalationTrigger.UNCERTAINTY_EXCEEDED)
 
-        # Trigger 2: 고위험 행동 키워드 감지
-        if any(kw in text_lower for kw in HIGH_RISK_KEYWORDS):
+        # Trigger 2: 고위험 행동 키워드 감지 (맥락 인식)
+        #   - CRITICAL_KEYWORDS: EOL/위기 결정 → 문맥 무관 트리거
+        #   - PROCEDURAL_KEYWORDS: 시술 키워드 → 불확실 표현 동반 시만 트리거
+        has_critical = any(kw in text_lower for kw in CRITICAL_KEYWORDS)
+        has_uncertain_procedure = (
+            any(kw in text_lower for kw in PROCEDURAL_KEYWORDS)
+            and any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS)
+        )
+        if has_critical or has_uncertain_procedure:
             triggers.append(EscalationTrigger.HIGH_RISK_ACTION)
 
         # Trigger 3: 근거 부재 표현 감지
@@ -291,7 +317,7 @@ class EDE:
                 f"임계값({rtc_config.adjusted_threshold:.3f})"
             )
         if EscalationTrigger.HIGH_RISK_ACTION in triggers:
-            parts.append("고위험 임상 행동 키워드 감지")
+            parts.append("고위험 임상 행동 감지 (EOL 결정 또는 불확실 처치 언급)")
         if EscalationTrigger.NO_EVIDENCE in triggers:
             parts.append("근거 부재 표현 감지")
         if not math.isnan(entropy) and entropy > ENTROPY_HIGH_THRESHOLD:
