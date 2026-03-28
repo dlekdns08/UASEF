@@ -289,19 +289,27 @@ class WeightedConformalCalibrator:
     def _weighted_quantile(
         scores: list[float],
         weights: list[float],
+        w_test: float,
         level: float,
     ) -> float:
         """
-        Weighted quantile: inf{q : Σ_{i: s_i ≤ q} w_i / Σ_i w_i ≥ level}
+        Weighted quantile (Tibshirani et al. 2019, Algorithm 1):
+            inf{q : Σ_{i: s_i ≤ q} w_i / (Σ_i w_i + w_test) ≥ level}
+
+        w_test: 테스트 포인트의 weight (w_{n+1}).
+                분모에만 포함 — 테스트 점수는 미지이므로 +∞ 질량점으로 처리.
+                calibration 포인트들이 level을 충족하지 못하면 +∞ 반환(에스컬레이션).
         """
-        total_w = sum(weights)
+        total_w = sum(weights) + w_test   # n+1개 질량점의 총 가중치
         pairs = sorted(zip(scores, weights), key=lambda x: x[0])
         cumulative = 0.0
         for score, w in pairs:
             cumulative += w / total_w
             if cumulative >= level:
                 return score
-        return pairs[-1][0]  # 모든 포인트 통과 → 최대값 반환 (보수적)
+        # calibration 포인트만으로 level 미달 → +∞ 질량점 포함 시 통과
+        # 즉, 임계값을 +∞로 설정 = 반드시 에스컬레이션
+        return float("inf")
 
 
 # ── UQM 메인 클래스 ────────────────────────────────────────────────────────────
