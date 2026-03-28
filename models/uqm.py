@@ -67,6 +67,7 @@ class UncertaintyResult:
     raw_response: ModelResponse
     scoring_method: str = "logprob"   # 실제 사용된 방식 기록 (재현성)
     weighted_cp_used: bool = False    # Weighted CP 적용 여부 (Tibshirani et al., 2019)
+    prediction_set_size: int = 1      # Binary outcome에서 항상 1. 하위 호환성 유지용 필드.
 
 
 @dataclass
