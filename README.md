@@ -1,5 +1,7 @@
 # UASEF
 
+![UASEF](UASEF.png)
+
 Uncertainty-Aware Safe Escalation Framework for Medical LLM Agents
 
 LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고, **위험도를 판단**하여 **인간 전문가에게 자동 인계**하는 연구 프레임워크입니다.
