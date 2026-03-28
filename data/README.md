@@ -93,7 +93,69 @@ cp /tmp/medabstain/data/NAP.jsonl data/raw/medabstain_NAP.jsonl
 
 ---
 
-## 데이터소스 3 — MIMIC-III (선택, 분포 이동 실험)
+## 데이터소스 3 — PubMedQA (선택, 근거 부재 시나리오)
+
+**용도**: `rare_disease` 버킷 보강 및 NO_EVIDENCE 트리거 검증
+
+**출처**: Jin et al., 2019 — "PubMedQA: A Dataset for Biomedical Research Question Answering"
+**HuggingFace ID**: `pubmed_qa / pqa_labeled` (1,000 expert-labeled)
+**라이선스**: MIT License
+
+### 응답 매핑
+
+| `final_decision` | `expected_escalate` | 설명 |
+| --- | --- | --- |
+| `yes` | False | 명확한 근거로 답변 가능 |
+| `no` | False | 명확한 근거로 답변 가능 |
+| `maybe` | **True** | 불확실 → 에스컬레이션 대상 |
+
+`"maybe"` 케이스가 UASEF의 NO_EVIDENCE 트리거(Trigger 3) 검증에 핵심적으로 활용됩니다.
+
+### HuggingFace 자동 다운로드 (권장)
+
+`load_pubmedqa()`가 자동으로 시도합니다:
+
+```python
+from datasets import load_dataset
+ds = load_dataset("pubmed_qa", "pqa_labeled", split="test", trust_remote_code=True)
+```
+
+### 실험 파이프라인에서 활성화
+
+```yaml
+# experiments/configs/base_config.yaml
+data:
+  include_pubmedqa: true   # PubMedQA "maybe" 케이스를 rare_disease 버킷에 추가
+```
+
+또는 CLI에서:
+
+```bash
+# base_config.yaml의 include_pubmedqa를 true로 변경 후 실험 실행
+python experiments/run_experiment.py --n-cal 500 --n-test 50
+```
+
+### 로컬 JSONL 수동 설치 (오프라인 환경)
+
+HuggingFace 자동 다운로드가 실패하면 `load_pubmedqa()`는 빈 목록을 반환합니다.
+오프라인 환경에서는 아래와 같이 수동 설치 후 `data/raw/`에 위치시키세요:
+
+```bash
+# HuggingFace에서 pqa_labeled를 JSONL로 변환하여 저장
+python -c "
+from datasets import load_dataset
+import json
+ds = load_dataset('pubmed_qa', 'pqa_labeled', split='test', trust_remote_code=True)
+with open('data/raw/pubmedqa_test.jsonl', 'w') as f:
+    for row in ds:
+        f.write(json.dumps(row) + '\n')
+print(f'저장 완료: {len(ds)}개')
+"
+```
+
+---
+
+## 데이터소스 4 — MIMIC-III (선택, 분포 이동 실험)
 
 **용도**: 실제 ICU 임상 기록으로 distribution shift 실험
 
