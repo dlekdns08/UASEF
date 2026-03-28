@@ -256,9 +256,16 @@ class WeightedConformalCalibrator:
         """
         test_text에 대한 개인화된 weighted quantile q̂_w를 반환합니다.
         evaluate()에서 threshold 대신 이 값을 사용합니다.
+
+        Tibshirani et al. (2019) Algorithm 1:
+            test point 자신의 weight w_{n+1} = 1 + k * Jaccard(test, test) = 1 + k
+            을 포함하여 총 n+1개 질량점으로 분위수 계산.
+            이 항이 없으면 coverage ≥ 1-α 하한 보장이 성립하지 않음.
         """
         weights = self._compute_weights(test_text)
-        return self._weighted_quantile(self._cal_scores, weights, 1 - self.alpha)
+        # w_{n+1}: 테스트 포인트는 자기 자신과 Jaccard = 1.0 → 최대 유사도
+        w_test = 1.0 + self.similarity_scale
+        return self._weighted_quantile(self._cal_scores, weights, w_test, 1 - self.alpha)
 
     def _compute_weights(self, test_text: str) -> list[float]:
         """
