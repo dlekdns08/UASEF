@@ -723,6 +723,27 @@ LANGCHAIN_PROJECT=UASEF-agent
 
 ## 9. 실험 실행
 
+### 전체 실험 한 번에 실행 (권장)
+
+```bash
+# 빠른 스모크 테스트 (소규모 기본값)
+python experiments/run_all_experiments.py --backend openai
+
+# 논문 품질
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
+
+# 특정 실험 건너뛰기 (--skip agent / baseline / medabstain / pareto)
+python experiments/run_all_experiments.py --backend openai --skip pareto
+
+# 전체 백엔드 (lmstudio + openai)
+python experiments/run_all_experiments.py --n-cal 500 --n-test 50
+```
+
+실행 후 `results/all_experiments_report.md`에서 모든 실험 결과를 한눈에 확인할 수 있습니다.
+
+---
+
 ### 순차 파이프라인 실험
 
 ```bash
@@ -830,6 +851,8 @@ python models/rtc_ede.py
 | `results/alpha_recommendations.json` | `pareto_sweep.py` | specialty별 최적 α 및 권고 이유 |
 | `results/comparison_bar.png` | `visualize_results.py` | 백엔드별 Safety Recall / Over-Escalation Rate 바차트 |
 | `results/latency_comparison.png` | `visualize_results.py` | 로컬 vs 클라우드 응답 지연 비교 |
+| `results/all_experiments_summary.json` | `run_all_experiments.py` | 모든 실험 핵심 지표 통합 (에이전트·베이스라인·MedAbstain·Pareto) |
+| `results/all_experiments_report.md` | `run_all_experiments.py` | Safety Recall ≥ 0.95 달성 여부 포함 Markdown 보고서 |
 
 ---
 
