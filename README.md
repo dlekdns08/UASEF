@@ -25,6 +25,7 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
    - 6.3 [MedAbstain 분류 정확도 평가](#63-medabstain-분류-정확도-평가-eval_medabstainpy)
    - 6.4 [Pareto Frontier Alpha Sweep](#64-pareto-frontier-alpha-sweep-pareto_sweeppy)
    - 6.5 [베이스라인 비교 실험](#65-베이스라인-비교-실험-run_baseline_comparisonpy)
+   - 6.6 [전체 실험 통합 실행기](#66-전체-실험-통합-실행기-run_all_experimentspy)
 7. [평가 지표](#7-평가-지표)
 8. [설치 및 환경 구성](#8-설치-및-환경-구성)
 9. [실험 실행](#9-실험-실행)
@@ -140,6 +141,7 @@ UASEF/
 │   ├── run_baseline_comparison.py  # 베이스라인 비교 (no_esc / threshold_only / full_uasef)
 │   ├── eval_medabstain.py          # MedAbstain AP/NAP 분류 정확도 평가
 │   ├── pareto_sweep.py             # α sweep → Pareto frontier + α 권고
+│   ├── run_all_experiments.py      # ★ 전체 실험 통합 실행 + 요약 보고서 생성
 │   └── visualize_results.py        # 결과 시각화
 │
 ├── results/                        # 실험 결과 (자동 생성, .gitignore)
@@ -627,6 +629,32 @@ escalated = unc.nonconformity_score > rtc_config.adjusted_threshold
 `threshold_only` vs `full_uasef` 차이가 EDE의 키워드·근거 부재 트리거가 추가적으로 기여하는 Safety Recall 향상량입니다.
 
 > **⚠ 미구현**: 계획서의 Temperature Scaling / MC Dropout 비교는 현재 구현되지 않았습니다. 추가 시 `BaselineScorer` 인터페이스(`score()`, `threshold()`)를 준수하면 됩니다.
+
+---
+
+### 6.6 전체 실험 통합 실행기 (`run_all_experiments.py`)
+
+위 4개 실험(에이전트, 베이스라인, MedAbstain, Pareto Sweep)을 **한 번에 순차 실행**하고 결과를 통합 요약합니다.
+
+#### 실행 방식
+
+각 실험 모듈의 함수를 직접 import하여 실행하므로 subprocess 오버헤드 없이 동일한 Python 프로세스에서 실행됩니다. 하나의 실험이 실패(예: 백엔드 연결 오류)해도 나머지 실험은 계속 진행됩니다.
+
+#### 추가 출력 파일
+
+| 파일 | 설명 |
+|------|------|
+| `results/all_experiments_summary.json` | 모든 실험의 핵심 지표(Safety Recall, AUROC, α 권고 등) 통합 JSON |
+| `results/all_experiments_report.md` | Safety Recall ≥ 0.95 달성 여부를 중심으로 한 Markdown 보고서 |
+
+#### `--skip` 옵션
+
+특정 실험을 건너뛸 수 있습니다. LMStudio 서버가 없는 환경에서 openai 단독 실행 시 유용합니다.
+
+```bash
+# pareto sweep 제외 (시간이 가장 오래 걸림)
+python experiments/run_all_experiments.py --backend openai --skip pareto
+```
 
 ---
 
