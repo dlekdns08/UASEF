@@ -289,7 +289,7 @@ def save_results(all_results: dict) -> None:
 
     # 터미널 요약
     print("\n" + "="*65)
-    print("  UASEF Agent 실험 요약")
+    print("UASEF Agent 실험 요약")
     print("="*65)
     print(f"{'Backend':<12} {'Acc':<8} {'Safety R.':<12} {'Over-Esc.':<12} "
           f"{'Avg Tools':<12} {'Avg Iters'}")
