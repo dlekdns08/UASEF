@@ -1,21 +1,28 @@
 """
-UASEF — 실험 실행기
-LMStudio(로컬) vs OpenAI를 3가지 시나리오에서 비교 평가합니다.
+UASEF — 순차 파이프라인 실험 실행기
+
+실험 구조:
+  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+             token-level logprobs로 비적합 점수 계산. 논문 주요 결과.
+  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+             N회 쿼리의 Jaccard 다양성으로 비적합 점수 계산.
+             "블랙박스 LLM에도 UASEF 적용 가능함"을 검증하는 ablation study.
+
+  두 방식 모두 CP coverage 보장(P(s≤q̂)≥1-α)은 수학적으로 성립하지만,
+  비적합 함수가 달라 결과를 직접 수치 비교하지 않습니다.
 
 실행 방법:
-    # 전체 실험 (base_config.yaml 사용)
-    python experiments/run_experiment.py
-
-    # 특정 시나리오만 실행
-    python experiments/run_experiment.py --scenario emergency
-    python experiments/run_experiment.py --scenario rare_disease
-    python experiments/run_experiment.py --scenario multimorbidity
-
-    # 시나리오별 config 파일 적용
-    python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
-
-    # 논문 품질 실험 (n_calibration=500, n_per_scenario=50)
+    # Primary + Ablation 전체 실험 (권장)
     python experiments/run_experiment.py --n-cal 500 --n-test 50
+
+    # Primary만 (OpenAI logprob)
+    python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
+
+    # Ablation만 (로컬 self_consistency)
+    python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
+
+    # 시나리오별 config 적용
+    python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
 
 출력:
     results/experiment_results.json
@@ -158,7 +165,16 @@ def _build_datasets(cfg: dict) -> tuple[list[str], dict]:
     return cal_questions, scenarios
 
 
-BACKENDS = ["lmstudio", "openai"]
+BACKENDS = ["openai", "lmstudio"]  # Primary(openai) → Ablation(lmstudio) 순
+
+
+def _scoring_method_for(backend: str) -> str:
+    """백엔드별 기본 scoring method 선택.
+
+    Primary:  openai   → logprob          (token-level logprobs 활용)
+    Ablation: 로컬     → self_consistency  (logprobs 불필요)
+    """
+    return "logprob" if backend == "openai" else "self_consistency"
 
 
 # ── 평가 지표 계산 ──────────────────────────────────────────────────────────────
