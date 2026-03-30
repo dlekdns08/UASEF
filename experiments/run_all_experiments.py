@@ -394,6 +394,10 @@ def build_markdown_report(summary: dict) -> str:
     lines.append(f"- **α**: {cfg['alpha']}")
     lines.append(f"- **n_cal**: {cfg['n_cal']} | **n_test**: {cfg['n_test']} | "
                  f"**n_medabstain**: {cfg['n_medabstain']} | **n_pareto_test**: {cfg['n_pareto_test']}")
+    lines.append(f"\n> **실험 구조**")
+    lines.append(f"> - `[Primary]` **OpenAI** — logprob-based CP: token-level logprobs 기반 비적합 점수. **논문 주요 결과.**")
+    lines.append(f"> - `[Ablation]` **LMStudio** — self_consistency-based CP: N회 쿼리 Jaccard 다양성 기반. 블랙박스 LLM 적용 가능성 검증.")
+    lines.append(f"> - 두 방식의 수치는 비적합 함수 차이로 직접 비교하지 않습니다. 각각 독립적으로 CP coverage를 검증합니다.\n")
 
     # ── 실험 1: 에이전트 ──
     h(2, "1. LangGraph 에이전트 실험")
