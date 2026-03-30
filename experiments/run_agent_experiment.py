@@ -4,8 +4,20 @@ UASEF Agent Experiment — LangGraph 에이전트 실험 실행기
 순차 파이프라인(run_experiment.py)과 동일한 시나리오를 에이전트 루프로 실행.
 결과에 tool_call_count, react_iterations, 도구 사용 내역이 추가됩니다.
 
+실험 구조:
+  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+  (--scoring-method으로 강제 지정 가능)
+
 실행:
-    python experiments/run_agent_experiment.py
+    # Primary + Ablation 전체 (권장)
+    python experiments/run_agent_experiment.py --n-cal 500 --n-test 50
+
+    # Primary만 (OpenAI logprob)
+    python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
+
+    # Ablation만 (로컬 self_consistency)
+    python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
 출력:
     results/agent_results.json

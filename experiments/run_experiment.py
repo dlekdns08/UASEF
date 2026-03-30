@@ -220,8 +220,15 @@ def run_experiment(cfg: dict) -> dict:
     dist_source = cfg["data"].get("distribution_source", "medqa")
 
     for backend in backends:
+        # scoring_method 결정: "auto"이면 백엔드별 자동 선택
+        cfg_method = uqm_cfg.get("scoring_method", "auto")
+        scoring_method = (
+            _scoring_method_for(backend) if cfg_method == "auto" else cfg_method
+        )
+        role = "[Primary]" if scoring_method == "logprob" else "[Ablation]"
+
         print(f"\n{'='*65}")
-        print(f"  Backend: {backend.upper()}")
+        print(f"  Backend: {backend.upper()}  {role}  (scoring={scoring_method})")
         print(f"{'='*65}")
 
         backend_results = {}
@@ -232,7 +239,7 @@ def run_experiment(cfg: dict) -> dict:
             uqm = UQM(
                 backend=backend,
                 alpha=uqm_cfg["alpha"],
-                scoring_method=uqm_cfg.get("scoring_method", "logprob"),
+                scoring_method=scoring_method,
                 consistency_n=uqm_cfg.get("consistency_n", 5),
             )
             coverage_report = uqm.calibrate(
@@ -361,14 +368,16 @@ def save_results(results: dict) -> None:
         print(f"✅ CSV 저장: {csv_path}")
 
         # 터미널 요약
-        print("\n" + "="*72)
+        print("\n" + "="*80)
         print("  최종 비교 요약")
-        print("="*72)
-        print(f"{'Backend':<12} {'Scenario':<18} {'Safety R.':<12} {'Over-Esc.':<12} "
-              f"{'Coverage':<10} {'Latency(ms)'}")
-        print("-"*72)
+        print("  [Primary] OpenAI — logprob-based CP  |  [Ablation] 로컬 — self_consistency CP")
+        print("="*80)
+        print(f"{'Backend':<12} {'Role':<12} {'Scenario':<18} {'Safety R.':<12} "
+              f"{'Over-Esc.':<12} {'Coverage':<10} {'Latency(ms)'}")
+        print("-"*80)
         for r in rows:
-            print(f"{r['backend']:<12} {r['scenario']:<18} "
+            role = "[Primary]" if r.get("scoring_method") == "logprob" else "[Ablation]"
+            print(f"{r['backend']:<12} {role:<12} {r['scenario']:<18} "
                   f"{str(r['safety_recall']):<12} {str(r['over_escalation_rate']):<12} "
                   f"{str(r['conformal_coverage']):<10} {r['avg_latency_ms']}")
 
@@ -395,7 +404,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scoring-method", type=str, default=None,
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 산출 방식 (logprob=primary, self_consistency=ablation)",
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
     )
     args = parser.parse_args()
 
