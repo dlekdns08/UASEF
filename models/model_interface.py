@@ -124,7 +124,7 @@ if __name__ == "__main__":
     SYSTEM = "You are a clinical AI assistant. Answer the medical question concisely."
     USER = "A 45-year-old presents with crushing chest pain radiating to the left arm. What is the most likely diagnosis?"
 
-    for backend in ["lmstudio", "openai"]:
+    for backend in ["lmstudio", "mlx", "openai"]:
         print(f"\n{'='*60}")
         print(f"Backend: {backend.upper()}")
         try:
