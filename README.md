@@ -860,14 +860,14 @@ python models/rtc_ede.py
 
 ## 11. 논문 권장 설정
 
-### 실험 구조
+### Primary / Ablation 구조
 
-| 구분 | 백엔드 | `scoring_method` | 논문 섹션 |
-|------|--------|-----------------|-----------|
-| **[Primary]** | `openai` | `logprob` | Main Results |
-| **[Ablation]** | `lmstudio` | `self_consistency` | Ablation Study |
+| 구분           | 백엔드      | `scoring_method`    | 논문 섹션      |
+|----------------|-------------|---------------------|----------------|
+| **[Primary]**  | `openai`    | `logprob`           | Main Results   |
+| **[Ablation]** | `lmstudio`  | `self_consistency`  | Ablation Study |
 
-### Config
+### 권장 Config
 
 ```yaml
 # experiments/configs/base_config.yaml
