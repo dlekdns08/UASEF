@@ -26,7 +26,7 @@ class ModelResponse:
 
 def get_client(backend: str) -> tuple[OpenAI, str]:
     """
-    backend: "lmstudio" | "openai"
+    backend: "lmstudio" | "openai" | "mlx"
     반환: (OpenAI client, model_name)
     """
     if backend == "lmstudio":
@@ -39,8 +39,17 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
     elif backend == "openai":
         client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    elif backend == "mlx":
+        # mlx-lm 서버: python -m mlx_lm.server --model <model> --port 8080
+        # logprobs 지원: mlx-lm 0.19+ 필요
+        client = OpenAI(
+            base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
+            api_key="mlx",
+        )
+        # mlx-lm 서버는 로드된 모델을 사용 (API 호출 시 모델명은 무시됨)
+        model_name = os.getenv("MLX_MODEL", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
     else:
-        raise ValueError(f"Unknown backend: {backend}. Use 'lmstudio' or 'openai'.")
+        raise ValueError(f"Unknown backend: {backend}. Use 'lmstudio', 'openai', or 'mlx'.")
     return client, model_name
 
 
