@@ -639,8 +639,10 @@ def main() -> None:
     total_start = datetime.now()
 
     _section("UASEF 전체 실험 통합 실행")
-    print(f"  Backend      : {args.backend or 'all (lmstudio + openai)'}")
-    print(f"  Scoring      : {args.scoring_method}  |  α = {args.alpha}")
+    print(f"  Backend      : {args.backend or 'all (openai[Primary] + lmstudio[Ablation])'}")
+    print(f"  Scoring      : {args.scoring_method}  "
+          f"{'(auto → openai=logprob, 로컬=self_consistency)' if args.scoring_method == 'auto' else ''}")
+    print(f"  α            : {args.alpha}")
     print(f"  n_cal        : {args.n_cal}")
     print(f"  n_test       : {args.n_test}  (에이전트·베이스라인)")
     print(f"  n_medabstain : {args.n_medabstain}  (변형별)")
