@@ -7,19 +7,27 @@ UASEF 전체 실험 통합 실행기
   3. MedAbstain 분류 정확도 평가   → results/medabstain_eval.json
   4. Pareto Frontier α Sweep       → results/pareto_sweep_results.json
 
+실험 구조:
+  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP  (논문 주요 결과)
+  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+             "블랙박스 LLM에도 UASEF 적용 가능함" 검증용 ablation study.
+
+  두 결과는 Markdown 보고서에서 명시적으로 구분됩니다.
+  비적합 함수가 달라 수치를 직접 비교하지 않습니다.
+
 추가 출력:
   results/all_experiments_summary.json   — 모든 실험 핵심 지표 통합
-  results/all_experiments_report.md      — 사람이 읽기 쉬운 Markdown 보고서
+  results/all_experiments_report.md      — Primary / Ablation 구분 Markdown 보고서
 
 실행 예시:
-    # 빠른 스모크 테스트 (기본 소규모)
+    # Primary만 (OpenAI, 빠른 스모크 테스트)
     python experiments/run_all_experiments.py --backend openai
 
-    # 논문 품질
+    # Primary 논문 품질
     python experiments/run_all_experiments.py --backend openai \\
         --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
 
-    # 전체 백엔드 (lmstudio + openai)
+    # Primary + Ablation 전체 (논문 최종 실행)
     python experiments/run_all_experiments.py --n-cal 500 --n-test 50
 """
 
@@ -593,7 +601,7 @@ def main() -> None:
     parser.add_argument(
         "--backend", type=str, default=None,
         choices=["lmstudio", "openai"],
-        help="단일 백엔드 (기본: 양쪽 모두)",
+        help="단일 백엔드 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=30,
                         help="Calibration 질문 수 (논문 품질: 500)")
@@ -604,8 +612,9 @@ def main() -> None:
     parser.add_argument("--n-pareto-test", type=int, default=20,
                         help="Pareto Sweep 시나리오별 테스트 케이스 수 (논문 품질: 100)")
     parser.add_argument(
-        "--scoring-method", type=str, default="logprob",
-        choices=["logprob", "self_consistency"],
+        "--scoring-method", type=str, default="auto",
+        choices=["logprob", "self_consistency", "auto"],
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
     )
     parser.add_argument("--alpha", type=float, default=0.05,
                         help="Conformal prediction α")
