@@ -860,11 +860,20 @@ python models/rtc_ede.py
 
 ## 11. 논문 권장 설정
 
+### 실험 구조
+
+| 구분 | 백엔드 | `scoring_method` | 논문 섹션 |
+|------|--------|-----------------|-----------|
+| **[Primary]** | `openai` | `logprob` | Main Results |
+| **[Ablation]** | `lmstudio` | `self_consistency` | Ablation Study |
+
+### Config
+
 ```yaml
 # experiments/configs/base_config.yaml
 uqm:
   alpha: 0.05
-  scoring_method: logprob    # primary. self_consistency는 ablation study 전용
+  scoring_method: auto       # openai=logprob(Primary), 로컬=self_consistency(Ablation) 자동 선택
   holdout_fraction: 0.2
 data:
   n_calibration: 500         # CP 보장 실용 하한
@@ -874,6 +883,12 @@ data:
 > **현재 기본값(`n_calibration=30`)은 개발/디버그 전용입니다.**
 > n이 너무 작으면 q̂가 보수적(over-coverage)이 되어 지표가 낙관적으로 보입니다.
 > 논문 품질 결과를 위해 반드시 `n ≥ 500`을 사용하세요.
+
+### 논문 서술 주의사항
+
+- **Primary와 Ablation의 수치를 같은 테이블에서 직접 비교하지 마세요.** 비적합 함수(s(x))가 달라 스케일이 다릅니다.
+- Ablation 섹션에서 명시적으로 기술: *"We use self-consistency-based nonconformity scores for local models, as they do not expose token-level log probabilities. CP coverage guarantees hold independently for both methods."*
+- Primary 결과가 논문 주요 주장의 근거가 됩니다. Ablation은 "framework generalizability"를 보이는 보조 증거입니다.
 
 ### CP 이론 보증 (Angelopoulos & Bates, 2021)
 
