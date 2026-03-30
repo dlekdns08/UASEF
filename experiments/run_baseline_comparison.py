@@ -226,7 +226,7 @@ def run_baseline_comparison(
     return {
         "backend": backend,
         "timestamp": datetime.now().isoformat(),
-        "scoring_method": scoring_method,
+        "scoring_method": effective_method,
         "n_calibration": n_cal,
         "n_test_per_scenario": n_test,
         "metrics": metrics,
