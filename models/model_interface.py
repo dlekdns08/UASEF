@@ -71,6 +71,8 @@ def query_model(
     """
     client, model_name = get_client(backend)
 
+    # mlx-lm 서버는 max_tokens 파라미터를 사용 (max_completion_tokens 미지원)
+    token_limit_key = "max_tokens" if backend == "mlx" else "max_completion_tokens"
     kwargs = dict(
         model=model_name,
         messages=[
@@ -78,7 +80,7 @@ def query_model(
             {"role": "user", "content": user_prompt},
         ],
         temperature=temperature,
-        max_completion_tokens=max_completion_tokens,
+        **{token_limit_key: max_completion_tokens},
     )
 
     # logprobs 요청 (지원 여부는 모델에 따라 다름)
