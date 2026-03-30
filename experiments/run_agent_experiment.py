@@ -68,7 +68,12 @@ from data.loader import (
 #   n_calibration = 500   (MedQA train split)
 #   n_per_scenario = 50   (시나리오별 케이스 수)
 
-BACKENDS = ["lmstudio", "openai"]
+BACKENDS = ["openai", "lmstudio"]  # Primary(openai) → Ablation(lmstudio) 순
+
+
+def _scoring_method_for(backend: str) -> str:
+    """Primary: openai → logprob / Ablation: 로컬 → self_consistency"""
+    return "logprob" if backend == "openai" else "self_consistency"
 
 
 # ── 보조 함수 ─────────────────────────────────────────────────────────────────
@@ -94,18 +99,24 @@ def run_backend_experiment(
     backend: str,
     cal_questions: list[str],
     agent_scenarios: list[dict],
-    scoring_method: str = "logprob",
+    scoring_method: str = "auto",
     alpha: float = 0.05,
     distribution_source: str = "medqa",
 ) -> dict:
+    # "auto"이면 백엔드별 자동 선택
+    effective_method = (
+        _scoring_method_for(backend) if scoring_method == "auto" else scoring_method
+    )
+    role = "[Primary]" if effective_method == "logprob" else "[Ablation]"
+
     print(f"\n{'='*65}")
-    print(f"  UASEF Agent Experiment — Backend: {backend.upper()}")
-    print(f"  scoring={scoring_method}, α={alpha}, dist={distribution_source}")
+    print(f"  UASEF Agent Experiment — Backend: {backend.upper()}  {role}")
+    print(f"  scoring={effective_method}, α={alpha}, dist={distribution_source}")
     print(f"{'='*65}")
 
     # Step 1: UQM 보정 (한 번만 실행, 모든 시나리오 공유)
     print(f"\n[1/3] UQM 보정 중 ({len(cal_questions)}개)...")
-    uqm = UQM(backend=backend, alpha=alpha, scoring_method=scoring_method)
+    uqm = UQM(backend=backend, alpha=alpha, scoring_method=effective_method)
     try:
         coverage_report = uqm.calibrate(cal_questions, distribution_source=distribution_source)
     except Exception as e:
