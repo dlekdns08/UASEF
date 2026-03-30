@@ -8,6 +8,10 @@ UASEF 베이스라인 비교 실험.
   2. threshold_only:  CP Trigger 1만 사용 (T2 키워드, T3 근거 부재, 엔트로피 boost 없음)
   3. full_uasef:      T1 + T2 + T3 + 엔트로피 가중치 전체 사용
 
+실험 구조:
+  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+
 ⚠ 계획서의 Temperature Scaling / MC Dropout은 현재 미구현.
   향후 추가 시 아래 BaselineScorer 인터페이스를 준수하면 됩니다:
 
@@ -16,8 +20,14 @@ UASEF 베이스라인 비교 실험.
         def threshold(self) -> float: ...
 
 실행:
-    python experiments/run_baseline_comparison.py --backend openai
+    # Primary (OpenAI logprob)
+    python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
+
+    # Ablation (로컬 self_consistency)
     python experiments/run_baseline_comparison.py --backend lmstudio --n-cal 500 --n-test 50
+
+    # Primary + Ablation 모두
+    python experiments/run_baseline_comparison.py --n-cal 500 --n-test 50
 
 출력:
     results/baseline_comparison.json
@@ -109,21 +119,31 @@ _SPECIALTY_MAP = {
 }
 
 
+def _scoring_method_for(backend: str) -> str:
+    """Primary: openai → logprob / Ablation: 로컬 → self_consistency"""
+    return "logprob" if backend == "openai" else "self_consistency"
+
+
 def run_baseline_comparison(
     backend: str,
     n_cal: int = 30,
     n_test: int = 10,
-    scoring_method: str = "logprob",
+    scoring_method: str = "auto",
     seed: int = 42,
 ) -> dict:
+    effective_method = (
+        _scoring_method_for(backend) if scoring_method == "auto" else scoring_method
+    )
+    role = "[Primary]" if effective_method == "logprob" else "[Ablation]"
+
     print(f"\n{'='*65}")
-    print(f"  베이스라인 비교 — Backend: {backend.upper()}")
-    print(f"  scoring={scoring_method}, n_cal={n_cal}, n_test={n_test}")
+    print(f"  베이스라인 비교 — Backend: {backend.upper()}  {role}")
+    print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}")
     print(f"{'='*65}")
 
     # UQM 보정
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
-    uqm = UQM(backend=backend, alpha=0.05, scoring_method=scoring_method)
+    uqm = UQM(backend=backend, alpha=0.05, scoring_method=effective_method)
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
         uqm.calibrate(cal_questions, distribution_source="medqa")

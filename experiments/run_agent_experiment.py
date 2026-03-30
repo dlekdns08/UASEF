@@ -309,14 +309,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--backend", type=str, default=None,
         choices=["lmstudio", "openai"],
-        help="단일 백엔드만 실행 (기본: 양쪽 모두)",
+        help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=30, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=3, help="시나리오별 테스트 케이스 수 (권장: 50)")
     parser.add_argument(
-        "--scoring-method", type=str, default="logprob",
-        choices=["logprob", "self_consistency"],
-        help="비적합 점수 방식 (logprob=primary, self_consistency=ablation)",
+        "--scoring-method", type=str, default="auto",
+        choices=["logprob", "self_consistency", "auto"],
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
     )
     parser.add_argument("--alpha", type=float, default=0.05, help="Conformal prediction α (기본: 0.05)")
     parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
