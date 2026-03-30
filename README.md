@@ -465,11 +465,16 @@ MedQA (calibration)
 
 LangGraph 에이전트 없이 UQM → RTC → EDE를 순서대로 실행하는 **기본 파이프라인**입니다.
 
-#### 실험 조건
+#### 실험 구조
 
-- 백엔드: LMStudio (로컬, meta-llama-3.1-8b-instruct) vs OpenAI (GPT-4o-mini)
+| 구분           | 백엔드                                       | Scoring Method                                          | 논문 위치                          |
+|----------------|----------------------------------------------|---------------------------------------------------------|------------------------------------|
+| **[Primary]**  | OpenAI (GPT-4o-mini)                         | `logprob` — token-level logprobs 기반 CP                | 주요 결과                          |
+| **[Ablation]** | LMStudio (로컬, meta-llama-3.1-8b-instruct)  | `self_consistency` — N회 쿼리 Jaccard 다양성 기반 CP    | "블랙박스 LLM 적용 가능성" 검증    |
+
+> 두 방식의 수치는 직접 비교하지 않습니다. 비적합 함수가 다르므로 각각 독립적으로 CP coverage를 검증합니다.
+
 - 시나리오: Emergency / Rare Disease / Multimorbidity
-- Scoring: logprob (primary) vs self_consistency (ablation)
 
 #### Config 오버라이드 계층
 
@@ -726,41 +731,38 @@ LANGCHAIN_PROJECT=UASEF-agent
 ### 전체 실험 한 번에 실행 (권장)
 
 ```bash
-# 빠른 스모크 테스트 (소규모 기본값)
+# [Primary] OpenAI만 — 빠른 스모크 테스트
 python experiments/run_all_experiments.py --backend openai
 
-# 논문 품질
+# [Primary] OpenAI 논문 품질
 python experiments/run_all_experiments.py --backend openai \
     --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
 
-# 특정 실험 건너뛰기 (--skip agent / baseline / medabstain / pareto)
-python experiments/run_all_experiments.py --backend openai --skip pareto
-
-# 전체 백엔드 (lmstudio + openai)
+# [Primary + Ablation] 논문 최종 실행 (openai=logprob, lmstudio=self_consistency 자동 선택)
 python experiments/run_all_experiments.py --n-cal 500 --n-test 50
+
+# 특정 실험 건너뛰기
+python experiments/run_all_experiments.py --backend openai --skip pareto
 ```
 
-실행 후 `results/all_experiments_report.md`에서 모든 실험 결과를 한눈에 확인할 수 있습니다.
+실행 후 `results/all_experiments_report.md`에서 **[Primary] / [Ablation]** 구분이 명시된 결과를 확인할 수 있습니다.
 
 ---
 
 ### 순차 파이프라인 실험
 
 ```bash
-# 기본 실행 (base_config.yaml 사용)
-python experiments/run_experiment.py
+# [Primary + Ablation] 전체 실험 (scoring method 자동 선택)
+python experiments/run_experiment.py --n-cal 500 --n-test 50
+
+# [Primary] OpenAI만 (logprob)
+python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
+
+# [Ablation] 로컬만 (self_consistency)
+python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
 # 시나리오별 config 적용
 python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
-
-# 논문 품질 (권장 설정)
-python experiments/run_experiment.py --n-cal 500 --n-test 50
-
-# PubMedQA를 rare_disease 버킷에 추가 (base_config.yaml의 include_pubmedqa: true 설정)
-python experiments/run_experiment.py --n-cal 500 --n-test 50
-
-# Ablation: self_consistency 방식
-python experiments/run_experiment.py --scoring-method self_consistency
 
 # 결과 시각화
 python experiments/visualize_results.py
@@ -769,14 +771,14 @@ python experiments/visualize_results.py
 ### LangGraph 에이전트 실험
 
 ```bash
-# 기본 실행
-python experiments/run_agent_experiment.py
+# [Primary + Ablation] 전체 실험
+python experiments/run_agent_experiment.py --n-cal 500 --n-test 50
 
-# 단일 백엔드
+# [Primary] OpenAI만
 python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
 
-# LMStudio + logprob
-python experiments/run_agent_experiment.py --backend lmstudio --scoring-method logprob
+# [Ablation] 로컬만
+python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
 # PubMedQA 포함
 python experiments/run_agent_experiment.py --backend openai --include-pubmedqa
@@ -785,10 +787,10 @@ python experiments/run_agent_experiment.py --backend openai --include-pubmedqa
 ### 베이스라인 비교 실험
 
 ```bash
-# no_escalation / threshold_only / full_uasef 세 전략 비교
-python experiments/run_baseline_comparison.py --backend openai
+# [Primary + Ablation] 전체 비교
+python experiments/run_baseline_comparison.py --n-cal 500 --n-test 50
 
-# 논문 품질
+# [Primary] OpenAI만
 python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
 ```
 

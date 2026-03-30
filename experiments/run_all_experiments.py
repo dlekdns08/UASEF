@@ -399,16 +399,26 @@ def build_markdown_report(summary: dict) -> str:
     lines.append(f"> - `[Ablation]` **LMStudio** — self_consistency-based CP: N회 쿼리 Jaccard 다양성 기반. 블랙박스 LLM 적용 가능성 검증.")
     lines.append(f"> - 두 방식의 수치는 비적합 함수 차이로 직접 비교하지 않습니다. 각각 독립적으로 CP coverage를 검증합니다.\n")
 
+    def _role_label(backend: str, scoring_method: str | None = None) -> str:
+        """백엔드 또는 scoring_method로 Primary/Ablation 레이블 결정."""
+        if scoring_method == "logprob":
+            return "[Primary]"
+        if scoring_method == "self_consistency":
+            return "[Ablation]"
+        return "[Primary]" if backend == "openai" else "[Ablation]"
+
     # ── 실험 1: 에이전트 ──
     h(2, "1. LangGraph 에이전트 실험")
     agent = summary.get("agent", {})
     if agent:
-        lines.append(row("Backend", "Accuracy", "Safety Recall", "Over-Esc. Rate",
+        lines.append(row("Backend", "Role", "Accuracy", "Safety Recall", "Over-Esc. Rate",
                          "Escalation Rate", "Avg Tool Calls", "Avg Iters", "Coverage"))
-        lines.append(sep(10, 10, 14, 16, 16, 16, 10, 10))
+        lines.append(sep(10, 11, 10, 14, 16, 16, 16, 10, 10))
         for backend, s in agent.items():
+            role = _role_label(backend, s.get("scoring_method"))
             lines.append(row(
                 backend,
+                role,
                 _fmt(s.get("accuracy")),
                 _fmt(s.get("safety_recall")),
                 _fmt(s.get("over_escalation_rate")),
@@ -424,17 +434,18 @@ def build_markdown_report(summary: dict) -> str:
     h(2, "2. 베이스라인 비교 실험")
     baseline = summary.get("baseline", {})
     if baseline:
-        lines.append(row("Backend", "전략", "Safety Recall", "Over-Esc. Rate",
+        lines.append(row("Backend", "Role", "전략", "Safety Recall", "Over-Esc. Rate",
                          "TP", "FN", "FP", "TN", "OK(≥0.95)"))
-        lines.append(sep(10, 22, 14, 16, 4, 4, 4, 4, 10))
+        lines.append(sep(10, 11, 22, 14, 16, 4, 4, 4, 4, 10))
         for backend, strategies in baseline.items():
+            role = _role_label(backend)
             for strategy, m in strategies.items():
                 if "error" in m:
-                    lines.append(row(backend, strategy, "오류", "", "", "", "", "", ""))
+                    lines.append(row(backend, role, strategy, "오류", "", "", "", "", "", ""))
                     continue
                 ok = "✓" if m.get("safety_recall_ok") else "✗"
                 lines.append(row(
-                    backend, strategy,
+                    backend, role, strategy,
                     _fmt(m.get("safety_recall")),
                     _fmt(m.get("over_escalation_rate")),
                     m.get("tp", ""), m.get("fn", ""), m.get("fp", ""), m.get("tn", ""),
