@@ -4,12 +4,12 @@ UASEF — 순차 파이프라인 실험 실행기
 실험 구조:
   [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
              token-level logprobs로 비적합 점수 계산. 논문 주요 결과.
-  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
-             N회 쿼리의 Jaccard 다양성으로 비적합 점수 계산.
-             "블랙박스 LLM에도 UASEF 적용 가능함"을 검증하는 ablation study.
+  [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
+             LM Studio의 OpenAI-compatible API를 통해 token-level logprobs 추출.
+             "로컬 GGUF 모델에도 UASEF logprob CP 적용 가능함"을 검증하는 ablation study.
 
-  두 방식 모두 CP coverage 보장(P(s≤q̂)≥1-α)은 수학적으로 성립하지만,
-  비적합 함수가 달라 결과를 직접 수치 비교하지 않습니다.
+  두 백엔드 모두 동일한 logprob 비적합 함수를 사용하며,
+  CP coverage 보장(P(s≤q̂)≥1-α)이 수학적으로 성립합니다.
 
 실행 방법:
     # Primary + Ablation 전체 실험 (권장)
@@ -18,7 +18,7 @@ UASEF — 순차 파이프라인 실험 실행기
     # Primary만 (OpenAI logprob)
     python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
 
-    # Ablation만 (로컬 self_consistency)
+    # Ablation만 (로컬 logprob)
     python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
     # 시나리오별 config 적용
@@ -171,10 +171,10 @@ BACKENDS = ["openai", "lmstudio"]  # Primary(openai) → Ablation(lmstudio) 순
 def _scoring_method_for(backend: str) -> str:
     """백엔드별 기본 scoring method 선택.
 
-    Primary:  openai   → logprob          (token-level logprobs 활용)
-    Ablation: 로컬     → self_consistency  (logprobs 불필요)
+    Primary:  openai        → logprob  (token-level logprobs 활용)
+    Ablation: lmstudio GGUF → logprob  (LM Studio OpenAI-compatible API 지원)
     """
-    return "logprob" if backend == "openai" else "self_consistency"
+    return "logprob"
 
 
 # ── 평가 지표 계산 ──────────────────────────────────────────────────────────────
@@ -370,13 +370,13 @@ def save_results(results: dict) -> None:
         # 터미널 요약
         print("\n" + "="*80)
         print("  최종 비교 요약")
-        print("  [Primary] OpenAI — logprob-based CP  |  [Ablation] 로컬 — self_consistency CP")
+        print("  [Primary] OpenAI — logprob-based CP  |  [Ablation] LMStudio GGUF — logprob-based CP")
         print("="*80)
         print(f"{'Backend':<12} {'Role':<12} {'Scenario':<18} {'Safety R.':<12} "
               f"{'Over-Esc.':<12} {'Coverage':<10} {'Latency(ms)'}")
         print("-"*80)
         for r in rows:
-            role = "[Primary]" if r.get("scoring_method") == "logprob" else "[Ablation]"
+            role = "[Primary]" if r.get("backend") == "openai" else "[Ablation]"
             print(f"{r['backend']:<12} {role:<12} {r['scenario']:<18} "
                   f"{str(r['safety_recall']):<12} {str(r['over_escalation_rate']):<12} "
                   f"{str(r['conformal_coverage']):<10} {r['avg_latency_ms']}")
@@ -404,7 +404,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scoring-method", type=str, default=None,
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     args = parser.parse_args()
 
