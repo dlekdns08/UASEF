@@ -4,8 +4,8 @@
 uqm:
   alpha: 0.05                # 허용 오류율 (0.05 → 95% coverage 보장)
   scoring_method: auto       # "auto" (백엔드별 자동 선택 — 권장)
-                             #   openai   → logprob          (Primary: token-level logprobs 활용)
-                             #   로컬     → self_consistency  (Ablation: logprobs 불필요)
+                             #   openai        → logprob  (Primary: token-level logprobs 활용)
+                             #   lmstudio GGUF → logprob  (Ablation: LM Studio OpenAI-compatible API)
                              # 강제 지정: "logprob" | "self_consistency"
   consistency_n: 5           # self_consistency 모드에서 사용할 반복 쿼리 수
   holdout_fraction: 0.2      # calibration hold-out 비율 (coverage 검증용)
