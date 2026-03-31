@@ -9,8 +9,8 @@ UASEF 전체 실험 통합 실행기
 
 실험 구조:
   [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP  (논문 주요 결과)
-  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
-             "블랙박스 LLM에도 UASEF 적용 가능함" 검증용 ablation study.
+  [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
+             "로컬 GGUF 모델에도 UASEF logprob CP 적용 가능함" 검증용 ablation study.
 
   두 결과는 Markdown 보고서에서 명시적으로 구분됩니다.
   비적합 함수가 달라 수치를 직접 비교하지 않습니다.
@@ -396,15 +396,11 @@ def build_markdown_report(summary: dict) -> str:
                  f"**n_medabstain**: {cfg['n_medabstain']} | **n_pareto_test**: {cfg['n_pareto_test']}")
     lines.append(f"\n> **실험 구조**")
     lines.append(f"> - `[Primary]` **OpenAI** — logprob-based CP: token-level logprobs 기반 비적합 점수. **논문 주요 결과.**")
-    lines.append(f"> - `[Ablation]` **LMStudio** — self_consistency-based CP: N회 쿼리 Jaccard 다양성 기반. 블랙박스 LLM 적용 가능성 검증.")
-    lines.append(f"> - 두 방식의 수치는 비적합 함수 차이로 직접 비교하지 않습니다. 각각 독립적으로 CP coverage를 검증합니다.\n")
+    lines.append(f"> - `[Ablation]` **LMStudio GGUF** — logprob-based CP: LM Studio OpenAI-compatible API를 통해 token-level logprobs 추출. 로컬 GGUF 모델 적용 가능성 검증.")
+    lines.append(f"> - 두 백엔드 모두 동일한 logprob 비적합 함수를 사용합니다. 모델 차이에 의한 성능 비교가 가능합니다.\n")
 
     def _role_label(backend: str, scoring_method: str | None = None) -> str:
-        """백엔드 또는 scoring_method로 Primary/Ablation 레이블 결정."""
-        if scoring_method == "logprob":
-            return "[Primary]"
-        if scoring_method == "self_consistency":
-            return "[Ablation]"
+        """백엔드로 Primary/Ablation 레이블 결정. 두 백엔드 모두 logprob 사용."""
         return "[Primary]" if backend == "openai" else "[Ablation]"
 
     # ── 실험 1: 에이전트 ──
@@ -629,7 +625,7 @@ def main() -> None:
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     parser.add_argument("--alpha", type=float, default=0.05,
                         help="Conformal prediction α")
@@ -656,7 +652,7 @@ def main() -> None:
     _section("UASEF 전체 실험 통합 실행")
     print(f"  Backend      : {args.backend or 'all (openai[Primary] + lmstudio[Ablation])'}")
     print(f"  Scoring      : {args.scoring_method}  "
-          f"{'(auto → openai=logprob, 로컬=self_consistency)' if args.scoring_method == 'auto' else ''}")
+          f"{'(auto → openai=logprob, lmstudio=logprob)' if args.scoring_method == 'auto' else ''}")
     print(f"  α            : {args.alpha}")
     print(f"  n_cal        : {args.n_cal}")
     print(f"  n_test       : {args.n_test}  (에이전트·베이스라인)")
