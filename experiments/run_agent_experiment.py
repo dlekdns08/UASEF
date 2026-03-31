@@ -6,7 +6,7 @@ UASEF Agent Experiment — LangGraph 에이전트 실험 실행기
 
 실험 구조:
   [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
-  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+  [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
   (--scoring-method으로 강제 지정 가능)
 
 실행:
@@ -16,7 +16,7 @@ UASEF Agent Experiment — LangGraph 에이전트 실험 실행기
     # Primary만 (OpenAI logprob)
     python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
 
-    # Ablation만 (로컬 self_consistency)
+    # Ablation만 (로컬 logprob)
     python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
 출력:
@@ -72,8 +72,8 @@ BACKENDS = ["openai", "lmstudio"]  # Primary(openai) → Ablation(lmstudio) 순
 
 
 def _scoring_method_for(backend: str) -> str:
-    """Primary: openai → logprob / Ablation: 로컬 → self_consistency"""
-    return "logprob" if backend == "openai" else "self_consistency"
+    """Primary: openai → logprob / Ablation: lmstudio GGUF → logprob"""
+    return "logprob"
 
 
 # ── 보조 함수 ─────────────────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     parser.add_argument("--alpha", type=float, default=0.05, help="Conformal prediction α (기본: 0.05)")
     parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
