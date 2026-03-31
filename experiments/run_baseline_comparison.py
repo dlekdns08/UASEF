@@ -10,7 +10,7 @@ UASEF 베이스라인 비교 실험.
 
 실험 구조:
   [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
-  [Ablation] 로컬 (LMStudio)      — self_consistency-based CP
+  [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
 
 ⚠ 계획서의 Temperature Scaling / MC Dropout은 현재 미구현.
   향후 추가 시 아래 BaselineScorer 인터페이스를 준수하면 됩니다:
@@ -23,7 +23,7 @@ UASEF 베이스라인 비교 실험.
     # Primary (OpenAI logprob)
     python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
 
-    # Ablation (로컬 self_consistency)
+    # Ablation (로컬 logprob)
     python experiments/run_baseline_comparison.py --backend lmstudio --n-cal 500 --n-test 50
 
     # Primary + Ablation 모두
@@ -120,8 +120,8 @@ _SPECIALTY_MAP = {
 
 
 def _scoring_method_for(backend: str) -> str:
-    """Primary: openai → logprob / Ablation: 로컬 → self_consistency"""
-    return "logprob" if backend == "openai" else "self_consistency"
+    """Primary: openai → logprob / Ablation: lmstudio GGUF → logprob"""
+    return "logprob"
 
 
 def run_baseline_comparison(
@@ -309,7 +309,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, 로컬=self_consistency)",
+        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
