@@ -196,13 +196,13 @@ q̂ = s_{(⌈(n+1)(1-α)⌉)}  ← n번째 순위 점수
 #### Scoring Method 비교
 
 | 방식 | 수식 | 특징 | 논문 위치 |
-|------|------|------|----------|
-| **logprob** (Primary) | `s = -mean(token logprobs)` | CP 보장 ✓, 단일 쿼리 | 주요 기여 |
-| **self_consistency** (Ablation) | `s = Jaccard_diversity × 5` | CP 보장 ✓, N회 쿼리 | Ablation study |
+| ---- | ---- | ---- | --------- |
+| **logprob** (Primary + Ablation) | `s = -mean(token logprobs)` | CP 보장 ✓, 단일 쿼리 | 주요 기여 + Ablation |
+| **self_consistency** (대안) | `s = Jaccard_diversity × 5` | CP 보장 ✓, N회 쿼리, logprobs 불필요 | 블랙박스 LLM 호환용 |
 | **auto** | 런타임 감지 | 재현성 저하 위험 | 비권장 |
 
-> **왜 logprob이 Primary인가?**
-> 자연어 다양성보다 모델 내부 확률 분포가 CP의 교환가능성 가정에 더 적합하며, 단일 쿼리로 score와 답변을 동시에 얻어 비용과 지연을 절반으로 줄입니다.
+> **왜 logprob이 Primary이고 Ablation 모두인가?**
+> LM Studio의 OpenAI-compatible API는 token-level logprobs를 지원하므로, OpenAI와 로컬 GGUF 모델 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, 로컬 환경에서도 CP coverage 보장이 성립함을 검증하는 것입니다. `self_consistency`는 logprobs를 지원하지 않는 Claude API, Gemini API 등에 적용할 수 있는 대안입니다.
 
 #### 엔트로피 계산
 
@@ -252,10 +252,10 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 
 | scoring_method | logprobs 필요 | 적용 가능 LLM | 논문 위치 |
 | --- | --- | --- | --- |
-| `logprob` (Primary) | 필수 | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | 주요 기여 |
-| `self_consistency` (Ablation) | 불필요 | 모든 LLM | Ablation study |
+| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | 주요 기여 + Ablation |
+| `self_consistency` (대안) | 불필요 | 모든 LLM | 블랙박스 LLM 호환용 |
 
-> "블랙박스 LLM 적용 가능"은 `self_consistency` 방식에만 해당합니다. `logprob` 방식은 token-level logprobs를 지원하지 않는 Claude API, Gemini API, Cohere 등에서 `ValueError`가 발생합니다.
+> `logprob` 방식은 token-level logprobs를 지원하지 않는 Claude API, Gemini API, Cohere 등에서 `ValueError`가 발생합니다. 이런 환경에서는 `self_consistency`를 사용하세요. LM Studio는 OpenAI-compatible API로 logprobs를 지원하므로 Primary와 동일한 방식을 사용합니다.
 
 ---
 
@@ -564,12 +564,12 @@ LangGraph 에이전트 없이 UQM → RTC → EDE를 순서대로 실행하는 *
 
 #### 실험 구조
 
-| 구분           | 백엔드                                       | Scoring Method                                          | 논문 위치                          |
-|----------------|----------------------------------------------|---------------------------------------------------------|------------------------------------|
-| **[Primary]**  | OpenAI (GPT-4o-mini)                         | `logprob` — token-level logprobs 기반 CP                | 주요 결과                          |
-| **[Ablation]** | LMStudio (로컬, meta-llama-3.1-8b-instruct)  | `self_consistency` — N회 쿼리 Jaccard 다양성 기반 CP    | "블랙박스 LLM 적용 가능성" 검증    |
+| 구분 | 백엔드 | Scoring Method | 논문 위치 |
+| ---- | ------ | -------------- | --------- |
+| **[Primary]** | OpenAI (GPT-4o-mini) | `logprob` — token-level logprobs 기반 CP | 주요 결과 |
+| **[Ablation]** | LMStudio (로컬, meta-llama-3.1-8b-instruct) | `logprob` — LM Studio OpenAI-compatible API로 token-level logprobs 추출 | "로컬 GGUF 모델에도 logprob CP 적용 가능" 검증 |
 
-> 두 방식의 수치는 직접 비교하지 않습니다. 비적합 함수가 다르므로 각각 독립적으로 CP coverage를 검증합니다.
+> 두 백엔드 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, **LM Studio의 OpenAI-compatible API를 통해 로컬 GGUF 모델에서도 token-level logprobs를 추출할 수 있음**을 검증하는 것입니다.
 
 - 시나리오: Emergency / Rare Disease / Multimorbidity
 
@@ -849,7 +849,7 @@ python experiments/run_all_experiments.py --backend openai
 python experiments/run_all_experiments.py --backend openai \
     --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
 
-# [Primary + Ablation] 논문 최종 실행 (openai=logprob, lmstudio=self_consistency 자동 선택)
+# [Primary + Ablation] 논문 최종 실행 (openai=logprob, lmstudio=logprob 자동 선택)
 python experiments/run_all_experiments.py --n-cal 500 --n-test 50
 
 # 특정 실험 건너뛰기
@@ -869,7 +869,7 @@ python experiments/run_experiment.py --n-cal 500 --n-test 50
 # [Primary] OpenAI만 (logprob)
 python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
 
-# [Ablation] 로컬만 (self_consistency)
+# [Ablation] 로컬만 (logprob via LM Studio)
 python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
 
 # 시나리오별 config 적용
@@ -938,7 +938,7 @@ print_recommendations(recs)
 # 모델 연결 확인 (logprobs 지원 여부 포함)
 python models/model_interface.py
 
-# UQM 단독 (logprob vs self_consistency 비교)
+# UQM 단독 (logprob 동작 확인, self_consistency 비교 가능)
 python models/uqm.py
 
 # RTC + EDE 단독 (가상 UncertaintyResult로 트리거 확인)
@@ -974,10 +974,10 @@ python models/rtc_ede.py
 
 ### Primary / Ablation 구조
 
-| 구분           | 백엔드      | `scoring_method`    | 논문 섹션      |
-|----------------|-------------|---------------------|----------------|
-| **[Primary]**  | `openai`    | `logprob`           | Main Results   |
-| **[Ablation]** | `lmstudio`  | `self_consistency`  | Ablation Study |
+| 구분 | 백엔드 | `scoring_method` | 논문 섹션 |
+| ---- | ------ | ---------------- | --------- |
+| **[Primary]** | `openai` | `logprob` | Main Results |
+| **[Ablation]** | `lmstudio` | `logprob` | Ablation Study |
 
 ### 권장 Config
 
@@ -985,7 +985,7 @@ python models/rtc_ede.py
 # experiments/configs/base_config.yaml
 uqm:
   alpha: 0.05
-  scoring_method: auto       # openai=logprob(Primary), 로컬=self_consistency(Ablation) 자동 선택
+  scoring_method: auto       # openai=logprob(Primary), lmstudio=logprob(Ablation) 자동 선택
   holdout_fraction: 0.2
 data:
   n_calibration: 500         # CP 보장 실용 하한
@@ -1016,9 +1016,9 @@ ede:
 
 ### 논문 서술 주의사항
 
-- **Primary와 Ablation의 수치를 같은 테이블에서 직접 비교하지 마세요.** 비적합 함수(s(x))가 달라 스케일이 다릅니다.
-- Ablation 섹션에서 명시적으로 기술: *"We use self-consistency-based nonconformity scores for local models, as they do not expose token-level log probabilities. CP coverage guarantees hold independently for both methods."*
-- Primary 결과가 논문 주요 주장의 근거가 됩니다. Ablation은 "framework generalizability"를 보이는 보조 증거입니다.
+- Primary와 Ablation 모두 동일한 `logprob` 비적합 함수를 사용하므로 수치를 같은 테이블에서 비교할 수 있습니다. 단, 모델(GPT-4o-mini vs 로컬 GGUF)이 다르므로 nonconformity score의 절대값 스케일 차이는 존재합니다.
+- Ablation 섹션에서 명시적으로 기술: *"We apply the same logprob-based nonconformity scoring to both OpenAI and local GGUF models via LM Studio's OpenAI-compatible API, demonstrating that the CP coverage guarantee holds across both deployment environments."*
+- Primary 결과가 논문 주요 주장의 근거가 됩니다. Ablation은 "로컬 GGUF 모델에서도 동일한 logprob CP 적용 가능"을 보이는 보조 증거입니다.
 
 ### CP 이론 보증 (Angelopoulos & Bates, 2021)
 
