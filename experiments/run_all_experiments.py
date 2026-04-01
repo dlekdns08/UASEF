@@ -403,6 +403,14 @@ def build_markdown_report(summary: dict) -> str:
         """백엔드로 Primary/Ablation 레이블 결정. 두 백엔드 모두 logprob 사용."""
         return "[Primary]" if backend == "openai" else "[Ablation]"
 
+    def _role_label(backend: str, scoring_method: str | None = None) -> str:
+        """백엔드 또는 scoring_method로 Primary/Ablation 레이블 결정."""
+        if scoring_method == "logprob":
+            return "[Primary]"
+        if scoring_method == "self_consistency":
+            return "[Ablation]"
+        return "[Primary]" if backend == "openai" else "[Ablation]"
+
     # ── 실험 1: 에이전트 ──
     h(2, "1. LangGraph 에이전트 실험")
     agent = summary.get("agent", {})
