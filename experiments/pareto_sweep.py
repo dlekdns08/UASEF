@@ -38,6 +38,7 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_scenarios
+from experiments.config_utils import load_calibration_config
 
 try:
     import matplotlib
@@ -94,7 +95,8 @@ def measure_pareto_point(
     )
     actual_coverage = coverage_report.get("actual_coverage", 1 - alpha)
 
-    rtc = RTC(base_threshold=uqm.calibrator.threshold)
+    rtc_multipliers, _ = load_calibration_config()
+    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
     rtc_config = rtc.get_threshold(specialty, scenario_type)
 
     escalations = []

@@ -54,6 +54,7 @@ from data.loader import (
     load_scenarios,
     case_to_agent_dict,
 )
+from experiments.config_utils import load_calibration_config
 
 
 # ── 실험 데이터셋 — MedQA / MedAbstain ────────────────────────────────────────
@@ -126,6 +127,8 @@ def run_backend_experiment(
     base_threshold = uqm.calibrator.threshold
     print(f"\n[2/3] 에이전트 그래프 준비 완료 (base_threshold={base_threshold:.4f})")
 
+    rtc_multipliers, ede_kwargs = load_calibration_config()
+
     # Step 3: 시나리오별 실행
     print(f"\n[3/3] {len(agent_scenarios)}개 시나리오 실행...")
     case_results = []
@@ -142,8 +145,8 @@ def run_backend_experiment(
         # 시나리오별 컴포넌트 생성 (specialty/scenario_type 반영)
         components = AgentComponents(
             uqm=uqm,
-            rtc=RTC(base_threshold=base_threshold),
-            ede=EDE(),
+            rtc=RTC(base_threshold=base_threshold, multipliers=rtc_multipliers),
+            ede=EDE(**ede_kwargs),
             backend=backend,
             specialty=specialty,
             scenario_type=scenario_type,
