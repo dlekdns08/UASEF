@@ -53,7 +53,7 @@ def grid_search_ede_coefficients(
             "grid_results": list[dict]   # 전체 grid 결과 (appendix용)
         }
     """
-    best: dict = {"f1_safety": -1.0}
+    best: dict = {"best_f1_safety": -1.0}
     grid_results: list[dict] = []
 
     for w_t1, w_ent in iproduct(T1_WEIGHT_CANDIDATES, ENTROPY_BOOST_CANDIDATES):
@@ -83,7 +83,7 @@ def grid_search_ede_coefficients(
         }
         grid_results.append(row)
 
-        if f1 > best["f1_safety"]:
+        if f1 > best["best_f1_safety"]:
             best = {
                 "best_t1_weight": w_t1,
                 "best_entropy_boost": w_ent,
