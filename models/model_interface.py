@@ -37,7 +37,13 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
         # LMStudio에 로드된 모델명 — 실제 로드된 모델로 수정하세요
         model_name = os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct")
     elif backend == "openai":
-        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env` "
+                "(note: `NAI_API_KEY` is not used)."
+            )
+        client = OpenAI(api_key=api_key)
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     elif backend == "mlx":
         # mlx-lm 서버: python -m mlx_lm.server --model <model> --port 8080
