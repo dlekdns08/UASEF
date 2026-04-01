@@ -50,6 +50,7 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_scenarios, case_to_experiment_dict
+from experiments.config_utils import load_calibration_config
 
 
 # ── 베이스라인 에스컬레이션 함수 ──────────────────────────────────────────────────
@@ -151,8 +152,9 @@ def run_baseline_comparison(
         print(f"  [SKIP] UQM 보정 실패: {e}")
         return {}
 
-    rtc = RTC(base_threshold=uqm.calibrator.threshold)
-    ede = EDE()
+    rtc_multipliers, ede_kwargs = load_calibration_config()
+    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
+    ede = EDE(**ede_kwargs)
 
     # 테스트 케이스 로드
     print(f"\n[2/3] 테스트 케이스 로드 중 (n_per_scenario={n_test})...")
