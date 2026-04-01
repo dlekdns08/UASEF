@@ -1,48 +1,27 @@
-# UASEF 기본 실험 설정
-# 시나리오별 config가 이 파일의 값을 선택적으로 오버라이드합니다.
-
 uqm:
-  alpha: 0.05                # 허용 오류율 (0.05 → 95% coverage 보장)
-  scoring_method: auto       # "auto" (백엔드별 자동 선택 — 권장)
-                             #   openai        → logprob  (Primary: token-level logprobs 활용)
-                             #   lmstudio GGUF → logprob  (Ablation: LM Studio OpenAI-compatible API)
-                             # 강제 지정: "logprob" | "self_consistency"
-  consistency_n: 5           # self_consistency 모드에서 사용할 반복 쿼리 수
-  holdout_fraction: 0.2      # calibration hold-out 비율 (coverage 검증용)
-
+  alpha: 0.05
+  scoring_method: auto
+  consistency_n: 5
+  holdout_fraction: 0.2
 data:
-  n_calibration: 30          # calibration 질문 수 (논문 권장: ≥500)
-  n_test_per_scenario: 3     # 시나리오별 테스트 케이스 수 (논문 권장: ≥50)
+  n_calibration: 30
+  n_test_per_scenario: 3
   calibration_split: train
   test_split: test
   seed: 42
-  distribution_source: medqa # calibration 분포 식별자 (distribution shift 경고에 사용)
-  include_pubmedqa: false    # true 설정 시 PubMedQA "maybe" 케이스를 rare_disease에 추가
-
+  distribution_source: medqa
+  include_pubmedqa: false
 backends:
-  - lmstudio
-  - openai
-
+- lmstudio
+- openai
 output:
   results_dir: results
-
-# ── 데이터 기반 캘리브레이션 결과 ─────────────────────────────────────────────────
-# 아래 값은 run_calibration_pipeline.py 실행 시 자동으로 갱신됩니다.
-# 직접 편집하지 마세요 — 파이프라인 출력으로 덮어씁니다.
-#
-# 실행: python experiments/run_calibration_pipeline.py --n-cal 500 --n-labeled 50
-
-# RTC 위험도별 배율 (rtc_calibration.py Pareto sweep 결과)
 rtc:
-  CRITICAL: 0.60
-  HIGH: 0.75
-  MODERATE: 1.00
-  LOW: 1.30
-
-# 엔트로피 임계값 (entropy_calibration.py Youden's J 결과, nats/token)
-entropy_threshold: 2.0
-
-# EDE confidence 계수 (ede_coefficient_search.py grid search 결과)
+  CRITICAL: 0.5
+  HIGH: 0.7
+  MODERATE: 0.9
+  LOW: 1.2
+entropy_threshold: 0.6045
 ede:
-  t1_weight: 0.40
-  entropy_boost: 0.15
+  t1_weight: 0.2
+  entropy_boost: 0.05
