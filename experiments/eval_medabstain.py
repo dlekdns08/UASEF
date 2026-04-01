@@ -39,6 +39,7 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_medabstain_cases
+from experiments.config_utils import load_calibration_config
 
 try:
     from scipy.stats import roc_auc_score  # type: ignore
@@ -231,8 +232,9 @@ def run_medabstain_eval(
         print(f"  [SKIP] UQM 보정 실패: {e}")
         return {}
 
-    rtc = RTC(base_threshold=uqm.calibrator.threshold)
-    ede = EDE()
+    rtc_multipliers, ede_kwargs = load_calibration_config()
+    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
+    ede = EDE(**ede_kwargs)
 
     # Step 2: MedAbstain 케이스 로드
     print(f"\n[2/3] MedAbstain 로드 중 ({variants})...")
