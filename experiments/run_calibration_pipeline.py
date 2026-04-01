@@ -28,9 +28,11 @@ from pathlib import Path
 from datetime import datetime
 
 import yaml
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env")
 
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE, SPECIALTY_RISK_MAP, RiskLevel
