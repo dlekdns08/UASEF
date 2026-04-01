@@ -252,14 +252,28 @@ def run_experiment(cfg: dict) -> dict:
             print(f"  [SKIP] UQM 보정 실패: {e}")
             continue
 
-        # Step 2: RTC 설정
+        # Step 2: RTC 설정 (config 기반 배율 주입)
+        rtc_multipliers = cfg.get("rtc")  # base_config.yaml rtc 섹션 (캘리브레이션 결과)
         print(f"\n[2/4] RTC 설정 (base_threshold={base_threshold:.4f})...")
-        rtc = RTC(base_threshold=base_threshold)
+        if rtc_multipliers:
+            print(f"  배율 출처: base_config.yaml (데이터 기반)")
+        else:
+            print(f"  배율 출처: 모듈 기본값 RISK_THRESHOLD_MULTIPLIER")
+        rtc = RTC(base_threshold=base_threshold, multipliers=rtc_multipliers)
+
+        # EDE 계수 로드 (config 기반)
+        ede_cfg = cfg.get("ede", {})
+        entropy_threshold = cfg.get("entropy_threshold", 2.0)
+        ede_kwargs = {
+            "t1_weight": ede_cfg.get("t1_weight", 0.4),
+            "entropy_boost": ede_cfg.get("entropy_boost", 0.15),
+            "entropy_threshold": entropy_threshold,
+        }
 
         # Step 3: 각 시나리오 실험
         for scenario_name, scenario_cfg in scenarios.items():
             print(f"\n[3/4] 시나리오: {scenario_name}")
-            ede = EDE()
+            ede = EDE(**ede_kwargs)
             case_results = []
 
             rtc_config = rtc.get_threshold(
@@ -323,6 +337,8 @@ def run_experiment(cfg: dict) -> dict:
             "scoring_method": uqm.active_scoring_method,
             "distribution_source": dist_source,
             "uqm_config": uqm_cfg,
+            "rtc_multipliers": {k.value: v for k, v in rtc._multipliers.items()},
+            "ede_config": ede_kwargs,
             "scenarios": backend_results,
         }
 
