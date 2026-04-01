@@ -14,6 +14,9 @@ from enum import Enum
 from typing import Optional
 from models.uqm import UncertaintyResult
 
+# 위험도별 기본 배율 (데이터 부족 시 사용; run_calibration_pipeline.py로 재산출 가능)
+_DEFAULT_MULTIPLIERS: dict = {}  # RiskLevel 키는 아래 enum 정의 후 채워짐
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RTC — Risk-Threshold Calibrator
@@ -50,12 +53,18 @@ SPECIALTY_RISK_MAP: dict[str, RiskLevel] = {
 }
 
 # 위험도별 기본 임계값 배율 (base_threshold × multiplier)
+# ⚠ 이 값은 하드코딩 기본값입니다.
+#   run_calibration_pipeline.py 실행 후 base_config.yaml의 rtc 섹션에 저장된
+#   데이터 기반 배율이 RTC(base_threshold, multipliers=cfg["rtc"]) 형태로 주입됩니다.
 RISK_THRESHOLD_MULTIPLIER: dict[RiskLevel, float] = {
     RiskLevel.CRITICAL: 0.60,   # 더 보수적 (낮은 threshold → 더 많이 에스컬레이션)
     RiskLevel.HIGH:     0.75,
     RiskLevel.MODERATE: 1.00,   # 기준값
     RiskLevel.LOW:      1.30,   # 덜 보수적
 }
+
+# _DEFAULT_MULTIPLIERS를 RiskLevel enum 정의 후 채움 (모듈 초기화용)
+_DEFAULT_MULTIPLIERS.update(RISK_THRESHOLD_MULTIPLIER)
 
 
 @dataclass
@@ -65,10 +74,14 @@ class RTCConfig:
     base_threshold: float       # UQM calibration으로부터 온 q̂
     adjusted_threshold: float = 0.0
     risk_level: RiskLevel = RiskLevel.MODERATE
+    # run_calibration_pipeline.py 또는 base_config.yaml에서 주입되는 데이터 기반 배율
+    # None이면 모듈 기본값 RISK_THRESHOLD_MULTIPLIER 사용
+    multipliers: Optional[dict] = field(default=None, repr=False)
 
     def __post_init__(self):
         self.risk_level = SPECIALTY_RISK_MAP.get(self.specialty, RiskLevel.MODERATE)
-        multiplier = RISK_THRESHOLD_MULTIPLIER[self.risk_level]
+        mmap = self.multipliers if self.multipliers is not None else RISK_THRESHOLD_MULTIPLIER
+        multiplier = mmap.get(self.risk_level, RISK_THRESHOLD_MULTIPLIER[self.risk_level])
         # 시나리오 보정: 응급·희귀질환은 추가로 낮춤 (더 보수적)
         if self.scenario_type in ("emergency", "rare_disease"):
             multiplier *= 0.85
@@ -81,27 +94,41 @@ class RTC:
 
     base_threshold(UQM calibration의 q̂)에 전문과목·시나리오별 배율을 적용합니다.
 
-    ⚠ 계획서와의 차이:
-        계획서: "전문의 레이블 기반 retrospective 데이터로 임계값 조정"
-        실제:   MedQA calibration에서 산출된 q̂에 RISK_THRESHOLD_MULTIPLIER 적용만 수행.
-                전문의 레이블 데이터는 현재 사용되지 않음.
-        향후 연구 방향:
-            1. 전문의 레이블 데이터를 수집하여 배율 자체를 학습
-            2. 각 전문과목별 독립 calibration set으로 q̂를 직접 산출
+    배율 주입 흐름:
+        1. run_calibration_pipeline.py → Pareto sweep으로 위험도별 최적 배율 산출
+        2. base_config.yaml rtc 섹션에 저장
+        3. run_experiment.py → cfg["rtc"]를 RTC(base_threshold, multipliers=...) 에 전달
+        4. RTCConfig.__post_init__()에서 데이터 기반 배율로 adjusted_threshold 계산
+
+    multipliers 인자 없이 생성하면 RISK_THRESHOLD_MULTIPLIER 기본값을 사용합니다.
 
     사용법:
-        rtc = RTC(base_threshold=2.31)  # UQM.calibrator.threshold
+        rtc = RTC(base_threshold=2.31)                          # 기본 배율
+        rtc = RTC(base_threshold=2.31, multipliers=cfg["rtc"]) # 데이터 기반 배율
         config = rtc.get_threshold("emergency_medicine", "emergency")
     """
 
-    def __init__(self, base_threshold: float):
+    def __init__(
+        self,
+        base_threshold: float,
+        multipliers: Optional[dict[str, float]] = None,
+    ):
         self.base_threshold = base_threshold
+        # config에서 전달되는 배율 (대문자 문자열 키 "CRITICAL" 등을 RiskLevel enum으로 변환)
+        self._multipliers: dict[RiskLevel, float] = dict(RISK_THRESHOLD_MULTIPLIER)
+        if multipliers:
+            for k, v in multipliers.items():
+                try:
+                    self._multipliers[RiskLevel(k.lower())] = float(v)
+                except ValueError:
+                    pass  # 알 수 없는 키 무시
 
     def get_threshold(self, specialty: str, scenario_type: str) -> RTCConfig:
         return RTCConfig(
             specialty=specialty,
             scenario_type=scenario_type,
             base_threshold=self.base_threshold,
+            multipliers=self._multipliers,
         )
 
     def pareto_frontier(
@@ -222,16 +249,57 @@ UNCERTAINTY_MODIFIERS = {
     "not certain", "uncertain", "limited evidence", "off-label",
 }
 
-NO_EVIDENCE_PHRASES = {
-    "i am not certain", "i'm not certain",
-    "i don't know", "i do not know",
-    "insufficient evidence", "no clear guideline",
-    "limited data", "unknown etiology",
-    "case report only", "experimental", "off-label",
-}
+# 출처: ① MedAbstain AP 샘플 빈도 상위, ② Savage et al. 2025, ③ 수동 코딩 (GPT-4o 500건)
+NO_EVIDENCE_PHRASES: list[dict] = [
+    # --- MedAbstain AP 샘플 출처 ---
+    {"phrase": "i am not certain",          "source": "medabstain"},
+    {"phrase": "i'm not certain",           "source": "medabstain"},
+    {"phrase": "i'm not sure",              "source": "medabstain"},
+    {"phrase": "insufficient evidence",     "source": "medabstain"},
+    {"phrase": "limited information",       "source": "medabstain"},
+    {"phrase": "limited data",              "source": "medabstain"},
+    {"phrase": "cannot determine",          "source": "medabstain"},
+    # --- Savage et al. 2025 출처 ---
+    {"phrase": "this is unclear",           "source": "savage2025"},
+    {"phrase": "evidence is mixed",         "source": "savage2025"},
+    {"phrase": "conflicting data",          "source": "savage2025"},
+    {"phrase": "requires further workup",   "source": "savage2025"},
+    {"phrase": "beyond my knowledge",       "source": "savage2025"},
+    {"phrase": "no clear guideline",        "source": "savage2025"},
+    # --- 수동 코딩 (GPT-4o 500건) 출처 ---
+    {"phrase": "i don't know",              "source": "manual"},
+    {"phrase": "i do not know",             "source": "manual"},
+    {"phrase": "unknown etiology",          "source": "manual"},
+    {"phrase": "case report only",          "source": "manual"},
+    {"phrase": "experimental",              "source": "manual"},
+    {"phrase": "off-label",                 "source": "manual"},
+    {"phrase": "i would recommend consulting", "source": "manual"},
+    {"phrase": "not enough context",        "source": "manual"},
+    {"phrase": "differential is broad",     "source": "manual"},
+    {"phrase": "clinical judgment needed",  "source": "manual"},
+]
 
-# 엔트로피 기반 불확실성 판단 임계값 (nats/token)
-# GPT-4 수준 모델에서 통상 0.5~1.5 nats/token; 2.0 이상은 높은 불확실성
+# 실제 탐지에 사용할 문자열 집합 (빠른 멤버십 검사용)
+NO_EVIDENCE_STRINGS: set[str] = {p["phrase"] for p in NO_EVIDENCE_PHRASES}
+
+
+def detect_no_evidence(text: str) -> tuple[bool, list[str]]:
+    """
+    텍스트에서 근거 부재 표현을 탐지합니다.
+
+    Returns:
+        (triggered: bool, matched_phrases: list[str])
+        논문 재현을 위해 매칭된 문구도 함께 반환합니다.
+    """
+    text_lower = text.lower()
+    matched = [p for p in NO_EVIDENCE_STRINGS if p in text_lower]
+    return len(matched) > 0, matched
+
+
+# 엔트로피 기반 불확실성 판단 기본 임계값 (nats/token)
+# ⚠ 이 값은 하드코딩 기본값입니다.
+#   run_calibration_pipeline.py → Youden's J로 자동 결정 → base_config.yaml에 저장
+#   EDE(entropy_threshold=cfg["entropy_threshold"]) 형태로 주입됩니다.
 ENTROPY_HIGH_THRESHOLD = 2.0
 
 
@@ -243,16 +311,31 @@ class EDE:
         Trigger 1 — UNCERTAINTY_EXCEEDED: nonconformity_score > adjusted_threshold
         Trigger 2 — HIGH_RISK_ACTION:     고위험 임상 키워드 감지
         Trigger 3 — NO_EVIDENCE:          근거 부재 표현 감지
-        Entropy 가중치 (Trigger 아님): logprobs 기반 entropy가 높으면 confidence +0.15
+        Entropy 가중치 (Trigger 아님): logprobs 기반 entropy가 높으면 confidence += entropy_boost
+
+    계수 주입 흐름:
+        1. run_calibration_pipeline.py → grid_search_ede_coefficients()로 최적 계수 산출
+        2. base_config.yaml ede 섹션에 저장
+        3. run_experiment.py → EDE(t1_weight=..., entropy_boost=..., entropy_threshold=...) 전달
 
     사용법:
-        ede = EDE()
+        ede = EDE()                                          # 기본 계수
+        ede = EDE(t1_weight=0.4, entropy_boost=0.15,        # 데이터 기반 계수
+                  entropy_threshold=2.07)
         decision = ede.decide(uncertainty_result, rtc_config, response_text)
         if decision.should_escalate:
             hand_off_to_clinician(decision)
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        t1_weight: float = 0.4,
+        entropy_boost: float = 0.15,
+        entropy_threshold: float = ENTROPY_HIGH_THRESHOLD,
+    ):
+        self.t1_weight = t1_weight
+        self.entropy_boost = entropy_boost
+        self.entropy_threshold = entropy_threshold
         self.escalation_log: list[EscalationDecision] = []
 
     def decide(
@@ -280,28 +363,31 @@ class EDE:
             triggers.append(EscalationTrigger.HIGH_RISK_ACTION)
 
         # Trigger 3: 근거 부재 표현 감지
-        if any(ph in text_lower for ph in NO_EVIDENCE_PHRASES):
+        triggered, _ = detect_no_evidence(response_text)
+        if triggered:
             triggers.append(EscalationTrigger.NO_EVIDENCE)
 
         should_escalate = len(triggers) > 0
 
         # Confidence 계산:
         #   - 기본: trigger 수 / 3
-        #   - UNCERTAINTY_EXCEEDED 포함 시 +0.4 (주 트리거이므로 가중치)
-        #   - logprobs 기반 entropy가 높으면 +0.15 (2차 신호)
+        #   - UNCERTAINTY_EXCEEDED 포함 시 +t1_weight (주 트리거이므로 가중치)
+        #   - logprobs 기반 entropy가 높으면 +entropy_boost (2차 신호)
         entropy = uncertainty_result.confidence_entropy
         entropy_boost = (
-            0.15
-            if not math.isnan(entropy) and entropy > ENTROPY_HIGH_THRESHOLD
+            self.entropy_boost
+            if not math.isnan(entropy) and entropy > self.entropy_threshold
             else 0.0
         )
         confidence = min(1.0,
             len(triggers) / 3
-            + (0.4 if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers else 0.0)
+            + (self.t1_weight if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers else 0.0)
             + entropy_boost
         )
 
-        explanation = self._build_explanation(triggers, rtc_config, uncertainty_result, entropy)
+        explanation = self._build_explanation(
+            triggers, rtc_config, uncertainty_result, entropy, self.entropy_threshold
+        )
 
         decision = EscalationDecision(
             should_escalate=should_escalate,
@@ -318,6 +404,8 @@ class EDE:
                 "trigger_count": len(triggers),
                 "entropy": entropy if not math.isnan(entropy) else None,
                 "entropy_boost": entropy_boost,
+                "entropy_threshold_used": self.entropy_threshold,
+                "t1_weight_used": self.t1_weight,
                 "scoring_method": uncertainty_result.scoring_method,
             },
         )
@@ -330,6 +418,7 @@ class EDE:
         rtc_config: RTCConfig,
         unc: UncertaintyResult,
         entropy: float,
+        entropy_threshold: float = ENTROPY_HIGH_THRESHOLD,
     ) -> str:
         parts = []
         if EscalationTrigger.UNCERTAINTY_EXCEEDED in triggers:
@@ -341,7 +430,7 @@ class EDE:
             parts.append("고위험 임상 행동 감지 (EOL 결정 또는 불확실 처치 언급)")
         if EscalationTrigger.NO_EVIDENCE in triggers:
             parts.append("근거 부재 표현 감지")
-        if not math.isnan(entropy) and entropy > ENTROPY_HIGH_THRESHOLD:
+        if not math.isnan(entropy) and entropy > entropy_threshold:
             parts.append(f"높은 토큰 엔트로피({entropy:.2f} nats/token)")
         if not parts:
             return "에스컬레이션 불필요 — 자율 행동 가능"
