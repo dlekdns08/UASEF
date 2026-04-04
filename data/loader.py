@@ -256,10 +256,15 @@ def _load_from_local_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
     """jind11/MedQA 포맷 로컬 JSONL 로드."""
     rows = []
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"[DataLoader] JSONL 파싱 오류 (line {lineno}) — 건너뜀: {e}")
+                continue
 
     rng = random.Random(seed)
     rng.shuffle(rows)
@@ -573,10 +578,15 @@ def _load_mimic_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
     """
     rows = []
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"[DataLoader] JSONL 파싱 오류 (line {lineno}) — 건너뜀: {e}")
+                continue
 
     rng = random.Random(seed)
     rng.shuffle(rows)
