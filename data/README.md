@@ -69,26 +69,44 @@ cp /tmp/MedQA/data/questions/US/4_options/test.jsonl  data/raw/medqa_test.jsonl
 **용도**: 희귀질환·불확실 시나리오 (expected_escalate=True 케이스)
 
 **출처**: Zhu et al., 2023 — "Can LLMs Express Their Uncertainty?"
-**GitHub**: https://github.com/HowieSiao/medabstain
+**GitHub**: https://github.com/sravanthi6m/MedAbstain
 **라이선스**: CC BY 4.0
 
 ### 4가지 변형
 
-| 파일명 | 설명 | expected_escalate |
-|--------|------|-------------------|
-| `medabstain_NA.jsonl` | 정상 + 정상 | False |
-| `medabstain_A.jsonl`  | Abstention (불확실) | True |
-| `medabstain_NAP.jsonl`| 정상 + Perturbed (변형) | True |
-| `medabstain_AP.jsonl` | Abstention + Perturbed | True |
+| UASEF 파일명 | 원본 파일명 | 설명 | expected_escalate |
+|---|---|---|---|
+| `medabstain_NA.jsonl` | `medqa_1_test_noabst.json` | 정상 + 정상 | False |
+| `medabstain_A.jsonl`  | `medqa_1_test_randabst.json` | Abstention (불확실) | False |
+| `medabstain_NAP.jsonl`| `perturbed_medqa_1_test_noabst.json` | 정상 + Perturbed (변형) | True |
+| `medabstain_AP.jsonl` | `perturbed_medqa_1_test_randabst.json` | Abstention + Perturbed | True |
 
 `AP` / `NAP` 변형이 희귀질환 시나리오의 핵심 테스트 소스입니다.
+
+> **주의**: 원본 파일은 JSON 배열 형식입니다. 아래 설치 스크립트가 JSONL로 변환합니다.
 
 ### 수동 설치
 
 ```bash
-git clone https://github.com/HowieSiao/medabstain.git /tmp/medabstain
-cp /tmp/medabstain/data/AP.jsonl  data/raw/medabstain_AP.jsonl
-cp /tmp/medabstain/data/NAP.jsonl data/raw/medabstain_NAP.jsonl
+git clone https://github.com/sravanthi6m/MedAbstain /tmp/medabstain
+cd /tmp/medabstain/data
+
+python3 -c "
+import json, pathlib
+
+mapping = {
+    'perturbed_medqa_1_test_randabst.json': 'medabstain_AP.jsonl',
+    'perturbed_medqa_1_test_noabst.json':   'medabstain_NAP.jsonl',
+    'medqa_1_test_randabst.json':            'medabstain_A.jsonl',
+    'medqa_1_test_noabst.json':              'medabstain_NA.jsonl',
+}
+out_dir = pathlib.Path('$(pwd)/../../UASEF/data/raw')  # 경로 맞게 수정
+for src, dst in mapping.items():
+    rows = json.loads(pathlib.Path(src).read_text())
+    out = out_dir / dst
+    out.write_text('\n'.join(json.dumps(r, ensure_ascii=False) for r in rows))
+    print(f'{src} → {dst} ({len(rows)}개)')
+"
 ```
 
 ---
