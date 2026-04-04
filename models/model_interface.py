@@ -77,6 +77,15 @@ def query_model(
     """
     client, model_name = get_client(backend)
 
+    # null bytes 및 JSON 직렬화를 깨는 제어 문자 제거 (MedQA 등 외부 데이터셋 대응)
+    def _sanitize(text: str) -> str:
+        text = text.replace("\x00", "")
+        text = text.encode("utf-8", errors="ignore").decode("utf-8")
+        return text
+
+    system_prompt = _sanitize(system_prompt)
+    user_prompt = _sanitize(user_prompt)
+
     # mlx-lm 서버는 max_tokens 파라미터를 사용 (max_completion_tokens 미지원)
     token_limit_key = "max_tokens" if backend == "mlx" else "max_completion_tokens"
     kwargs = dict(
