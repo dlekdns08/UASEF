@@ -321,7 +321,7 @@ if __name__ == "__main__":
         choices=["logprob", "self_consistency", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
-    parser.add_argument("--alpha", type=float, default=0.05, help="Conformal prediction α (기본: 0.05)")
+    parser.add_argument("--alpha", type=float, default=0.15, help="Conformal prediction α (기본: 0.15)")
     parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
     parser.add_argument(
         "--include-pubmedqa", action="store_true",
