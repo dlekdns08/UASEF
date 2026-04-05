@@ -269,10 +269,10 @@ adjusted_threshold = q̂ × risk_multiplier × scenario_multiplier
 
 | Risk Level | Default Multiplier | Specialties |
 | ---------- | ----------------- | ----------- |
-| CRITICAL | ×0.60 | Emergency medicine, ICU, trauma surgery |
-| HIGH | ×0.75 | Cardiology, neurology, oncology, cardiothoracic surgery |
-| MODERATE | ×1.00 | Internal medicine, surgery, pediatrics, obstetrics |
-| LOW | ×1.30 | General practice, preventive medicine, dermatology, psychiatry |
+| CRITICAL | ×0.40 | Emergency medicine, ICU, trauma surgery |
+| HIGH | ×0.55 | Cardiology, neurology, oncology, cardiothoracic surgery |
+| MODERATE | ×0.70 | Internal medicine, surgery, pediatrics, obstetrics |
+| LOW | ×1.00 | General practice, preventive medicine, dermatology, psychiatry |
 
 An additional ×0.85 is applied for `emergency` / `rare_disease` scenarios.
 
@@ -577,11 +577,11 @@ The **base pipeline** that runs UQM → RTC → EDE sequentially without a LangG
 # Right overrides left
 
 uqm:
-  alpha: 0.05
+  alpha: 0.15
   scoring_method: logprob
   holdout_fraction: 0.2
 data:
-  n_calibration: 30      # recommended: 500
+  n_calibration: 500     # practical lower bound for CP guarantee
   n_test_per_scenario: 3 # recommended: 50
 ```
 
@@ -609,9 +609,9 @@ The ReAct agent reasons using tools, while UASEF independently determines escala
 
 | Scenario | Specialty | RTC Risk | Threshold Multiplier |
 | -------- | --------- | -------- | -------------------- |
-| emergency | emergency_medicine | CRITICAL | ×0.60 × 0.85 = ×0.51 |
-| rare_disease | neurology | HIGH | ×0.75 × 0.85 = ×0.64 |
-| multimorbidity | internal_medicine | MODERATE | ×1.00 |
+| emergency | emergency_medicine | CRITICAL | ×0.40 × 0.85 = ×0.34 |
+| rare_disease | neurology | HIGH | ×0.55 × 0.85 = ×0.47 |
+| multimorbidity | internal_medicine | MODERATE | ×0.70 |
 
 **Agent graph execution:**
 
@@ -958,7 +958,7 @@ python models/rtc_ede.py
 | `results/medabstain_eval_summary.csv` | `eval_medabstain.py` | Backend × variant summary |
 | `results/pareto_sweep_results.json` | `pareto_sweep.py` | Empirical (coverage, escalation_rate) per α × specialty |
 | `results/pareto_frontier.png` | `pareto_sweep.py` | Trajectory per α + target region visualization |
-| `results/alpha_recommendations.json` | `pareto_sweep.py` | Optimal α per specialty with reasoning |
+| `results/alpha_recommendations.json` | `pareto_sweep.py`, `run_all_experiments.py` | Optimal α per specialty with reasoning |
 | `results/comparison_bar.png` | `visualize_results.py` | Safety Recall / Over-Escalation Rate bar chart per backend |
 | `results/latency_comparison.png` | `visualize_results.py` | Local vs cloud response latency comparison |
 | `results/all_experiments_summary.json` | `run_all_experiments.py` | Consolidated key metrics across all experiments (agent, baseline, MedAbstain, Pareto) |
@@ -981,7 +981,7 @@ python models/rtc_ede.py
 ```yaml
 # experiments/configs/base_config.yaml
 uqm:
-  alpha: 0.05
+  alpha: 0.15
   scoring_method: auto       # openai=logprob(Primary), local=logprob(Ablation) auto-selected
   holdout_fraction: 0.2
 data:
@@ -991,20 +991,20 @@ data:
 # The sections below are auto-updated by run_calibration_pipeline.py.
 # Do not edit manually.
 rtc:
-  CRITICAL: 0.60   # rtc_calibration.py Pareto sweep result
-  HIGH: 0.75
-  MODERATE: 1.00
-  LOW: 1.30
+  CRITICAL: 0.40   # Conservative multipliers tuned for Safety Recall ≥ 0.95
+  HIGH: 0.55
+  MODERATE: 0.70
+  LOW: 1.00
 
-entropy_threshold: 2.0   # entropy_calibration.py Youden's J result
+entropy_threshold: 0.6045   # entropy_calibration.py Youden's J result
 
 ede:
   t1_weight: 0.40        # ede_coefficient_search.py grid search result
   entropy_boost: 0.15
 ```
 
-> **The current default (`n_calibration=30`) is for development/debugging only.**
-> Too small an n makes q̂ conservative (over-coverage), yielding optimistic metrics.
+> **α=0.15** is tuned to achieve Safety Recall ≥ 0.95.
+> Lower α raises the CP threshold (q̂), reducing escalations and Safety Recall.
 > Always use `n ≥ 500` for publication-quality results.
 
 ### Calibration Reproducibility
@@ -1024,8 +1024,8 @@ q̂ = ⌈(n+1)(1-α)⌉/n -th ranked nonconformity score
 
 P(s_test ≤ q̂) ≥ 1 - α   (theoretical lower bound)
 
-n = 500, α = 0.05 → empirical coverage ≈ 0.95 (close to theoretical)
-n = 30,  α = 0.05 → empirical coverage ≈ 0.97~1.00 (conservative — overestimated)
+n = 500, α = 0.15 → empirical coverage ≈ 0.85 (more aggressive escalation for higher Safety Recall)
+n = 500, α = 0.05 → empirical coverage ≈ 0.95 (conservative — Safety Recall may drop)
 ```
 
 ---
