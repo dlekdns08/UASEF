@@ -233,6 +233,12 @@ def run_experiment_pareto(args) -> tuple[dict, dict]:
                 coverage_weight=2.0,
             )
             print_recommendations(recommendations)
+            rec_path = RESULTS_DIR / "alpha_recommendations.json"
+            rec_path.write_text(
+                json.dumps(recommendations, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"\n✅ α 권고 저장: {rec_path}")
         except Exception:
             print("[WARN] α 권고 계산 실패:")
             traceback.print_exc()
