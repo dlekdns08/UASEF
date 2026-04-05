@@ -146,6 +146,7 @@ def run_experiment_baseline(args) -> dict:
                 n_cal=args.n_cal,
                 n_test=args.n_test,
                 scoring_method=args.scoring_method,
+                alpha=args.alpha,
                 seed=args.seed,
             )
             if result:
@@ -641,8 +642,8 @@ def main() -> None:
         choices=["logprob", "self_consistency", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
-    parser.add_argument("--alpha", type=float, default=0.05,
-                        help="Conformal prediction α")
+    parser.add_argument("--alpha", type=float, default=0.15,
+                        help="Conformal prediction α (기본: 0.15)")
     parser.add_argument(
         "--variants", nargs="+", default=["AP", "NAP", "A", "NA"],
         choices=["AP", "NAP", "A", "NA"],
