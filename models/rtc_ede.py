@@ -277,6 +277,27 @@ NO_EVIDENCE_PHRASES: list[dict] = [
     {"phrase": "not enough context",        "source": "manual"},
     {"phrase": "differential is broad",     "source": "manual"},
     {"phrase": "clinical judgment needed",  "source": "manual"},
+    # --- 추가: 모델이 자주 사용하는 불확실 표현 ---
+    {"phrase": "this remains controversial",     "source": "extended"},
+    {"phrase": "evidence is lacking",            "source": "extended"},
+    {"phrase": "no consensus",                   "source": "extended"},
+    {"phrase": "varies by institution",          "source": "extended"},
+    {"phrase": "expert opinion only",            "source": "extended"},
+    {"phrase": "the literature is mixed",        "source": "extended"},
+    {"phrase": "further evaluation needed",      "source": "extended"},
+    {"phrase": "more information is needed",     "source": "extended"},
+    {"phrase": "this is debated",                "source": "extended"},
+    {"phrase": "not well established",           "source": "extended"},
+    {"phrase": "limited evidence",               "source": "extended"},
+    {"phrase": "emerging evidence",              "source": "extended"},
+    {"phrase": "may vary",                       "source": "extended"},
+    {"phrase": "recommend specialist",           "source": "extended"},
+    {"phrase": "specialist consultation",        "source": "extended"},
+    {"phrase": "consult a specialist",           "source": "extended"},
+    {"phrase": "further workup",                 "source": "extended"},
+    {"phrase": "cannot be determined",           "source": "extended"},
+    {"phrase": "highly variable",                "source": "extended"},
+    {"phrase": "unclear etiology",               "source": "extended"},
 ]
 
 # 실제 탐지에 사용할 문자열 집합 (빠른 멤버십 검사용)
