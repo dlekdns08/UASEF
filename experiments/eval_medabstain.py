@@ -226,7 +226,7 @@ def run_medabstain_eval(
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
     uqm = UQM(
         backend=backend,
-        alpha=0.05,
+        alpha=0.15,
         scoring_method=scoring_method,
         use_weighted_cp=True,
     )
