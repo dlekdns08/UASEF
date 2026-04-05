@@ -273,10 +273,10 @@ adjusted_threshold = q̂ × risk_multiplier × scenario_multiplier
 
 | 위험 등급 | 기본 배율 | 해당 전문과목 |
 | -------- | ------- | ------------ |
-| CRITICAL | ×0.60 | 응급의학, 중환자의학, 외상외과 |
-| HIGH     | ×0.75 | 심장내과, 신경과, 종양학, 심흉외과 |
-| MODERATE | ×1.00 | 내과, 외과, 소아과, 산부인과 |
-| LOW      | ×1.30 | 일반 외래, 예방의학, 피부과, 정신건강의학과 |
+| CRITICAL | ×0.40 | 응급의학, 중환자의학, 외상외과 |
+| HIGH     | ×0.55 | 심장내과, 신경과, 종양학, 심흉외과 |
+| MODERATE | ×0.70 | 내과, 외과, 소아과, 산부인과 |
+| LOW      | ×1.00 | 일반 외래, 예방의학, 피부과, 정신건강의학과 |
 
 `emergency` / `rare_disease` 시나리오에는 추가 ×0.85 적용됩니다.
 
@@ -580,11 +580,11 @@ LangGraph 에이전트 없이 UQM → RTC → EDE를 순서대로 실행하는 *
 # 오른쪽이 왼쪽을 덮어씁니다.
 
 uqm:
-  alpha: 0.05
+  alpha: 0.15
   scoring_method: logprob
   holdout_fraction: 0.2
 data:
-  n_calibration: 30      # 논문 권장: 500
+  n_calibration: 500     # CP 보장 실용 하한
   n_test_per_scenario: 3 # 논문 권장: 50
 ```
 
@@ -612,9 +612,9 @@ ReAct 에이전트가 도구를 활용해 추론하고, UASEF가 독립적으로
 
 | 시나리오 | 전문과목 | RTC 위험도 | 임계값 배율 |
 |---------|---------|-----------|------------|
-| emergency | emergency_medicine | CRITICAL | ×0.60 × 0.85 = ×0.51 |
-| rare_disease | neurology | HIGH | ×0.75 × 0.85 = ×0.64 |
-| multimorbidity | internal_medicine | MODERATE | ×1.00 |
+| emergency | emergency_medicine | CRITICAL | ×0.40 × 0.85 = ×0.34 |
+| rare_disease | neurology | HIGH | ×0.55 × 0.85 = ×0.47 |
+| multimorbidity | internal_medicine | MODERATE | ×0.70 |
 
 **에이전트 그래프 실행 상세:**
 
@@ -961,7 +961,7 @@ python models/rtc_ede.py
 | `results/medabstain_eval_summary.csv` | `eval_medabstain.py` | 백엔드 × 변형 요약표 |
 | `results/pareto_sweep_results.json` | `pareto_sweep.py` | α × specialty 실측 (coverage, escalation_rate) |
 | `results/pareto_frontier.png` | `pareto_sweep.py` | α 별 trajectory + 이상적 영역 |
-| `results/alpha_recommendations.json` | `pareto_sweep.py` | specialty별 최적 α 및 권고 이유 |
+| `results/alpha_recommendations.json` | `pareto_sweep.py`, `run_all_experiments.py` | specialty별 최적 α 및 권고 이유 |
 | `results/comparison_bar.png` | `visualize_results.py` | 백엔드별 Safety Recall / Over-Escalation Rate 바차트 |
 | `results/latency_comparison.png` | `visualize_results.py` | 로컬 vs 클라우드 응답 지연 비교 |
 | `results/all_experiments_summary.json` | `run_all_experiments.py` | 모든 실험 핵심 지표 통합 (에이전트·베이스라인·MedAbstain·Pareto) |
@@ -984,7 +984,7 @@ python models/rtc_ede.py
 ```yaml
 # experiments/configs/base_config.yaml
 uqm:
-  alpha: 0.05
+  alpha: 0.15
   scoring_method: auto       # openai=logprob(Primary), lmstudio=logprob(Ablation) 자동 선택
   holdout_fraction: 0.2
 data:
@@ -994,20 +994,20 @@ data:
 # 아래 섹션은 run_calibration_pipeline.py 실행 후 자동 갱신됩니다.
 # 직접 편집하지 마세요.
 rtc:
-  CRITICAL: 0.60   # rtc_calibration.py Pareto sweep 결과
-  HIGH: 0.75
-  MODERATE: 1.00
-  LOW: 1.30
+  CRITICAL: 0.40   # Safety Recall 목표치 달성을 위한 보수적 배율
+  HIGH: 0.55
+  MODERATE: 0.70
+  LOW: 1.00
 
-entropy_threshold: 2.0   # entropy_calibration.py Youden's J 결과
+entropy_threshold: 0.6045   # entropy_calibration.py Youden's J 결과
 
 ede:
   t1_weight: 0.40        # ede_coefficient_search.py grid search 결과
   entropy_boost: 0.15
 ```
 
-> **현재 기본값(`n_calibration=30`)은 개발/디버그 전용입니다.**
-> n이 너무 작으면 q̂가 보수적(over-coverage)이 되어 지표가 낙관적으로 보입니다.
+> **α=0.15**는 Safety Recall ≥ 0.95 달성을 위해 조정된 값입니다.
+> α가 낮을수록 CP threshold(q̂)가 높아져 에스컬레이션이 줄어들고 Safety Recall이 하락합니다.
 > 논문 품질 결과를 위해 반드시 `n ≥ 500`을 사용하세요.
 
 ### 캘리브레이션 재현성
@@ -1027,8 +1027,8 @@ q̂ = ⌈(n+1)(1-α)⌉/n 번째 순위 비적합 점수
 
 P(s_test ≤ q̂) ≥ 1 - α   (이론적 하한)
 
-n = 500, α = 0.05 → 실측 coverage ≈ 0.95 (이론값과 근접)
-n = 30,  α = 0.05 → 실측 coverage ≈ 0.97~1.00 (보수적 — 과추정)
+n = 500, α = 0.15 → 실측 coverage ≈ 0.85 (이론값과 근접, 더 적극적 에스컬레이션)
+n = 500, α = 0.05 → 실측 coverage ≈ 0.95 (보수적 — Safety Recall 하락 가능)
 ```
 
 ---
