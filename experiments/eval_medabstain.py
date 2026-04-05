@@ -64,10 +64,15 @@ def evaluate_case(
     ede: EDE,
     question: str,
     distribution_source: str = "medqa",
+    specialty: str = "internal_medicine",
+    scenario_type: str = "rare_disease",
 ) -> dict:
     """단일 질문에 대해 UASEF 전 파이프라인을 실행하고 결과를 반환합니다."""
     unc = uqm.evaluate(question, distribution_source=distribution_source)
-    rtc_config = rtc.get_threshold("internal_medicine", "rare_disease")
+    rtc_config = rtc.get_threshold(
+        specialty or "internal_medicine",
+        scenario_type or "rare_disease",
+    )
     decision = ede.decide(unc, rtc_config, response_text=unc.raw_response.text)
 
     return {
@@ -223,7 +228,7 @@ def run_medabstain_eval(
         backend=backend,
         alpha=0.05,
         scoring_method=scoring_method,
-        use_weighted_cp=use_weighted_cp,
+        use_weighted_cp=True,
     )
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
@@ -254,6 +259,8 @@ def run_medabstain_eval(
                 uqm=uqm, rtc=rtc, ede=ede,
                 question=case.question,
                 distribution_source="medqa",   # MedAbstain은 MedQA 기반
+                specialty=case.specialty or "internal_medicine",
+                scenario_type=case.scenario_type or "rare_disease",
             )
             result.update({
                 "variant": case.source,        # "medabstain_AP" 등
