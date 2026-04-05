@@ -1,10 +1,10 @@
 uqm:
-  alpha: 0.05
+  alpha: 0.15
   scoring_method: auto
   consistency_n: 5
   holdout_fraction: 0.2
 data:
-  n_calibration: 30
+  n_calibration: 500
   n_test_per_scenario: 3
   calibration_split: train
   test_split: test
@@ -17,11 +17,11 @@ backends:
 output:
   results_dir: results
 rtc:
-  CRITICAL: 0.5
-  HIGH: 0.7
-  MODERATE: 0.9
-  LOW: 1.2
+  CRITICAL: 0.40
+  HIGH: 0.55
+  MODERATE: 0.70
+  LOW: 1.00
 entropy_threshold: 0.6045
 ede:
-  t1_weight: 0.2
-  entropy_boost: 0.05
+  t1_weight: 0.4
+  entropy_boost: 0.15
