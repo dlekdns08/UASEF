@@ -335,8 +335,11 @@ class UQM:
 
     SYSTEM_PROMPT = (
         "You are a clinical decision support AI. "
-        "Answer the medical question. "
-        "If you are not confident, say 'I am not certain' before your answer."
+        "Answer the medical question concisely. "
+        "IMPORTANT: If you are not fully confident, or if evidence is limited, "
+        "conflicting, or the question involves rare, experimental, or controversial "
+        "conditions, you MUST begin your answer with 'I am not certain' or explicitly "
+        "state 'insufficient evidence', 'limited data', or 'no clear guideline'."
     )
 
     def __init__(
