@@ -127,9 +127,10 @@ def _scoring_method_for(backend: str) -> str:
 
 def run_baseline_comparison(
     backend: str,
-    n_cal: int = 30,
+    n_cal: int = 500,
     n_test: int = 10,
     scoring_method: str = "auto",
+    alpha: float = 0.15,
     seed: int = 42,
 ) -> dict:
     effective_method = (
@@ -139,12 +140,12 @@ def run_baseline_comparison(
 
     print(f"\n{'='*65}")
     print(f"  베이스라인 비교 — Backend: {backend.upper()}  {role}")
-    print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}")
+    print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}, α={alpha}")
     print(f"{'='*65}")
 
     # UQM 보정
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
-    uqm = UQM(backend=backend, alpha=0.05, scoring_method=effective_method)
+    uqm = UQM(backend=backend, alpha=alpha, scoring_method=effective_method)
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
         uqm.calibrate(cal_questions, distribution_source="medqa")
@@ -304,7 +305,7 @@ if __name__ == "__main__":
         choices=["lmstudio", "openai"],
         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
-    parser.add_argument("--n-cal", type=int, default=30,
+    parser.add_argument("--n-cal", type=int, default=500,
                         help="calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=10,
                         help="시나리오별 테스트 케이스 수 (권장: 50)")
@@ -313,6 +314,8 @@ if __name__ == "__main__":
         choices=["logprob", "self_consistency", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
+    parser.add_argument("--alpha", type=float, default=0.15,
+                        help="Conformal prediction α (기본: 0.15)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -326,6 +329,7 @@ if __name__ == "__main__":
                 n_cal=args.n_cal,
                 n_test=args.n_test,
                 scoring_method=args.scoring_method,
+                alpha=args.alpha,
                 seed=args.seed,
             )
             if result:
