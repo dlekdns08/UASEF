@@ -451,8 +451,22 @@ class UQM:
 
         cal_scores, holdout_scores = [], []
         cal_texts: list[str] = []
+        n_skipped = 0
         for i, q in enumerate(questions):
-            score, _ = self._get_score(q)
+            last_exc = None
+            for attempt in range(1, 4):
+                try:
+                    score, _ = self._get_score(q)
+                    last_exc = None
+                    break
+                except Exception as e:
+                    last_exc = e
+                    if attempt < 3:
+                        print(f"  [RETRY {attempt}/3] {i+1}/{n_total}: {e}")
+            if last_exc is not None:
+                n_skipped += 1
+                print(f"  [SKIP {i+1}/{n_total}] 3회 실패, 샘플 건너뜀: {last_exc}")
+                continue
             if i in holdout_set:
                 holdout_scores.append(score)
             else:
@@ -460,6 +474,8 @@ class UQM:
                 cal_texts.append(q)
             if (i + 1) % 10 == 0:
                 print(f"  [{i+1}/{n_total}] score={score:.4f}")
+        if n_skipped:
+            print(f"  [UQM] 총 {n_skipped}개 샘플 스킵 (cal={len(cal_scores)}, holdout={len(holdout_scores)})")
 
         self._cal_texts = cal_texts
         self.calibrator.fit(cal_scores)
