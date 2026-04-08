@@ -130,7 +130,7 @@ def run_baseline_comparison(
     n_cal: int = 500,
     n_test: int = 10,
     scoring_method: str = "auto",
-    alpha: float = 0.15,
+    alpha: float = None,
     seed: int = 42,
 ) -> dict:
     effective_method = (
@@ -138,14 +138,18 @@ def run_baseline_comparison(
     )
     role = "[Primary]" if effective_method == "logprob" else "[Ablation]"
 
+    from experiments.config_utils import load_config
+    cfg = load_config()
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+
     print(f"\n{'='*65}")
     print(f"  베이스라인 비교 — Backend: {backend.upper()}  {role}")
-    print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}, α={alpha}")
+    print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}, α={effective_alpha}")
     print(f"{'='*65}")
 
     # UQM 보정
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
-    uqm = UQM(backend=backend, alpha=alpha, scoring_method=effective_method)
+    uqm = UQM(backend=backend, alpha=effective_alpha, scoring_method=effective_method)
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
         uqm.calibrate(cal_questions, distribution_source="medqa")
