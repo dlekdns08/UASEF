@@ -101,9 +101,13 @@ def run_backend_experiment(
     cal_questions: list[str],
     agent_scenarios: list[dict],
     scoring_method: str = "auto",
-    alpha: float = 0.05,
+    alpha: float = None,
     distribution_source: str = "medqa",
 ) -> dict:
+    from experiments.config_utils import load_config
+    cfg = load_config()
+    alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+
     # "auto"이면 백엔드별 자동 선택
     effective_method = (
         _scoring_method_for(backend) if scoring_method == "auto" else scoring_method
@@ -314,14 +318,14 @@ if __name__ == "__main__":
         choices=["lmstudio", "openai"],
         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
-    parser.add_argument("--n-cal", type=int, default=30, help="Calibration 질문 수 (권장: 500)")
+    parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=3, help="시나리오별 테스트 케이스 수 (권장: 50)")
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
-    parser.add_argument("--alpha", type=float, default=0.15, help="Conformal prediction α (기본: 0.15)")
+    parser.add_argument("--alpha", type=float, default=None, help="Conformal prediction α (기본: base_config.yaml uqm.alpha)")
     parser.add_argument("--seed", type=int, default=42, help="데이터 샘플링 시드")
     parser.add_argument(
         "--include-pubmedqa", action="store_true",
