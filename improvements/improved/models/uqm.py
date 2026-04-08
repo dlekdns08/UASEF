@@ -178,6 +178,17 @@ class ConformalCalibrator:
         n = len(nonconformity_scores)
         if n == 0:
             raise ValueError("빈 calibration set입니다.")
+        # CP coverage 보장을 위한 최소 n 검증:
+        # q̂ 공식이 유효하려면 ceil((n+1)(1-α))/n ≤ 1 이어야 함
+        # 즉, n ≥ ceil((1-α) / α). α=0.05 → n ≥ 19, α=0.01 → n ≥ 99
+        min_n = math.ceil((1 - self.alpha) / self.alpha)
+        if n < min_n:
+            warnings.warn(
+                f"[UQM] Calibration n={n}이 CP 보장을 위한 최소값 {min_n}(α={self.alpha})보다 작습니다. "
+                f"스킵된 샘플이 너무 많거나 calibration set이 부족합니다. "
+                f"Coverage 보장이 실측에서 위반될 수 있습니다.",
+                UserWarning, stacklevel=2,
+            )
         self.calibration_scores = sorted(nonconformity_scores)
         level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
         self.threshold = float(np.quantile(self.calibration_scores, level))
@@ -451,8 +462,22 @@ class UQM:
 
         cal_scores, holdout_scores = [], []
         cal_texts: list[str] = []
+        n_skipped = 0
         for i, q in enumerate(questions):
-            score, _ = self._get_score(q)
+            last_exc = None
+            for attempt in range(1, 4):
+                try:
+                    score, _ = self._get_score(q)
+                    last_exc = None
+                    break
+                except Exception as e:
+                    last_exc = e
+                    if attempt < 3:
+                        print(f"  [RETRY {attempt}/3] {i+1}/{n_total}: {e}")
+            if last_exc is not None:
+                n_skipped += 1
+                print(f"  [SKIP {i+1}/{n_total}] 3회 실패, 샘플 건너뜀: {last_exc}")
+                continue
             if i in holdout_set:
                 holdout_scores.append(score)
             else:
@@ -460,6 +485,8 @@ class UQM:
                 cal_texts.append(q)
             if (i + 1) % 10 == 0:
                 print(f"  [{i+1}/{n_total}] score={score:.4f}")
+        if n_skipped:
+            print(f"  [UQM] 총 {n_skipped}개 샘플 스킵 (cal={len(cal_scores)}, holdout={len(holdout_scores)})")
 
         self._cal_texts = cal_texts
         self.calibrator.fit(cal_scores)
