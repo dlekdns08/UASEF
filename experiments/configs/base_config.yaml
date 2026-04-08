@@ -1,5 +1,5 @@
 uqm:
-  alpha: 0.15
+  alpha: 0.05
   scoring_method: auto
   consistency_n: 5
   holdout_fraction: 0.2
@@ -17,10 +17,10 @@ backends:
 output:
   results_dir: results
 rtc:
-  CRITICAL: 0.40
-  HIGH: 0.55
-  MODERATE: 0.70
-  LOW: 1.00
+  CRITICAL: 0.60
+  HIGH: 0.75
+  MODERATE: 1.00
+  LOW: 1.30
 entropy_threshold: 0.6045
 ede:
   t1_weight: 0.4
