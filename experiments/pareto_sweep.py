@@ -130,7 +130,7 @@ def measure_pareto_point(
 
 def run_pareto_sweep(
     backend: str,
-    n_calibration: int = 30,
+    n_calibration: int = 500,
     n_test: int = 20,
     seed: int = 42,
     scoring_method: str = "logprob",
@@ -442,7 +442,7 @@ if __name__ == "__main__":
         choices=["lmstudio", "openai"],
         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
     )
-    parser.add_argument("--n-cal", type=int, default=30, help="Calibration 질문 수 (권장: 500)")
+    parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=20, help="시나리오별 테스트 케이스 수 (권장: 100)")
     parser.add_argument(
         "--scoring-method", type=str, default="logprob",
