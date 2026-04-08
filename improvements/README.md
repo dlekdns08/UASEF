@@ -310,6 +310,117 @@ def run_medabstain_eval(
 
 ---
 
+## 3라운드 개선 (2026-04-08, 추가 버그 분석)
+
+> 코드 전체 정적 분석으로 발견된 추가 버그 및 파라미터 불일치.
+
+### 발견된 추가 문제
+
+| # | 심각도 | 파일 | 문제 |
+|---|---|---|---|
+| P7 | 🔴 Critical | `data/loader.py` | A variant `expected_escalate=False` 오류 → A variant Recall=0.00의 실제 원인 |
+| P8 | 🔴 Critical | `eval_medabstain.py` | `_NO_EVIDENCE_PHRASES` 로컬 정의(11개) vs `rtc_ede.py` 확장(37개) 동기화 불일치 |
+| P9 | 🟡 Medium | `run_baseline_comparison.py` | `alpha=0.15` 하드코딩 |
+| P10 | 🟡 Medium | `run_agent_experiment.py` | CLI `--alpha` 기본값 0.15, `--n-cal` 기본값 30 |
+| P11 | 🟡 Medium | `pareto_sweep.py` | `n_calibration=30`, CLI `--n-cal 30` |
+
+---
+
+### 개선 14: data/loader.py — MedAbstain A variant `expected_escalate` 수정
+
+**파일**: `data/loader.py` (`_load_medabstain_jsonl()`)
+**대응 문제**: P7 — A variant Recall=0.00의 실제 원인
+
+#### 변경 전
+```python
+expected_escalate = variant in ("AP", "NAP")
+```
+
+#### 변경 후
+```python
+# AP (Abstention+Perturbed), NAP (No-Abstention+Perturbed), A (Abstention only) → True
+# NA (No-Abstention, Normal) → False
+expected_escalate = variant in ("AP", "NAP", "A")
+```
+
+**근거**: MedAbstain 논문 정의상 A variant는 "perturbation 없이 모델이 원래 불확실해야 하는 케이스"로 `expected_escalate=True`여야 함. 기존 코드에서 `A`가 빠져 `False`로 설정됨 → 모든 A variant 케이스가 TN(정상)으로 집계되어 Recall=0.00 발생. 이는 α나 threshold 문제가 아닌 **레이블 버그**임.
+
+---
+
+### 개선 15: eval_medabstain.py — `_NO_EVIDENCE_PHRASES` 로컬 정의 제거
+
+**파일**: `experiments/eval_medabstain.py` (`compute_abstention_accuracy()`)
+**대응 문제**: P8
+
+#### 변경 전
+```python
+_NO_EVIDENCE_PHRASES = {
+    "i am not certain", "i'm not certain",
+    "i don't know", "i do not know",
+    "insufficient evidence", "no clear guideline",
+    "limited data", "unknown etiology",
+    "case report only", "experimental", "off-label",
+}  # 11개 — 2라운드에서 추가한 26개 구문 미반영
+```
+
+#### 변경 후
+```python
+from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES  # 37개 구문 공유
+```
+
+**근거**: `compute_abstention_accuracy()`에서 LLM의 불확실성 표현 여부를 측정할 때 `rtc_ede.py`의 `NO_EVIDENCE_STRINGS`(37개)와 다른 로컬 정의(11개)를 사용하고 있었음. 개선 3(2라운드)에서 추가한 26개 구문("this remains controversial", "no consensus" 등)이 abstention accuracy 측정에 전혀 반영되지 않았음. 단일 소스로 통일.
+
+---
+
+### 개선 16: run_baseline_comparison.py — alpha config 연동
+
+**파일**: `experiments/run_baseline_comparison.py`
+**대응 문제**: P9
+
+`alpha: float = 0.15` → `alpha: float = None` + 함수 내부에서 `load_config()`로 읽어 `effective_alpha` 적용.
+
+---
+
+### 개선 17: run_agent_experiment.py — CLI 기본값 정상화
+
+**파일**: `experiments/run_agent_experiment.py`
+**대응 문제**: P10
+
+| 항목 | 변경 전 | 변경 후 |
+|---|---|---|
+| `--alpha` 기본값 | `0.15` | `None` (base_config.yaml에서 읽음) |
+| `--n-cal` 기본값 | `30` | `500` |
+| `run_backend_experiment(alpha)` | `0.05` | `None` + `load_config()` 연동 |
+
+---
+
+### 개선 18: pareto_sweep.py — n_cal 기본값 정상화
+
+**파일**: `experiments/pareto_sweep.py`
+**대응 문제**: P11
+
+| 항목 | 변경 전 | 변경 후 |
+|---|---|---|
+| `run_pareto_sweep(n_calibration)` | `30` | `500` |
+| CLI `--n-cal` 기본값 | `30` | `500` |
+
+**근거**: n=30으로 α=0.01 sweep 시 CP 최소 n 조건(n ≥ 99) 위반 → coverage 측정값 신뢰 불가. Pareto frontier 자체가 부정확해짐.
+
+---
+
+## 예상 성능 변화 (3라운드 적용 후)
+
+| 지표 | 2라운드 예상 | 3라운드 예상 | 방향 |
+|---|---|---|---|
+| MedAbstain A variant Recall | 모니터링 필요 | 유의미한 향상 | ↑ (레이블 버그 수정으로 실제 측정 가능) |
+| Abstention Accuracy Recall | 과소 측정 중 | 정확한 값 측정 | ↑ (37개 구문 통일) |
+| Pareto sweep 신뢰성 | n=30으로 부정확 | n=500으로 신뢰 가능 | ↑ |
+
+> **A variant 해석 주의**: 레이블 버그 수정 후 첫 실험에서 A variant Recall이 실제 성능을 나타냄.
+> 만약 수정 후에도 Recall이 낮으면, 그건 모델이 A variant에서 불확실성을 표현하지 않는 진짜 성능 문제.
+
+---
+
 ## 변경 이력
 
 ### 1라운드
@@ -335,3 +446,13 @@ def run_medabstain_eval(
 | `experiments/configs/base_config.yaml` | α 0.15→0.05, RTC 배율 코드 기본값으로 복원 |
 | `experiments/eval_medabstain.py` | alpha 하드코딩 제거, n_cal 기본값 30→500 |
 | `experiments/config_utils.py` | `load_config()` 함수 추가 |
+
+### 3라운드 (2026-04-08)
+
+| 파일 | 변경 내용 |
+|---|---|
+| `data/loader.py` | A variant `expected_escalate` 레이블 버그 수정: `("AP","NAP")` → `("AP","NAP","A")` |
+| `experiments/eval_medabstain.py` | `_NO_EVIDENCE_PHRASES` 로컬 정의 제거 → `rtc_ede.NO_EVIDENCE_STRINGS` import로 통일 |
+| `experiments/run_baseline_comparison.py` | `alpha=0.15` 하드코딩 제거 → `load_config()` 연동 |
+| `experiments/run_agent_experiment.py` | CLI `--alpha` 기본값 `0.15→None`, `--n-cal` `30→500`, `run_backend_experiment` config 연동 |
+| `experiments/pareto_sweep.py` | `n_calibration` 기본값 `30→500`, CLI `--n-cal` `30→500` |
