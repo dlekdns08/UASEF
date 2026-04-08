@@ -303,7 +303,9 @@ def _load_medabstain_jsonl(path: Path, variant: str) -> list[MedQACase]:
     AP / NAP 변형은 expected_escalate=True (정보 제거로 인한 불확실성).
     NA 변형은 expected_escalate=False.
     """
-    expected_escalate = variant in ("AP", "NAP")
+    # AP (Abstention+Perturbed), NAP (No-Abstention+Perturbed), A (Abstention only) → True
+    # NA (No-Abstention, Normal) → False
+    expected_escalate = variant in ("AP", "NAP", "A")
     cases = []
     with open(path, encoding="utf-8") as f:
         for line in f:
