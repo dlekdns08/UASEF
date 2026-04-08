@@ -208,12 +208,13 @@ def compute_abstention_accuracy(case_results: list[dict]) -> dict:
 
 def run_medabstain_eval(
     backend: str,
-    n_cal: int = 30,
+    n_cal: int = 500,
     n_per_variant: int = 50,
     scoring_method: str = "logprob",
     variants: list[str] = None,
     use_weighted_cp: bool = False,
     seed: int = 42,
+    alpha: float = None,
 ) -> dict:
     variants = variants or ["AP", "NAP", "A", "NA"]
 
@@ -223,10 +224,15 @@ def run_medabstain_eval(
     print(f"{'='*65}")
 
     # Step 1: UQM 보정 (MedQA train split)
-    print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
+    # alpha: 명시적으로 전달된 값 > base_config.yaml > 기본값 0.05
+    from experiments.config_utils import load_config
+    cfg = load_config()
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+
+    print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal}, α={effective_alpha})...")
     uqm = UQM(
         backend=backend,
-        alpha=0.15,
+        alpha=effective_alpha,
         scoring_method=scoring_method,
         use_weighted_cp=True,
     )
