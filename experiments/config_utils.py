@@ -20,6 +20,15 @@ import yaml
 _BASE_CONFIG_PATH = Path(__file__).parent / "configs" / "base_config.yaml"
 
 
+def load_config(config_path: Path = _BASE_CONFIG_PATH) -> dict:
+    """base_config.yaml 전체를 dict로 반환합니다."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+
+
 def load_calibration_config(config_path: Path = _BASE_CONFIG_PATH) -> tuple[dict | None, dict]:
     """
     base_config.yaml에서 캘리브레이션 결과를 읽어 반환합니다.
