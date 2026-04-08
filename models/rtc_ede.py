@@ -83,8 +83,10 @@ class RTCConfig:
         mmap = self.multipliers if self.multipliers is not None else RISK_THRESHOLD_MULTIPLIER
         multiplier = mmap.get(self.risk_level, RISK_THRESHOLD_MULTIPLIER[self.risk_level])
         # 시나리오 보정: 응급·희귀질환은 추가로 낮춤 (더 보수적)
+        # 0.85 → 0.90: 기존 값은 CRITICAL(0.60) × 0.85 = 0.51로 너무 공격적이었음
+        # emergency_medicine + emergency scenario에서 esc_rate ≈ 1.00 발생
         if self.scenario_type in ("emergency", "rare_disease"):
-            multiplier *= 0.85
+            multiplier *= 0.90
         self.adjusted_threshold = self.base_threshold * multiplier
 
 
