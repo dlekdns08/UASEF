@@ -135,13 +135,7 @@ def compute_metrics(results: list[dict]) -> dict:
 
 # ── Abstention Accuracy 계산 ──────────────────────────────────────────────────
 
-_NO_EVIDENCE_PHRASES = {
-    "i am not certain", "i'm not certain",
-    "i don't know", "i do not know",
-    "insufficient evidence", "no clear guideline",
-    "limited data", "unknown etiology",
-    "case report only", "experimental", "off-label",
-}
+from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES
 
 
 def compute_abstention_accuracy(case_results: list[dict]) -> dict:
