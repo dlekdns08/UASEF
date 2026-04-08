@@ -54,7 +54,7 @@ from data.loader import (
     load_scenarios,
     case_to_agent_dict,
 )
-from experiments.config_utils import load_calibration_config
+from experiments.config_utils import load_calibration_config, load_config
 
 
 # ── 실험 데이터셋 — MedQA / MedAbstain ────────────────────────────────────────
@@ -104,7 +104,6 @@ def run_backend_experiment(
     alpha: float = None,
     distribution_source: str = "medqa",
 ) -> dict:
-    from experiments.config_utils import load_config
     cfg = load_config()
     alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
 

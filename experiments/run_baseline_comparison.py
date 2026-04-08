@@ -50,7 +50,7 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_scenarios, case_to_experiment_dict
-from experiments.config_utils import load_calibration_config
+from experiments.config_utils import load_calibration_config, load_config
 
 
 # ── 베이스라인 에스컬레이션 함수 ──────────────────────────────────────────────────
@@ -138,7 +138,6 @@ def run_baseline_comparison(
     )
     role = "[Primary]" if effective_method == "logprob" else "[Ablation]"
 
-    from experiments.config_utils import load_config
     cfg = load_config()
     effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
 

@@ -39,7 +39,7 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_medabstain_cases
-from experiments.config_utils import load_calibration_config
+from experiments.config_utils import load_calibration_config, load_config
 
 try:
     from scipy.stats import roc_auc_score  # type: ignore
@@ -219,7 +219,6 @@ def run_medabstain_eval(
 
     # Step 1: UQM 보정 (MedQA train split)
     # alpha: 명시적으로 전달된 값 > base_config.yaml > 기본값 0.05
-    from experiments.config_utils import load_config
     cfg = load_config()
     effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
 

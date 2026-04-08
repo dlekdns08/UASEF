@@ -456,3 +456,14 @@ from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES  # 37개 
 | `experiments/run_baseline_comparison.py` | `alpha=0.15` 하드코딩 제거 → `load_config()` 연동 |
 | `experiments/run_agent_experiment.py` | CLI `--alpha` 기본값 `0.15→None`, `--n-cal` `30→500`, `run_backend_experiment` config 연동 |
 | `experiments/pareto_sweep.py` | `n_calibration` 기본값 `30→500`, CLI `--n-cal` `30→500` |
+
+### 4라운드 (2026-04-08)
+
+| # | 파일 | 변경 내용 |
+|---|---|---|
+| P12 | `experiments/run_all_experiments.py` | CLI `--n-cal` `30→500`, `--n-test` `3→50`, `--alpha` `0.15→None`(config 연동) |
+| P13 | `experiments/run_calibration_pipeline.py` | CLI `--n-cal` `30→500`, `--n-labeled` `10→50`; 루프 내 `import math`, `from models.rtc_ede import EscalationTrigger` 반복 import → 모듈 상단으로 이동 |
+| P14 | `experiments/run_baseline_comparison.py` | 함수 내 `from experiments.config_utils import load_config` → 모듈 상단으로 이동 |
+| P15 | `experiments/run_agent_experiment.py` | 함수 내 `from experiments.config_utils import load_config` → 모듈 상단으로 이동 |
+| P16 | `experiments/eval_medabstain.py` | 함수 내 `from experiments.config_utils import load_config` → 모듈 상단으로 이동 |
+| P17 | `agent/nodes.py` | `reason` 노드 내 LLM 재생성이 설계 의도임을 주석으로 명시 (State 직렬화 제약) |
