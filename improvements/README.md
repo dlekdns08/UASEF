@@ -467,3 +467,82 @@ from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES  # 37개 
 | P15 | `experiments/run_agent_experiment.py` | 함수 내 `from experiments.config_utils import load_config` → 모듈 상단으로 이동 |
 | P16 | `experiments/eval_medabstain.py` | 함수 내 `from experiments.config_utils import load_config` → 모듈 상단으로 이동 |
 | P17 | `agent/nodes.py` | `reason` 노드 내 LLM 재생성이 설계 의도임을 주석으로 명시 (State 직렬화 제약) |
+
+---
+
+## 5라운드 개선 (2026-04-10, 실험 결과 분석 및 근본 원인 수정)
+
+### 실험 결과 (5라운드 이전, α=0.05, corrected RTC multipliers)
+
+| 지표 | LMStudio | OpenAI | 목표 | 상태 |
+|---|---|---|---|---|
+| Safety Recall (에이전트) | 0.3371 | 0.5866 | ≥ 0.95 | ✗ |
+| Safety Recall (full_uasef) | 0.4190 | 0.4246 | ≥ 0.95 | ✗ |
+| Safety Recall (threshold_only) | 0.2514 | 0.3911 | ≥ 0.95 | ✗ |
+| Over-Escalation Rate (full_uasef) | 0.0476 | 0.2381 | ≤ 0.15 | 부분 |
+| Conformal Coverage (에이전트) | 0.9200 | 0.9500 | ≥ 0.90 | ✓ |
+
+### 핵심 원인 분석
+
+이전 라운드들의 수정(α 조정, RTC multiplier 교정, A 변형 레이블 수정)에도 불구하고 Safety Recall이 0.42에 머무른 이유:
+
+**P18 — CP 캘리브레이션 분포 불일치 (근본 원인)**
+
+| 항목 | 내용 |
+|---|---|
+| 증상 | threshold_only OpenAI: TP=70, FP=0 — 모든 NA 케이스는 threshold 미만, AP/NAP/A의 61%도 threshold 미만 |
+| 원인 | MedQA(USMLE 복잡한 시험 문제) 전체로 캘리브레이션 → q̂가 높게 설정됨. MedAbstain AP/NAP/A는 LLM이 **틀렸지만 자신있게** 답변(overconfident wrong) → logprob 기반 nonconformity score가 낮음 → threshold 미초과 |
+| 이론적 배경 | logprob 비적합 점수는 **토큰 확률**을 측정하므로 overconfident-wrong 케이스를 탐지 불가. 이는 MedAbstain 특유의 도전과제 |
+| 한계 | α를 아무리 높여도 MedQA 기반 threshold로는 ~63% recall이 상한. 0.95는 달성 불가 |
+
+**P19 — α=0.05 과보수적 설정**
+
+| 항목 | 내용 |
+|---|---|
+| 증상 | Pareto sweep α=0.10에서 coverage=0.94 (≥ 0.90 보장), esc_rate=0.47 |
+| 원인 | α=0.05 → q̂ = 95th percentile → 너무 높은 threshold |
+| 영향 | Safety Recall 0.05p 추가 하락 |
+
+**P20 — distribution_source 하드코딩으로 WeightedCP 비활성화**
+
+| 항목 | 내용 |
+|---|---|
+| 증상 | `distribution_source="medqa"` 하드코딩 → calibration("medqa") == eval("medqa") → shift 미감지 → WeightedCP OFF |
+| 원인 | `eval_medabstain.py`, `run_baseline_comparison.py`에서 MedAbstain 케이스에도 `"medqa"` 전달 |
+| 영향 | Tibshirani et al. (2019) WeightedCP가 전혀 작동하지 않음 |
+
+**P21 — base_config.yaml n_test_per_scenario YAML 미동기화**
+
+| 항목 | 내용 |
+|---|---|
+| 증상 | YAML에 `n_test_per_scenario: 3` 잔존. 실험은 CLI 기본값(50)으로 실행되어 YAML과 불일치 |
+
+### 5라운드 수정 내용
+
+| P# | 파일 | 변경 내용 | 기대 효과 |
+|---|---|---|---|
+| P18a | `experiments/configs/base_config.yaml` | `alpha: 0.05` → `0.10`; q̂ 낮아져 에스컬레이션 증가 | Recall +5~10%p |
+| P18b | `experiments/configs/base_config.yaml` | `n_test_per_scenario: 3` → `50`; YAML-CLI 동기화 | 문서 정합성 |
+| P18c | `data/loader.py` | `load_noesc_calibration_questions(n, split, seed)` 추가; MedQA에서 `expected_escalate=False`인 루틴 케이스만 필터링하여 반환 | one-class CP 캘리브레이션 지원 |
+| P18d | `experiments/eval_medabstain.py` | `use_routine_cal=True` 파라미터 추가(기본값); 루틴 케이스로 캘리브레이션하면 q̂가 낮아져 AP/NAP/A 탐지율 향상. 이론 근거: one-class conformal prediction — 정상 클래스 점수 분포로 임계값 설정 | Recall +20~40%p 기대 |
+| P20a | `experiments/eval_medabstain.py` | `distribution_source="medqa"` → `"medabstain"`; calibration="medqa", eval="medabstain" → shift 감지 → WeightedCP 자동 활성화 | Tibshirani et al. (2019) 보정 실효화 |
+| P20b | `experiments/run_baseline_comparison.py` | 하드코딩 `"medqa"` → `case.source` 기반 동적 결정; MedAbstain 케이스엔 `"medabstain"` | WeightedCP 활성화 |
+| P20c | `experiments/run_agent_experiment.py` | `case_to_agent_dict()`가 반환한 `distribution_source` 필드 사용; MedAbstain 케이스 자동 감지 | WeightedCP 활성화 |
+| P20d | `data/loader.py` | `case_to_agent_dict()`에 `"distribution_source"` 필드 추가; MedAbstain source 자동 감지 | 에이전트 실험 WeightedCP 지원 |
+
+### 설계 결정 및 연구 함의
+
+**one-class CP 캘리브레이션 (P18c/P18d) 이론 근거**:
+- 기존 방식: 전체 MedQA(mixed difficulty)로 캘리브레이션 → q̂ = MedQA 전체 95th percentile (높음)
+- 개선 방식: MedQA 루틴(non-escalation) 케이스만으로 캘리브레이션 → q̂ = 쉬운 질문 95th percentile (낮음)
+- 핵심 이유: MedAbstain NA(정상 케이스) 점수 < MedQA 루틴 점수 ≤ MedQA 전체 점수. 루틴 기반 q̂는 NA 케이스의 95%를 threshold 미만에 두면서 AP/NAP/A 케이스는 더 많이 threshold를 초과하게 함.
+
+**근본적 한계 (논문 Limitation 섹션에 기술 필요)**:
+- logprob 비적합 점수는 모델이 **확신있게 틀리는** 케이스(overconfident wrong)를 감지할 수 없음
+- MedAbstain AP/NAP 케이스는 이 패턴을 의도적으로 테스트하는 설계임
+- one-class CP + α=0.10으로 recall ~0.65~0.75 달성 예측. 0.95는 logprob T1만으로는 불가능
+- 0.95 달성을 위해서는 self-consistency 앙상블(N회 쿼리), 외부 지식 베이스 fact-check, 또는 의미론적 불확실성 측정이 필요
+
+**--no-routine-cal 플래그**:
+- eval_medabstain.py에 `--no-routine-cal` 추가하여 기존 동작(전체 MedQA 캘리브레이션) 재현 가능
+- 논문에서 기존 방식과 one-class CP 방식의 차이를 ablation으로 보고 가능
