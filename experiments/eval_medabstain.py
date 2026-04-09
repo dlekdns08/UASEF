@@ -38,7 +38,11 @@ load_dotenv(ROOT / ".env")
 
 from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
-from data.loader import load_calibration_questions, load_medabstain_cases
+from data.loader import (
+    load_calibration_questions,
+    load_noesc_calibration_questions,
+    load_medabstain_cases,
+)
 from experiments.config_utils import load_calibration_config, load_config
 
 try:
@@ -207,22 +211,39 @@ def run_medabstain_eval(
     scoring_method: str = "logprob",
     variants: list[str] = None,
     use_weighted_cp: bool = False,
+    use_routine_cal: bool = True,
     seed: int = 42,
     alpha: float = None,
 ) -> dict:
+    """
+    Args:
+        use_routine_cal: True(기본)이면 MedQA 루틴(non-escalation) 케이스만으로 캘리브레이션.
+            → q̂가 낮아져 MedAbstain AP/NAP/A 탐지율이 높아짐(Safety Recall 개선).
+            → 이론 근거: one-class CP — 정상 클래스 점수 분포로 임계값을 설정하면
+              이상(불확실) 케이스가 임계값을 초과할 가능성이 높아짐.
+            False이면 기존 방식(전체 MedQA 캘리브레이션).
+    """
     variants = variants or ["AP", "NAP", "A", "NA"]
 
     print(f"\n{'='*65}")
     print(f"  MedAbstain 평가 — Backend: {backend.upper()}")
-    print(f"  variants={variants}, scoring={scoring_method}, weighted_cp={use_weighted_cp}")
+    cal_mode = "routine-only" if use_routine_cal else "all-MedQA"
+    print(f"  variants={variants}, scoring={scoring_method}, cal_mode={cal_mode}")
     print(f"{'='*65}")
 
-    # Step 1: UQM 보정 (MedQA train split)
-    # alpha: 명시적으로 전달된 값 > base_config.yaml > 기본값 0.05
+    # Step 1: UQM 보정
+    # alpha: 명시적으로 전달된 값 > base_config.yaml > 기본값 0.10
     cfg = load_config()
-    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
 
-    print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal}, α={effective_alpha})...")
+    if use_routine_cal:
+        print(
+            f"\n[1/3] UQM 보정 중 (MedQA 루틴 케이스만, n={n_cal}, α={effective_alpha})...\n"
+            f"  → one-class CP: 정상(루틴) 케이스 기반 q̂ 설정 → AP/NAP/A 탐지율 향상 기대"
+        )
+    else:
+        print(f"\n[1/3] UQM 보정 중 (MedQA 전체, n={n_cal}, α={effective_alpha})...")
+
     uqm = UQM(
         backend=backend,
         alpha=effective_alpha,
@@ -230,12 +251,16 @@ def run_medabstain_eval(
         use_weighted_cp=True,
     )
     try:
-        cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
+        if use_routine_cal:
+            cal_questions = load_noesc_calibration_questions(n=n_cal, split="train", seed=seed)
+        else:
+            cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
         coverage_report = uqm.calibrate(cal_questions, distribution_source="medqa")
     except Exception as e:
         print(f"  [SKIP] UQM 보정 실패: {e}")
         return {}
 
+    calibration_source = "medqa_routine" if use_routine_cal else "medqa"
     rtc_multipliers, ede_kwargs = load_calibration_config()
     rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
     ede = EDE(**ede_kwargs)
@@ -249,15 +274,19 @@ def run_medabstain_eval(
     print(f"  총 {len(cases)}개 케이스 로드 완료")
 
     # Step 3: 케이스별 평가
+    # distribution_source="medabstain": MedQA와 다른 분포 명시 → WeightedCP 자동 활성화
+    # (calibration=medqa, evaluation=medabstain → exchangeability 위반 가능성 알림 + 보정)
     print(f"\n[3/3] {len(cases)}개 케이스 평가 중...")
     case_results = []
 
     for i, case in enumerate(cases):
+        # MedAbstain 케이스는 MedQA와 다른 분포 → distribution_source="medabstain"으로 표시
+        eval_dist = "medabstain"
         try:
             result = evaluate_case(
                 uqm=uqm, rtc=rtc, ede=ede,
                 question=case.question,
-                distribution_source="medqa",   # MedAbstain은 MedQA 기반
+                distribution_source=eval_dist,
                 specialty=case.specialty or "internal_medicine",
                 scenario_type=case.scenario_type or "rare_disease",
             )
@@ -275,6 +304,7 @@ def run_medabstain_eval(
                     f"  [{i+1:3d}/{len(cases)}] {case.source:<20} "
                     f"esc={result['escalated']} expected={case.expected_escalate} "
                     f"{mark} score={result['nonconformity_score']:.3f}"
+                    + (" wCP" if result.get("weighted_cp_used") else "")
                 )
         except Exception as e:
             result = {
@@ -298,13 +328,17 @@ def run_medabstain_eval(
     # Abstention Accuracy (LLM 자체 불확실성 표현 능력 측정)
     abstention_stats = compute_abstention_accuracy(case_results)
 
+    wcp_count = sum(1 for r in case_results if r.get("weighted_cp_used"))
+    print(f"\n  [WeightedCP 적용: {wcp_count}/{len(case_results)}건]")
+
     return {
         "backend": backend,
         "timestamp": datetime.now().isoformat(),
         "scoring_method": uqm.active_scoring_method,
         "use_weighted_cp": use_weighted_cp,
+        "use_routine_cal": use_routine_cal,
         "n_calibration": n_cal,
-        "calibration_source": "medqa",
+        "calibration_source": calibration_source,
         "coverage_report": coverage_report,
         "variants_evaluated": variants,
         "abstention_accuracy": abstention_stats,
@@ -403,8 +437,8 @@ if __name__ == "__main__":
         choices=["lmstudio", "openai"],
         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
     )
-    parser.add_argument("--n-cal", type=int, default=30,
-                        help="MedQA calibration 질문 수 (권장: 500)")
+    parser.add_argument("--n-cal", type=int, default=500,
+                        help="캘리브레이션 질문 수 (권장: 500)")
     parser.add_argument("--n", type=int, default=50,
                         help="변형별 케이스 수 (권장: 100)")
     parser.add_argument(
@@ -419,6 +453,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weighted-cp", action="store_true",
         help="Weighted CP 사용 (Tibshirani et al., 2019)",
+    )
+    parser.add_argument(
+        "--no-routine-cal", action="store_true",
+        help="루틴 캘리브레이션 비활성화 → 전체 MedQA로 캘리브레이션 (기본: 루틴만 사용)",
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -435,6 +473,7 @@ if __name__ == "__main__":
                 scoring_method=args.scoring_method,
                 variants=args.variants,
                 use_weighted_cp=args.weighted_cp,
+                use_routine_cal=not args.no_routine_cal,
                 seed=args.seed,
             )
             if result:

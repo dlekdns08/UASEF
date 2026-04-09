@@ -185,6 +185,13 @@ def run_baseline_comparison(
             exp = case.expected_escalate
             processed += 1
 
+            # 케이스 출처에 따라 distribution_source 결정
+            # MedAbstain 케이스는 MedQA와 다른 분포 → WeightedCP 보정 활성화
+            dist_source = (
+                "medabstain" if getattr(case, "source", "").startswith("medabstain")
+                else "medqa"
+            )
+
             # Baseline 1: 절대 에스컬레이션 안 함
             strategy_results["no_escalation"].append({
                 "escalated": False,
@@ -194,7 +201,7 @@ def run_baseline_comparison(
 
             # Baseline 2: CP Trigger 1만
             try:
-                esc_t1, score = run_threshold_only(uqm, rtc_config, q, "medqa")
+                esc_t1, score = run_threshold_only(uqm, rtc_config, q, dist_source)
             except Exception as e:
                 print(f"  [{processed}/{total_cases}] threshold_only 오류: {e}")
                 esc_t1, score = False, 0.0
@@ -208,7 +215,7 @@ def run_baseline_comparison(
             # Baseline 3: Full UASEF
             try:
                 esc_full, score_full = run_full_uasef(
-                    uqm, rtc, ede, q, specialty, stype, "medqa"
+                    uqm, rtc, ede, q, specialty, stype, dist_source
                 )
             except Exception as e:
                 print(f"  [{processed}/{total_cases}] full_uasef 오류: {e}")

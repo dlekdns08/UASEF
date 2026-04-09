@@ -392,6 +392,76 @@ def load_calibration_questions(
     return result
 
 
+def load_noesc_calibration_questions(
+    n: int = 500,
+    split: str = "train",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[str]:
+    """
+    Non-escalation(루틴) MedQA 질문만 반환합니다.
+
+    MedAbstain 평가 시 one-class CP 캘리브레이션에 사용합니다.
+    MedQA 루틴 케이스(모델이 자신있게 답변하는 쉬운 질문)만 사용하면
+    q̂가 낮게 설정되어 AP/NAP/A 탐지율이 높아집니다.
+
+    설계 근거:
+        기존 방식(전체 MedQA 캘리브레이션): q̂ = USMLE 전체 95th percentile → 높음
+        루틴 캘리브레이션: q̂ = 쉬운 질문 95th percentile → 낮음
+        MedAbstain 불확실 케이스가 낮은 q̂를 초과할 가능성이 높아짐.
+
+    Args:
+        n:     반환할 질문 수
+        split: "train" | "test"
+        seed:  재현성 시드
+
+    Returns:
+        list[str]: expected_escalate=False인 루틴 질문 텍스트 목록
+    """
+    n_load = max(n * 8, 3000)  # 루틴 비율이 낮을 수 있어 넉넉히 로드
+    local_path = _RAW_DIR / f"medqa_{split}.jsonl"
+
+    if local_path.exists():
+        all_cases = _load_from_local_jsonl(local_path, n_load, seed)
+        if verbose:
+            print(f"[DataLoader] Non-esc calibration — 로컬 JSONL 로드: {len(all_cases)}개")
+    else:
+        try:
+            all_cases = _load_from_huggingface(split, n_load, seed)
+            if verbose:
+                print(f"[DataLoader] Non-esc calibration — HuggingFace 로드: {len(all_cases)}개")
+        except Exception as e:
+            if verbose:
+                print(f"[DataLoader] Non-esc calibration — 로드 실패: {e} → 폴백 사용")
+            all_cases = []
+
+    # expected_escalate=False인 루틴 케이스만 필터링
+    noesc = [c for c in all_cases if not c.expected_escalate]
+
+    rng = random.Random(seed)
+    rng.shuffle(noesc)
+    selected = noesc[:n]
+
+    if len(selected) < n:
+        # 폴백: 내장 루틴 질문 반복 확장
+        fallback_routine = [c.question for c in _FALLBACK_SCENARIOS if not c.expected_escalate]
+        extra_needed = n - len(selected)
+        extra = (fallback_routine * (extra_needed // max(len(fallback_routine), 1) + 1))[:extra_needed]
+        if verbose:
+            print(
+                f"[DataLoader] Non-esc 루틴 질문 부족 ({len(selected)}개) "
+                f"→ 폴백으로 {len(extra)}개 보충 (총 {len(selected) + len(extra)}개 / 요청 {n}개)"
+            )
+        return [c.question for c in selected] + extra
+
+    if verbose:
+        print(
+            f"[DataLoader] Non-esc calibration: {len(selected)}개 "
+            f"(루틴/step1, {split} split, 에스컬레이션 없음 확인)"
+        )
+    return [c.question for c in selected]
+
+
 def load_scenarios(
     n_per_scenario: int = 10,
     split: str = "test",
@@ -771,10 +841,15 @@ def case_to_experiment_dict(case: MedQACase) -> dict:
 
 def case_to_agent_dict(case: MedQACase) -> dict:
     """MedQACase → run_agent_experiment.py AGENT_SCENARIOS 포맷으로 변환."""
+    # distribution_source: MedAbstain 케이스는 WeightedCP 보정을 위해 "medabstain" 명시
+    dist_source = (
+        "medabstain" if case.source.startswith("medabstain") else "medqa"
+    )
     return {
         "id": f"{case.source[:3].upper()}-{hash(case.question) % 10000:04d}",
         "question": case.question,
         "specialty": case.specialty,
         "scenario_type": case.scenario_type,
         "expected_escalate": case.expected_escalate,
+        "distribution_source": dist_source,
     }

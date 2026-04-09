@@ -145,6 +145,9 @@ def run_backend_experiment(
         print(f"\n  [{sid}] specialty={specialty}, type={scenario_type}")
         print(f"  Q: {scenario['question'][:70]}...")
 
+        # 케이스별 distribution_source: MedAbstain이면 WeightedCP 활성화
+        case_dist_source = scenario.get("distribution_source", distribution_source)
+
         # 시나리오별 컴포넌트 생성 (specialty/scenario_type 반영)
         components = AgentComponents(
             uqm=uqm,
@@ -153,7 +156,7 @@ def run_backend_experiment(
             backend=backend,
             specialty=specialty,
             scenario_type=scenario_type,
-            distribution_source=distribution_source,
+            distribution_source=case_dist_source,
         )
 
         graph = build_graph(components)
