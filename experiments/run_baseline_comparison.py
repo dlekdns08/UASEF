@@ -128,7 +128,7 @@ def _scoring_method_for(backend: str) -> str:
 def run_baseline_comparison(
     backend: str,
     n_cal: int = 500,
-    n_test: int = 10,
+    n_test: int = 50,
     scoring_method: str = "auto",
     alpha: float = None,
     seed: int = 42,
@@ -139,7 +139,7 @@ def run_baseline_comparison(
     role = "[Primary]" if effective_method == "logprob" else "[Ablation]"
 
     cfg = load_config()
-    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
 
     print(f"\n{'='*65}")
     print(f"  베이스라인 비교 — Backend: {backend.upper()}  {role}")
@@ -317,15 +317,15 @@ if __name__ == "__main__":
     )
     parser.add_argument("--n-cal", type=int, default=500,
                         help="calibration 질문 수 (권장: 500)")
-    parser.add_argument("--n-test", type=int, default=10,
+    parser.add_argument("--n-test", type=int, default=50,
                         help="시나리오별 테스트 케이스 수 (권장: 50)")
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
-    parser.add_argument("--alpha", type=float, default=0.15,
-                        help="Conformal prediction α (기본: 0.15)")
+    parser.add_argument("--alpha", type=float, default=None,
+                        help="Conformal prediction α (기본: base_config.yaml uqm.alpha = 0.10)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
