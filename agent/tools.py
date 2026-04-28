@@ -1,7 +1,10 @@
 """
 UASEF Agent — 의료 도구 모음 (Mock 구현)
 
-실제 연구에서는 아래 소스로 교체:
+⚠ 본 4종 도구는 모두 Mock입니다. 보고서 7.4절(논의·한계)에 명시되어 있으며,
+   본 연구의 목적이 UASEF 안전 게이트의 효과 검증이므로 도구 정확도가 결과에 미치는
+   영향은 제한적입니다. 실제 임상 배포 시 아래 인증된 임상 정보 소스로 교체해야 합니다:
+
   - drug_interaction_checker  → Drugs@FDA API / RxNorm / Lexicomp
   - clinical_guideline_search → UpToDate API / PubMed E-utilities
   - lab_reference_lookup      → LOINC / 기관 내 LIS 연동
