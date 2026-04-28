@@ -88,6 +88,9 @@ def evaluate_case(
         "triggers": [t.value for t in decision.triggers],
         "uasef_confidence": decision.confidence,
         "scoring_method": unc.scoring_method,
+        # full response: NO_EVIDENCE 문구가 답변 후반에 등장해도 abstention accuracy에 반영되도록
+        # 절단하지 않고 보존. JSON 결과 크기는 늘어나나 measurement 정확도가 우선.
+        "answer_text": unc.raw_response.text,
         "answer_preview": unc.raw_response.text[:200],
     }
 
@@ -166,17 +169,18 @@ def compute_abstention_accuracy(case_results: list[dict]) -> dict:
     if not valid:
         return {"error": "평가 가능한 케이스 없음"}
 
-    # answer_preview 필드가 없으면 계산 불가
-    has_preview = any("answer_preview" in r for r in valid)
-    if not has_preview:
+    # answer_text 또는 answer_preview 필드가 없으면 계산 불가
+    has_text = any(("answer_text" in r) or ("answer_preview" in r) for r in valid)
+    if not has_text:
         return {
-            "error": "answer_preview 필드 없음 — evaluate_case()에 응답 텍스트 포함 필요",
-            "note": "evaluate_case() 반환값에 answer_preview 키를 추가하면 자동 계산됩니다.",
+            "error": "answer_text/answer_preview 필드 없음 — evaluate_case()에 응답 텍스트 포함 필요",
+            "note": "evaluate_case() 반환값에 answer_text 키를 추가하면 자동 계산됩니다.",
         }
 
     ta = fa = tr = ma = 0
     for r in valid:
-        text = r.get("answer_preview", "").lower()
+        # answer_text(전체) 우선, 없으면 answer_preview(200자) 사용
+        text = (r.get("answer_text") or r.get("answer_preview") or "").lower()
         has_abstain = any(ph in text for ph in _NO_EVIDENCE_PHRASES)
         expected = r.get("expected_escalate", False)
 
