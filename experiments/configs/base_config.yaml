@@ -1,6 +1,6 @@
 uqm:
   alpha: 0.10
-  scoring_method: auto
+  scoring_method: logprob
   consistency_n: 5
   holdout_fraction: 0.2
 data:
