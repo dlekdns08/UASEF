@@ -42,6 +42,7 @@ from models.rtc_calibration import sweep_all_risk_levels
 from models.entropy_calibration import find_entropy_threshold
 from models.ede_coefficient_search import grid_search_ede_coefficients
 from data.loader import load_calibration_questions, load_scenarios, case_to_experiment_dict
+from experiments.config_utils import load_config
 
 
 # 시나리오 → 위험도 레이블 매핑
@@ -75,9 +76,10 @@ def _save_base_config(cfg: dict) -> None:
 
 def run_calibration_pipeline(
     backend: str = "openai",
-    n_calibration: int = 30,
-    n_labeled: int = 10,
+    n_calibration: int = 500,
+    n_labeled: int = 50,
     seed: int = 42,
+    alpha: float | None = None,
 ) -> dict:
     """
     전체 캘리브레이션 파이프라인을 실행합니다.
@@ -87,20 +89,24 @@ def run_calibration_pipeline(
         n_calibration: CP calibration용 비레이블 질문 수 (권장: ≥500)
         n_labeled:     RTC/EDE calibration용 레이블 케이스 수 (권장: ≥50/시나리오)
         seed:          재현성을 위한 랜덤 시드
+        alpha:         CP α. None이면 base_config.yaml의 uqm.alpha 사용 (기본 0.10).
+                       캘리브레이션 α와 평가 α가 일치해야 q̂가 유효합니다.
 
     Returns:
         캘리브레이션 결과 요약 dict (calibration_report.json에도 저장)
     """
     timestamp = datetime.now().isoformat()
-    report: dict = {"timestamp": timestamp, "backend": backend}
+    cfg = load_config()
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
+    report: dict = {"timestamp": timestamp, "backend": backend, "alpha": effective_alpha}
 
     # ── Step 1: CP Calibration → base threshold q̂ ────────────────────────────
     print("\n" + "="*65)
-    print("  Step 1/4: CP Calibration → base threshold q̂")
+    print(f"  Step 1/4: CP Calibration → base threshold q̂ (α={effective_alpha})")
     print("="*65)
 
     cal_questions = load_calibration_questions(n=n_calibration, split="train", seed=seed)
-    uqm = UQM(backend=backend, alpha=0.05, scoring_method="logprob")
+    uqm = UQM(backend=backend, alpha=effective_alpha, scoring_method="logprob")
 
     try:
         coverage_report = uqm.calibrate(
@@ -236,7 +242,14 @@ def run_calibration_pipeline(
     else:
         t1_weight = 0.4
         entropy_boost = 0.15
-        print(f"  [FALLBACK] 데이터 부족 → t1_weight={t1_weight}, entropy_boost={entropy_boost}")
+        import warnings
+        warnings.warn(
+            f"[EDE] 레이블 데이터 부족 (n={len(all_labels)} < 5) → "
+            f"하드코딩 fallback 계수 사용 (t1_weight={t1_weight}, entropy_boost={entropy_boost}). "
+            f"논문 품질 결과를 위해 n_labeled를 늘려 grid search가 동작하도록 하세요.",
+            UserWarning, stacklevel=2,
+        )
+        print(f"  [FALLBACK] 데이터 부족 → t1_weight={t1_weight}, entropy_boost={entropy_boost} (UserWarning 발생)")
         report["ede_grid_search"] = {
             "best_t1_weight": t1_weight,
             "best_entropy_boost": entropy_boost,
@@ -295,14 +308,19 @@ if __name__ == "__main__":
         "--seed", type=int, default=42,
         help="재현성을 위한 랜덤 시드",
     )
+    parser.add_argument(
+        "--alpha", type=float, default=None,
+        help="Conformal prediction α (기본: base_config.yaml uqm.alpha)",
+    )
     args = parser.parse_args()
 
     print(f"\n[Pipeline] backend={args.backend}, n_cal={args.n_cal}, "
-          f"n_labeled={args.n_labeled}, seed={args.seed}")
+          f"n_labeled={args.n_labeled}, seed={args.seed}, alpha={args.alpha}")
 
     run_calibration_pipeline(
         backend=args.backend,
         n_calibration=args.n_cal,
         n_labeled=args.n_labeled,
         seed=args.seed,
+        alpha=args.alpha,
     )
