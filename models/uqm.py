@@ -78,11 +78,16 @@ class CalibrationMetadata:
     distribution_source: str = "unknown"   # "medqa" | "mimic3" | "pubmedqa" | "custom"
     n_calibration: int = 0
     n_holdout: int = 0
-    alpha: float = 0.05
+    alpha: float = 0.10
     threshold: float = 0.0
     scoring_method: str = "logprob"
     timestamp: str = ""
     coverage_report: dict = field(default_factory=dict)
+
+
+# Self-consistency 점수 정규화 상수: Jaccard 다양성(0~1) × SC_NORMALIZATION_SCALE → 0~5 범위.
+# logprob 비적합 점수 평균(NLL ≈ 0~5)와 동일 스케일을 맞춰 두 방식의 q̂가 비교 가능하도록 함.
+SC_NORMALIZATION_SCALE: float = 5.0
 
 
 # ── 비적합 점수 계산 ────────────────────────────────────────────────────────────
@@ -158,7 +163,7 @@ def compute_self_consistency_score(
         query_model(backend, system_prompt, question, temperature=0.7, logprobs=False).text.strip()[:200]
         for _ in range(n)
     ]
-    return _answer_diversity(texts) * 5.0
+    return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
 
 
 # ── Conformal Prediction 임계값 보정 ───────────────────────────────────────────
@@ -169,7 +174,7 @@ class ConformalCalibrator:
     q̂ = ceil((n+1)(1-α))/n 번째 분위수
     """
 
-    def __init__(self, alpha: float = 0.05):
+    def __init__(self, alpha: float = 0.10):
         self.alpha = alpha
         self.threshold: float = float("inf")
         self.calibration_scores: list[float] = []
@@ -236,7 +241,7 @@ class WeightedConformalCalibrator:
         NeurIPS 2019. arXiv:1904.06019
     """
 
-    def __init__(self, alpha: float = 0.05, similarity_scale: float = 5.0):
+    def __init__(self, alpha: float = 0.10, similarity_scale: float = 5.0):
         self.alpha = alpha
         self.similarity_scale = similarity_scale  # Jaccard 가중치 배율
         self.threshold: float = float("inf")      # 참고용 표준 CP 임계값
@@ -336,12 +341,12 @@ class UQM:
             → 단, N회 쿼리로 비용/지연 N배 증가. 논문에서 ablation으로 명시 필수.
 
     권장 사용법 (논문 재현):
-        uqm = UQM(backend="openai", alpha=0.05, scoring_method="logprob")
+        uqm = UQM(backend="openai", alpha=0.10, scoring_method="logprob")
         report = uqm.calibrate(cal_questions, distribution_source="medqa")
         result = uqm.evaluate(question, distribution_source="medqa")
 
     Ablation 비교:
-        uqm_sc = UQM(backend="lmstudio", alpha=0.05, scoring_method="self_consistency")
+        uqm_sc = UQM(backend="lmstudio", alpha=0.10, scoring_method="self_consistency")
     """
 
     SYSTEM_PROMPT = (
@@ -356,7 +361,7 @@ class UQM:
     def __init__(
         self,
         backend: str,
-        alpha: float = 0.05,
+        alpha: float = 0.10,
         consistency_n: int = 5,
         scoring_method: str = "logprob",
         use_weighted_cp: bool = False,
@@ -435,6 +440,7 @@ class UQM:
         questions: list[str],
         holdout_fraction: float = 0.2,
         distribution_source: str = "unknown",
+        seed: int = 42,
     ) -> dict:
         """
         Calibration set으로 임계값을 학습하고 hold-out으로 coverage를 검증합니다.
@@ -443,12 +449,13 @@ class UQM:
             distribution_source: 데이터 출처. evaluate() 호출 시 다른 분포가 감지되면
                                   distribution shift 경고가 발생합니다.
                                   예: "medqa", "mimic3", "pubmedqa", "custom"
+            seed: holdout split 재현성 시드.
         """
         n_total = len(questions)
         n_holdout = max(1, int(n_total * holdout_fraction))
         n_cal = n_total - n_holdout
 
-        rng = random.Random(42)
+        rng = random.Random(seed)
         idx = list(range(n_total))
         rng.shuffle(idx)
         holdout_set = set(idx[:n_holdout])
@@ -605,14 +612,15 @@ class UQM:
 # ── 빠른 확인 ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
-    CAL = ["What is the first-line treatment for type 2 diabetes?"] * 5 + \
-          ["What antibiotic is used for community-acquired pneumonia?"] * 5 + \
-          ["What is the mechanism of beta-blockers?"] * 5
+    # 데모: α=0.10 → n_min = ceil(0.9/0.1) = 9. 데모용으로 n=20 사용.
+    CAL = ["What is the first-line treatment for type 2 diabetes?"] * 7 + \
+          ["What antibiotic is used for community-acquired pneumonia?"] * 7 + \
+          ["What is the mechanism of beta-blockers?"] * 6
 
     for sm in [ScoringMethod.LOGPROB, ScoringMethod.SELF_CONSISTENCY]:
         print(f"\n{'='*55}\nscoring_method={sm.value}")
         try:
-            uqm = UQM(backend="openai", alpha=0.05, scoring_method=sm.value)
+            uqm = UQM(backend="openai", alpha=0.10, scoring_method=sm.value)
             uqm.calibrate(CAL, distribution_source="medqa")
             r = uqm.evaluate("What is aspirin used for?", distribution_source="medqa")
             print(f"Score={r.nonconformity_score:.3f}, Margin={r.margin:.3f}, Escalate={r.should_escalate}, Method={r.scoring_method}")
