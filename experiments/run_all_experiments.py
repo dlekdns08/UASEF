@@ -407,11 +407,11 @@ def build_markdown_report(summary: dict) -> str:
     lines.append(f"> - 두 백엔드 모두 동일한 logprob 비적합 함수를 사용합니다. 모델 차이에 의한 성능 비교가 가능합니다.\n")
 
     def _role_label(backend: str, scoring_method: str | None = None) -> str:
-        """백엔드로 Primary/Ablation 레이블 결정. 두 백엔드 모두 logprob 사용."""
-        return "[Primary]" if backend == "openai" else "[Ablation]"
+        """백엔드 또는 scoring_method로 Primary/Ablation 레이블 결정.
 
-    def _role_label(backend: str, scoring_method: str | None = None) -> str:
-        """백엔드 또는 scoring_method로 Primary/Ablation 레이블 결정."""
+        scoring_method 우선: logprob → Primary, self_consistency → Ablation.
+        scoring_method 미지정 시 backend로 결정 (openai → Primary, 그 외 → Ablation).
+        """
         if scoring_method == "logprob":
             return "[Primary]"
         if scoring_method == "self_consistency":
@@ -635,7 +635,7 @@ def main() -> None:
                         help="에이전트·베이스라인 시나리오별 테스트 케이스 수 (논문 품질: 50)")
     parser.add_argument("--n-medabstain", type=int, default=50,
                         help="MedAbstain 변형별 케이스 수 (논문 품질: 100)")
-    parser.add_argument("--n-pareto-test", type=int, default=20,
+    parser.add_argument("--n-pareto-test", type=int, default=100,
                         help="Pareto Sweep 시나리오별 테스트 케이스 수 (논문 품질: 100)")
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
