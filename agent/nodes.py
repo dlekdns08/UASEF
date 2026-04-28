@@ -32,6 +32,9 @@ from agent.tools import MEDICAL_TOOLS
 
 # ── 시스템 프롬프트 ────────────────────────────────────────────────────────────
 
+# NOTE: 불확실성 표현 지시는 UQM.SYSTEM_PROMPT(models/uqm.py)와 의도적으로 동일한
+# 문구를 사용합니다. UASEF 외부 감사 패턴에서 두 컴포넌트의 응답 분포가 어긋나면
+# logprob 기반 비적합 점수의 calibration 일관성이 깨지기 때문입니다.
 SYSTEM_PROMPT = """\
 You are a clinical decision support AI helping analyze complex medical cases.
 
@@ -39,7 +42,10 @@ Your approach:
 1. Analyze the patient case carefully
 2. Use tools to gather evidence — drug interactions, guidelines, lab references, differentials
 3. After gathering enough evidence, synthesize into a clear clinical recommendation
-4. State confidence explicitly — if uncertain, say "I am not certain"
+4. IMPORTANT: If you are not fully confident, or if evidence is limited, conflicting,
+   or the question involves rare, experimental, or controversial conditions, you MUST
+   begin your answer with "I am not certain" or explicitly state "insufficient evidence",
+   "limited data", or "no clear guideline".
 
 Tool use guidelines:
 - Use drug_interaction_checker for any multi-drug regimen
