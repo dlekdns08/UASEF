@@ -106,6 +106,7 @@ def _classify_case(question: str, meta_info: str = "") -> tuple[str, str, bool]:
 
 # ── 내장 폴백 데이터 ─────────────────────────────────────────────────────────
 
+# 보고서 4.1: "내장 fallback (개발/테스트 전용, 30개)"
 _FALLBACK_CALIBRATION = [
     "What is the first-line treatment for stage 1 hypertension in a 55-year-old?",
     "What antibiotic is recommended for outpatient community-acquired pneumonia?",
@@ -127,6 +128,16 @@ _FALLBACK_CALIBRATION = [
     "What class of drug is used for heart failure with reduced ejection fraction?",
     "What is the normal glomerular filtration rate?",
     "What virus causes infectious mononucleosis?",
+    "What is the first-line treatment for hyperkalemia with ECG changes?",
+    "Which vaccine is recommended for adults aged 65 and older?",
+    "What is the recommended screening interval for colonoscopy in average-risk adults?",
+    "What is the diagnostic criterion for diabetic ketoacidosis?",
+    "Which antibiotic class is contraindicated in pregnancy?",
+    "What is the first-line treatment for Graves disease?",
+    "What ECG finding is pathognomonic for atrial fibrillation?",
+    "What is the most common cause of nephrotic syndrome in adults?",
+    "Which laboratory test is most specific for systemic lupus erythematosus?",
+    "What is the first-line therapy for community-acquired MRSA skin infection?",
 ]
 
 _FALLBACK_SCENARIOS: list[MedQACase] = [
@@ -603,10 +614,12 @@ def load_medabstain_cases(
         path = _RAW_DIR / f"medabstain_{variant}.jsonl"
         if not path.exists():
             if verbose:
+                # MedAbstain 출처: Zhu et al. 2023 (PromptBench 계열) — 논문 [5].
+                # 일부 사본은 sravanthi6m/MedAbstain 등 mirror 저장소에서 확인하세요.
                 print(
                     f"[DataLoader] MedAbstain {variant} 없음: {path}\n"
-                    f"  → GitHub에서 다운로드: https://github.com/HowieSiao/medabstain\n"
-                    f"     cp /tmp/medabstain/data/{variant}.jsonl {path}"
+                    f"  → 데이터셋 출처: Zhu et al. (2023) PromptBench (논문 참고문헌 [5])\n"
+                    f"     해당 파일을 {path} 에 위치시키세요."
                 )
             continue
         cases = _load_medabstain_jsonl(path, variant)
@@ -813,6 +826,9 @@ def load_pubmedqa(
         # "maybe" → 불확실 → 에스컬레이션 대상
         expected_escalate = (final_decision == "maybe")
 
+        # PubMedQA는 yes/no/maybe 3-class 분류 데이터셋. MedQACase의 4지선다
+        # options 필드와 의미가 다르므로, 분석 시 source="pubmedqa"로 구분하세요.
+        # answer/answer_idx 는 분석 호환을 위해 임의 매핑입니다 (정답 평가에 사용 X).
         cases.append(MedQACase(
             question=question,
             options={"A": "yes", "B": "no", "C": "maybe"},
@@ -832,10 +848,16 @@ def load_pubmedqa(
 
 def case_to_experiment_dict(case: MedQACase) -> dict:
     """MedQACase → run_experiment.py SCENARIOS 포맷으로 변환."""
+    # MedAbstain 케이스는 MedQA와 다른 분포 → "medabstain"으로 표시 (WeightedCP 활성화)
+    dist_source = (
+        "medabstain" if case.source.startswith("medabstain") else "medqa"
+    )
     return {
         "id": f"{case.source[:3].upper()}-{hash(case.question) % 10000:04d}",
         "question": case.question,
         "expected_escalate": case.expected_escalate,
+        "source": case.source,
+        "distribution_source": dist_source,
     }
 
 
