@@ -8,10 +8,10 @@ scenario:
   description: "시나리오 B — 희귀질환: 유전질환, 이온통로병증, 희소 신경계 질환"
 
 uqm:
-  alpha: 0.05              # 희귀질환도 높은 coverage 유지
+  alpha: 0.10              # base_config.yaml과 동일. CP 보장은 RTC 배율로 강화 (HIGH ×0.75 × 0.90).
 
 data:
-  n_test_per_scenario: 10
+  n_test_per_scenario: 50
   # MedAbstain NAP/AP 변형 적극 활용 (희귀질환 → 모델 불확실성 높음)
   distribution_source: medqa
 

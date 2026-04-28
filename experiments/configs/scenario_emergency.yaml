@@ -8,10 +8,10 @@ scenario:
   description: "시나리오 A — 응급: STEMI, 패혈증, 아나필락시스"
 
 uqm:
-  alpha: 0.05              # 응급은 높은 coverage 유지 (낮은 alpha)
+  alpha: 0.10              # base_config.yaml과 동일. 시나리오별로 α를 변경하지 않음(CP 보장 유지).
 
 data:
-  n_test_per_scenario: 10
+  n_test_per_scenario: 50
   distribution_source: medqa
 
-# 응급 시나리오는 RTC에서 CRITICAL 배율(×0.60 × 0.85) 적용 → 매우 보수적 threshold
+# 응급 시나리오는 RTC에서 CRITICAL 배율(×0.60 × 0.90) 적용 → 매우 보수적 threshold

@@ -8,10 +8,10 @@ scenario:
   description: "시나리오 C — 복잡 다중이환: 3개 이상 만성질환 동시 관리"
 
 uqm:
-  alpha: 0.05
+  alpha: 0.10              # base_config.yaml과 동일. MODERATE 위험도(배율 ×1.00) 사용.
 
 data:
-  n_test_per_scenario: 10
+  n_test_per_scenario: 50
   distribution_source: medqa
 
 # 다중이환 시나리오: MedQA에서 3개+ 만성질환 키워드를 포함하는 질문 자동 필터링
