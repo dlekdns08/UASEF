@@ -1,7 +1,13 @@
 """
 UASEF — Model Interface Layer
-LMStudio(로컬)와 OpenAI를 동일한 인터페이스로 추상화합니다.
-LMStudio는 OpenAI-compatible API를 제공하므로 base_url만 바꾸면 됩니다.
+
+지원 백엔드:
+  - openai   : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
+  - lmstudio : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
+  - mlx      : Apple MLX 서버. 보고서엔 미수록된 추가 옵션이며, mlx-lm 0.19+ 필요.
+               OpenAI-compatible /v1/chat/completions 사용. 논문 보고 시에는 ablation으로 명시.
+
+세 백엔드 모두 OpenAI-compatible API를 제공하므로 base_url만 바꾸면 됩니다.
 """
 
 import os
