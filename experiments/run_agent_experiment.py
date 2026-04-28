@@ -105,7 +105,7 @@ def run_backend_experiment(
     distribution_source: str = "medqa",
 ) -> dict:
     cfg = load_config()
-    alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.05)
+    alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
 
     # "auto"이면 백엔드별 자동 선택
     effective_method = (
@@ -321,7 +321,7 @@ if __name__ == "__main__":
         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
-    parser.add_argument("--n-test", type=int, default=3, help="시나리오별 테스트 케이스 수 (권장: 50)")
+    parser.add_argument("--n-test", type=int, default=50, help="시나리오별 테스트 케이스 수 (권장: 50)")
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
