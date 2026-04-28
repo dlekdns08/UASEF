@@ -17,8 +17,9 @@ Pareto 기준: Safety Recall ≥ target AND Over-Escalation ≤ target인
 from __future__ import annotations
 
 # 위험도별 배율 후보 (Pareto sweep 탐색 범위)
+# 보고서 3.2.2 예시: CRITICAL ∈ {0.55, 0.60, 0.65, 0.70, 0.75}
 MULTIPLIER_CANDIDATES: dict[str, list[float]] = {
-    "CRITICAL": [0.50, 0.55, 0.60, 0.65, 0.70],
+    "CRITICAL": [0.55, 0.60, 0.65, 0.70, 0.75],
     "HIGH":     [0.70, 0.75, 0.80, 0.85],
     "MODERATE": [0.90, 1.00, 1.10],
     "LOW":      [1.20, 1.25, 1.30, 1.35, 1.40],
