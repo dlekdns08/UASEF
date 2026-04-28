@@ -2,6 +2,10 @@
 
 > 기준 실험 결과(Safety Recall: OpenAI 0.70 / LMStudio 0.47)에서 Safety Recall ≥ 0.95 목표치 달성을 위한 개선 작업.
 > 모델 변경 없이 시스템 파라미터 및 코드 수준에서 개선.
+>
+> ⚠ **참고용 스냅샷**: `improvements/improved/` 하위 파일은 라운드별 변경 시점의 스냅샷이며
+> 최신 코드와 동기화되지 않을 수 있습니다. 실제 운영 코드는 저장소 루트의
+> `models/`, `experiments/`, `data/` 디렉터리를 참조하세요.
 
 ## 폴더 구조
 
