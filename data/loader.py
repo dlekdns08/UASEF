@@ -496,13 +496,14 @@ def load_noesc_calibration_questions(
     selected = noesc[:n]
 
     if len(selected) < n:
-        # 폴백: 내장 루틴 질문 반복 확장
+        # 폴백: 내장 루틴 질문 반복 확장 — audit issue #3로 기본 차단
+        _refuse_fallback(f"load_noesc_calibration_questions (실제 {len(selected)}개 / 요청 {n}개)")
         fallback_routine = [c.question for c in _FALLBACK_SCENARIOS if not c.expected_escalate]
         extra_needed = n - len(selected)
         extra = (fallback_routine * (extra_needed // max(len(fallback_routine), 1) + 1))[:extra_needed]
         if verbose:
             print(
-                f"[DataLoader] Non-esc 루틴 질문 부족 ({len(selected)}개) "
+                f"[DataLoader] [WARNING] Non-esc 루틴 질문 부족 ({len(selected)}개) "
                 f"→ 폴백으로 {len(extra)}개 보충 (총 {len(selected) + len(extra)}개 / 요청 {n}개)"
             )
         return [c.question for c in selected] + extra
