@@ -210,12 +210,18 @@ def run_pareto_sweep(
 ) -> list[dict]:
     """
     모든 (α, specialty) 조합에 대해 Pareto point를 측정합니다.
-    각 α마다 UQM을 새로 보정합니다 (독립적 실험 조건).
+
+    audit issue #9 (2026-05-07):
+        과거: α마다 UQM.calibrate를 새로 호출 → 동일 cal_questions에 대해
+              LLM 호출이 6× 중복 발생 (6 alphas × 3 specialties = 18회).
+        개선: cal_scores와 test_scores를 (backend, scoring_method)당 1회만 계산하고
+              모든 α에서 공유 → LLM 호출 6× 절감.
     """
     print(f"\n{'='*60}")
     print(f"  Pareto Sweep — backend={backend}, scoring={scoring_method}")
     print(f"  α values: {ALPHAS}")
     print(f"  Specialties: {[s[0] for s in SPECIALTIES]}")
+    print(f"  (audit issue #9: score 캐싱 활성화 — α 변화에도 LLM 1회만 호출)")
     print(f"{'='*60}")
 
     # 데이터 로드 (스윕 전체에서 공유)
@@ -223,40 +229,52 @@ def run_pareto_sweep(
     cal_questions = load_calibration_questions(n=n_calibration, split="train", seed=seed)
     scenario_map = load_scenarios(n_per_scenario=n_test, split="test", seed=seed)
 
-    results = []
-    total = len(ALPHAS) * len(SPECIALTIES)
-    done = 0
+    # ── 1단계: cal_scores 한 번만 계산 ──────────────────────────────────────
+    print(f"\n[Phase 1] Calibration scores 계산 (1회) ...")
+    cal_scores_all = _compute_scores(backend, cal_questions, scoring_method, "cal")
+    cal_scores, holdout_scores = _split_cal_holdout(cal_scores_all, holdout_fraction=0.2, seed=seed)
+    print(f"  cal n={len(cal_scores)} / holdout n={len(holdout_scores)}")
 
+    # ── 2단계: 시나리오별 test_scores 한 번만 계산 ──────────────────────────
+    print(f"\n[Phase 2] Test scores 계산 (시나리오별 1회) ...")
+    test_scores_by_scenario: dict[str, list[float]] = {}
+    for specialty, scenario_type in SPECIALTIES:
+        test_cases_raw = scenario_map.get(scenario_type, [])
+        if not test_cases_raw:
+            print(f"  [{scenario_type}] 테스트 케이스 없음 — 건너뜀")
+            continue
+        test_qs = [c.question for c in test_cases_raw]
+        ts = _compute_scores(backend, test_qs, scoring_method, f"test/{scenario_type}")
+        test_scores_by_scenario[scenario_type] = ts
+        print(f"  [{scenario_type}] n={len(ts)}")
+
+    # ── 3단계: 모든 (α, specialty) 조합을 캐시된 점수로 평가 ────────────────
+    print(f"\n[Phase 3] {len(ALPHAS)} × {len(SPECIALTIES)} 포인트 평가 ...")
+    results = []
     for alpha in ALPHAS:
         for specialty, scenario_type in SPECIALTIES:
-            done += 1
-            test_cases_raw = scenario_map.get(scenario_type, [])
-            test_cases = [{"question": c.question} for c in test_cases_raw]
-
-            if not test_cases:
-                print(f"  [{done}/{total}] α={alpha:.2f}, {specialty}: 테스트 케이스 없음 — 건너뜀")
+            ts = test_scores_by_scenario.get(scenario_type, [])
+            if not ts:
                 continue
-
-            print(f"\n  [{done}/{total}] α={alpha:.2f}, specialty={specialty} "
-                  f"(n_test={len(test_cases)})...")
             try:
-                point = measure_pareto_point(
-                    backend=backend,
+                point = measure_pareto_point_from_scores(
                     alpha=alpha,
                     specialty=specialty,
                     scenario_type=scenario_type,
-                    cal_questions=cal_questions,
-                    test_cases=test_cases,
+                    cal_scores=cal_scores,
+                    holdout_scores=holdout_scores,
+                    test_scores=ts,
+                    distribution_source="medqa",
                     scoring_method=scoring_method,
                 )
                 results.append(point)
                 print(
-                    f"    coverage={point['actual_coverage']:.3f} "
-                    f"(목표={point['target_coverage']:.2f}) | "
-                    f"escalation_rate={point['escalation_rate']:.3f}"
+                    f"  α={alpha:.2f} {specialty:<22} "
+                    f"coverage={point['actual_coverage']:.3f} | "
+                    f"esc_rate={point['escalation_rate']:.3f}"
                 )
             except Exception as e:
-                print(f"    [ERROR] {e}")
+                print(f"  α={alpha:.2f} {specialty} [ERROR] {e}")
 
     return results
 
