@@ -500,6 +500,9 @@ if __name__ == "__main__":
                 use_weighted_cp=args.weighted_cp,
                 use_routine_cal=not args.no_routine_cal,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
