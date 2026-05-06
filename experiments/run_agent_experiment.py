@@ -174,6 +174,7 @@ def run_backend_experiment(
             specialty=specialty,
             scenario_type=scenario_type,
             distribution_source=case_dist_source,
+            prompt_mode=prompt_mode,   # audit #5
         )
 
         graph = build_graph(components)
