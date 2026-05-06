@@ -492,20 +492,27 @@ def build_markdown_report(summary: dict) -> str:
     h(2, "2. 베이스라인 비교 실험")
     baseline = summary.get("baseline", {})
     if baseline:
-        lines.append(row("Backend", "Role", "전략", "Safety Recall", "Over-Esc. Rate",
-                         "TP", "FN", "FP", "TN", "OK(≥0.95)"))
-        lines.append(sep(10, 11, 22, 14, 16, 4, 4, 4, 4, 10))
+        lines.append(row("Backend", "Role", "전략", "Safety Recall", "95% CI",
+                         "Over-Esc. Rate", "Over-Esc. CI", "TP", "FN", "FP", "TN", "OK(≥0.95)"))
+        lines.append(sep(10, 11, 22, 14, 14, 14, 14, 4, 4, 4, 4, 10))
         for backend, strategies in baseline.items():
             role = _role_label(backend)
             for strategy, m in strategies.items():
                 if "error" in m:
-                    lines.append(row(backend, role, strategy, "오류", "", "", "", "", "", ""))
+                    lines.append(row(backend, role, strategy, "오류", "", "", "", "", "", "", "", ""))
                     continue
                 ok = "✓" if m.get("safety_recall_ok") else "✗"
+                # audit #11: Wilson 95% CI 표기
+                sci = m.get("safety_recall_ci")
+                oci = m.get("over_escalation_ci")
+                sci_str = f"[{sci[0]:.3f},{sci[1]:.3f}]" if sci else ""
+                oci_str = f"[{oci[0]:.3f},{oci[1]:.3f}]" if oci else ""
                 lines.append(row(
                     backend, role, strategy,
                     _fmt(m.get("safety_recall")),
+                    sci_str,
                     _fmt(m.get("over_escalation_rate")),
+                    oci_str,
                     m.get("tp", ""), m.get("fn", ""), m.get("fp", ""), m.get("tn", ""),
                     ok,
                 ))
