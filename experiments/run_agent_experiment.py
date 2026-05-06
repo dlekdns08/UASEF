@@ -151,7 +151,11 @@ def run_backend_experiment(
         # 시나리오별 컴포넌트 생성 (specialty/scenario_type 반영)
         components = AgentComponents(
             uqm=uqm,
-            rtc=RTC(base_threshold=base_threshold, multipliers=rtc_multipliers),
+            rtc=RTC(
+                base_threshold=base_threshold,
+                multipliers=rtc_multipliers,
+                scenario_multipliers=_scenario_multipliers,
+            ),
             ede=EDE(**ede_kwargs),
             backend=backend,
             specialty=specialty,
