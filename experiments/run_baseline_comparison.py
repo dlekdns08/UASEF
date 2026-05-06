@@ -146,7 +146,13 @@ def run_baseline_comparison(
         return {}
 
     rtc_multipliers, ede_kwargs = load_calibration_config()
-    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
+    from experiments.config_utils import load_scenario_multipliers
+    scenario_multipliers = load_scenario_multipliers()
+    rtc = RTC(
+        base_threshold=uqm.calibrator.threshold,
+        multipliers=rtc_multipliers,
+        scenario_multipliers=scenario_multipliers,
+    )
     ede = EDE(**ede_kwargs)
 
     # 테스트 케이스 로드
