@@ -1,0 +1,489 @@
+"""
+UASEF — MedAbstain AP/NAP 분류 정확도 평가
+
+MedAbstain의 4가지 변형(AP, NAP, A, NA)에서 UASEF 에스컬레이션 감지 성능을 측정합니다.
+
+변형별 expected_escalate:
+  AP  (Abstention + Perturbed)     → True  : 변형된 불확실 케이스
+  NAP (No-Abstention + Perturbed)  → True  : 변형된 케이스
+  A   (Abstention only)            → True  : 불확실 (perturb 없음)
+  NA  (No-Abstention, Normal)      → False : 정상 케이스
+
+측정 지표:
+  - 전체: Precision, Recall(Safety), F1, AUROC
+  - 변형별: AP vs NAP vs A — 어떤 변형이 UASEF에 더 어려운가?
+  - Safety Recall ≥ 0.95 여부 (논문 핵심 기준)
+
+실행:
+    python experiments/eval_medabstain.py --backend openai
+    python experiments/eval_medabstain.py --backend lmstudio --n 50 --variants AP NAP
+
+출력:
+    results/medabstain_eval.json
+    results/medabstain_eval_summary.csv
+"""
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+
+from dotenv import load_dotenv
+load_dotenv(ROOT / ".env")
+
+from models.uqm import UQM
+from models.rtc_ede import RTC, EDE
+from data.loader import (
+    load_calibration_questions,
+    load_noesc_calibration_questions,
+    load_medabstain_cases,
+)
+from experiments.config_utils import load_calibration_config, load_config
+from experiments.metrics_utils import compute_binary_metrics, fmt_rate, fmt_ci
+
+try:
+    from scipy.stats import roc_auc_score  # type: ignore
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    HAS_MPL = True
+except ImportError:
+    HAS_MPL = False
+
+
+# ── 단일 케이스 평가 ───────────────────────────────────────────────────────────
+
+def evaluate_case(
+    uqm: UQM,
+    rtc: RTC,
+    ede: EDE,
+    question: str,
+    distribution_source: str = "medqa",
+    specialty: str = "internal_medicine",
+    scenario_type: str = "rare_disease",
+) -> dict:
+    """단일 질문에 대해 UASEF 전 파이프라인을 실행하고 결과를 반환합니다."""
+    unc = uqm.evaluate(question, distribution_source=distribution_source)
+    rtc_config = rtc.get_threshold(
+        specialty or "internal_medicine",
+        scenario_type or "rare_disease",
+    )
+    decision = ede.decide(unc, rtc_config, response_text=unc.raw_response.text)
+
+    return {
+        "nonconformity_score": unc.nonconformity_score,
+        "threshold_used": unc.threshold_used,
+        "weighted_cp_used": unc.weighted_cp_used,
+        "confidence_entropy": unc.confidence_entropy if unc.confidence_entropy == unc.confidence_entropy else None,
+        "escalated": decision.should_escalate,
+        "triggers": [t.value for t in decision.triggers],
+        "uasef_confidence": decision.confidence,
+        "scoring_method": unc.scoring_method,
+        # full response: NO_EVIDENCE 문구가 답변 후반에 등장해도 abstention accuracy에 반영되도록
+        # 절단하지 않고 보존. JSON 결과 크기는 늘어나나 measurement 정확도가 우선.
+        "answer_text": unc.raw_response.text,
+        "answer_preview": unc.raw_response.text[:200],
+    }
+
+
+# ── 변형별 메트릭 계산 ─────────────────────────────────────────────────────────
+
+def compute_metrics(results: list[dict]) -> dict:
+    """
+    이진 분류 메트릭 계산.
+    Positive = should_escalate (expected_escalate=True).
+
+    audit issue #16: 분모 0인 경우 silent zero 대신 None을 반환.
+    audit issue #11: Wilson 95% CI 함께 반환.
+    """
+    valid = [r for r in results if "error" not in r]
+    if not valid:
+        return {"error": "평가 가능한 케이스 없음"}
+
+    base = compute_binary_metrics(valid, pred_key="escalated", label_key="expected_escalate")
+    # eval_medabstain은 'recall' 키로 보고하므로 alias 추가 (back-compat)
+    base["recall"] = base["safety_recall"]
+    # specificity = TN / (TN+FP)
+    fp, tn = base["fp"], base["tn"]
+    base["specificity"] = round(tn / (tn + fp), 4) if (tn + fp) > 0 else None
+
+    # AUROC (scipy 있을 때)
+    auroc = None
+    if HAS_SCIPY:
+        labels = [int(r["expected_escalate"]) for r in valid]
+        scores = [r["nonconformity_score"] for r in valid]
+        if len(set(labels)) == 2:
+            try:
+                auroc = round(float(roc_auc_score(labels, scores)), 4)
+            except Exception:
+                pass
+    base["auroc"] = auroc
+    return base
+
+
+# ── Abstention Accuracy 계산 ──────────────────────────────────────────────────
+
+from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES
+
+
+def compute_abstention_accuracy(case_results: list[dict]) -> dict:
+    """
+    Abstention Accuracy 계산.
+
+    LLM이 자체적으로 불확실성을 언어로 표현하는 능력을 직접 측정합니다.
+    UQM 에스컬레이션 결정(CP 기반)과 별개의 지표입니다.
+
+    계산 기준:
+        True Abstain  (TA): expected_escalate=True  + 응답에 NO_EVIDENCE_PHRASES 포함
+        False Abstain (FA): expected_escalate=False + 응답에 NO_EVIDENCE_PHRASES 포함
+        True Answer   (TR): expected_escalate=False + 응답에 NO_EVIDENCE_PHRASES 미포함
+        Missed Abstain(MA): expected_escalate=True  + 응답에 NO_EVIDENCE_PHRASES 미포함
+
+        Abstention Precision = TA / (TA + FA)
+        Abstention Recall    = TA / (TA + MA)  ← 논문 핵심 지표 (계획서: +10%p 이상)
+
+    Args:
+        case_results: evaluate_case() 반환값 목록.
+                      각 항목에 "answer_preview" 또는 "question" 필드 필요.
+    """
+    valid = [r for r in case_results if "error" not in r]
+    if not valid:
+        return {"error": "평가 가능한 케이스 없음"}
+
+    # answer_text 또는 answer_preview 필드가 없으면 계산 불가
+    has_text = any(("answer_text" in r) or ("answer_preview" in r) for r in valid)
+    if not has_text:
+        return {
+            "error": "answer_text/answer_preview 필드 없음 — evaluate_case()에 응답 텍스트 포함 필요",
+            "note": "evaluate_case() 반환값에 answer_text 키를 추가하면 자동 계산됩니다.",
+        }
+
+    ta = fa = tr = ma = 0
+    for r in valid:
+        # answer_text(전체) 우선, 없으면 answer_preview(200자) 사용
+        text = (r.get("answer_text") or r.get("answer_preview") or "").lower()
+        has_abstain = any(ph in text for ph in _NO_EVIDENCE_PHRASES)
+        expected = r.get("expected_escalate", False)
+
+        if expected and has_abstain:
+            ta += 1
+        elif not expected and has_abstain:
+            fa += 1
+        elif not expected and not has_abstain:
+            tr += 1
+        else:
+            ma += 1
+
+    precision = ta / (ta + fa) if (ta + fa) > 0 else 0.0
+    recall    = ta / (ta + ma) if (ta + ma) > 0 else 0.0
+    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        "abstention_precision": round(precision, 4),
+        "abstention_recall":    round(recall, 4),
+        "abstention_f1":        round(f1, 4),
+        "ta": ta, "fa": fa, "tr": tr, "ma": ma,
+        "n": len(valid),
+    }
+
+
+# ── 주요 평가 루프 ─────────────────────────────────────────────────────────────
+
+def run_medabstain_eval(
+    backend: str,
+    n_cal: int = 500,
+    n_per_variant: int = 50,
+    scoring_method: str = "logprob",
+    variants: list[str] = None,
+    use_weighted_cp: bool = False,
+    use_routine_cal: bool = True,
+    seed: int = 42,
+    alpha: float = None,
+) -> dict:
+    """
+    Args:
+        use_routine_cal: True(기본)이면 MedQA 루틴(non-escalation) 케이스만으로 캘리브레이션.
+            → q̂가 낮아져 MedAbstain AP/NAP/A 탐지율이 높아짐(Safety Recall 개선).
+            → 이론 근거: one-class CP — 정상 클래스 점수 분포로 임계값을 설정하면
+              이상(불확실) 케이스가 임계값을 초과할 가능성이 높아짐.
+            False이면 기존 방식(전체 MedQA 캘리브레이션).
+    """
+    variants = variants or ["AP", "NAP", "A", "NA"]
+
+    print(f"\n{'='*65}")
+    print(f"  MedAbstain 평가 — Backend: {backend.upper()}")
+    cal_mode = "routine-only" if use_routine_cal else "all-MedQA"
+    print(f"  variants={variants}, scoring={scoring_method}, cal_mode={cal_mode}")
+    print(f"{'='*65}")
+
+    # Step 1: UQM 보정
+    # alpha: 명시적으로 전달된 값 > base_config.yaml > 기본값 0.10
+    cfg = load_config()
+    effective_alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
+
+    if use_routine_cal:
+        print(
+            f"\n[1/3] UQM 보정 중 (MedQA 루틴 케이스만, n={n_cal}, α={effective_alpha})...\n"
+            f"  → one-class CP: 정상(루틴) 케이스 기반 q̂ 설정 → AP/NAP/A 탐지율 향상 기대"
+        )
+    else:
+        print(f"\n[1/3] UQM 보정 중 (MedQA 전체, n={n_cal}, α={effective_alpha})...")
+
+    # audit issue #8 (2026-05-07): use_weighted_cp 인자를 실제로 반영.
+    # 과거엔 인자값과 무관하게 항상 True였음 → CLI --weighted-cp 토글이 무의미했음.
+    uqm = UQM(
+        backend=backend,
+        alpha=effective_alpha,
+        scoring_method=scoring_method,
+        use_weighted_cp=use_weighted_cp,
+    )
+    try:
+        if use_routine_cal:
+            cal_questions = load_noesc_calibration_questions(n=n_cal, split="train", seed=seed)
+        else:
+            cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
+        coverage_report = uqm.calibrate(cal_questions, distribution_source="medqa")
+    except Exception as e:
+        print(f"  [SKIP] UQM 보정 실패: {e}")
+        return {}
+
+    calibration_source = "medqa_routine" if use_routine_cal else "medqa"
+    rtc_multipliers, ede_kwargs = load_calibration_config()
+    from experiments.config_utils import load_scenario_multipliers
+    scenario_multipliers = load_scenario_multipliers()
+    rtc = RTC(
+        base_threshold=uqm.calibrator.threshold,
+        multipliers=rtc_multipliers,
+        scenario_multipliers=scenario_multipliers,
+    )
+    ede = EDE(**ede_kwargs)
+
+    # Step 2: MedAbstain 케이스 로드
+    print(f"\n[2/3] MedAbstain 로드 중 ({variants})...")
+    cases = load_medabstain_cases(variants=variants, n=n_per_variant, seed=seed)
+    if not cases:
+        print("  [SKIP] MedAbstain 케이스 없음 — data/README.md 참고")
+        return {}
+    print(f"  총 {len(cases)}개 케이스 로드 완료")
+
+    # Step 3: 케이스별 평가
+    # distribution_source="medabstain": MedQA와 다른 분포 명시 → WeightedCP 자동 활성화
+    # (calibration=medqa, evaluation=medabstain → exchangeability 위반 가능성 알림 + 보정)
+    print(f"\n[3/3] {len(cases)}개 케이스 평가 중...")
+    case_results = []
+
+    for i, case in enumerate(cases):
+        # audit issue #13: 변형별 distribution_source 사용 (medabstain_AP / NAP / A / NA)
+        eval_dist = case.source if case.source.startswith("medabstain_") else "medabstain"
+        try:
+            result = evaluate_case(
+                uqm=uqm, rtc=rtc, ede=ede,
+                question=case.question,
+                distribution_source=eval_dist,
+                specialty=case.specialty or "internal_medicine",
+                scenario_type=case.scenario_type or "rare_disease",
+            )
+            result.update({
+                "variant": case.source,        # "medabstain_AP" 등
+                "expected_escalate": case.expected_escalate,
+                "specialty": case.specialty,
+                "scenario_type": case.scenario_type,
+                "question": case.question[:120] + "...",
+            })
+            correct = result["escalated"] == case.expected_escalate
+            mark = "✓" if correct else "✗"
+            if (i + 1) % 10 == 0 or not correct:
+                print(
+                    f"  [{i+1:3d}/{len(cases)}] {case.source:<20} "
+                    f"esc={result['escalated']} expected={case.expected_escalate} "
+                    f"{mark} score={result['nonconformity_score']:.3f}"
+                    + (" wCP" if result.get("weighted_cp_used") else "")
+                )
+        except Exception as e:
+            result = {
+                "variant": case.source,
+                "expected_escalate": case.expected_escalate,
+                "error": str(e),
+            }
+            print(f"  [{i+1:3d}] [ERROR] {e}")
+        case_results.append(result)
+
+    # 전체 메트릭
+    overall = compute_metrics(case_results)
+
+    # 변형별 메트릭
+    per_variant = {}
+    for variant in variants:
+        src_key = f"medabstain_{variant}"
+        subset = [r for r in case_results if r.get("variant") == src_key]
+        per_variant[variant] = compute_metrics(subset) if subset else {"error": "케이스 없음"}
+
+    # Abstention Accuracy (LLM 자체 불확실성 표현 능력 측정)
+    abstention_stats = compute_abstention_accuracy(case_results)
+
+    wcp_count = sum(1 for r in case_results if r.get("weighted_cp_used"))
+    print(f"\n  [WeightedCP 적용: {wcp_count}/{len(case_results)}건]")
+
+    return {
+        "backend": backend,
+        "timestamp": datetime.now().isoformat(),
+        "scoring_method": uqm.active_scoring_method,
+        "use_weighted_cp": use_weighted_cp,
+        "use_routine_cal": use_routine_cal,
+        "n_calibration": n_cal,
+        "calibration_source": calibration_source,
+        "coverage_report": coverage_report,
+        "variants_evaluated": variants,
+        "abstention_accuracy": abstention_stats,
+        "overall": overall,
+        "per_variant": per_variant,
+        "cases": case_results,
+    }
+
+
+# ── 결과 저장 ─────────────────────────────────────────────────────────────────
+
+def _print_metric_table(results: dict) -> None:
+    """터미널 요약 테이블 출력."""
+    print("\n" + "="*70)
+    print("  MedAbstain 평가 요약")
+    print("="*70)
+    print(f"  Backend: {results['backend']} | Method: {results['scoring_method']} "
+          f"| WeightedCP: {results['use_weighted_cp']}")
+    print("-"*70)
+
+    overall = results.get("overall", {})
+    if "error" not in overall:
+        ok = "✓" if overall.get("safety_recall_ok") else "✗"
+        print(f"\n  [전체] n={overall['n']}")
+        print(f"    Safety Recall (≥0.95):  {fmt_rate(overall.get('recall'))}{fmt_ci(overall.get('safety_recall_ci'))} {ok}")
+        print(f"    Precision:              {fmt_rate(overall.get('precision'))}")
+        print(f"    F1:                     {fmt_rate(overall.get('f1'))}")
+        print(f"    Specificity:            {fmt_rate(overall.get('specificity'))}")
+        if overall.get("auroc") is not None:
+            print(f"    AUROC:                  {fmt_rate(overall.get('auroc'))}")
+
+    per_variant = results.get("per_variant", {})
+    if per_variant:
+        print(f"\n  {'Variant':<8} {'n':>5} {'Recall':>8} {'Precision':>10} {'F1':>6} {'AUROC':>7}")
+        print("  " + "-"*44)
+        for variant, m in per_variant.items():
+            if "error" in m:
+                print(f"  {variant:<8} — 케이스 없음")
+                continue
+            auroc_str = fmt_rate(m.get("auroc")) if m.get("auroc") is not None else "  N/A "
+            ok = "✓" if m.get("safety_recall_ok") else "✗"
+            print(
+                f"  {variant:<8} {m['n']:>5} {fmt_rate(m.get('recall')):>7}{ok} "
+                f"{fmt_rate(m.get('precision')):>10} {fmt_rate(m.get('f1')):>6} {auroc_str:>7}"
+            )
+
+
+def save_eval_results(all_results: dict) -> None:
+    out_dir = ROOT / "results"
+    out_dir.mkdir(exist_ok=True)
+
+    # JSON
+    json_path = out_dir / "medabstain_eval.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, ensure_ascii=False, indent=2)
+    print(f"\n✅ JSON 저장: {json_path}")
+
+    # CSV (백엔드 × 변형 요약)
+    csv_path = out_dir / "medabstain_eval_summary.csv"
+    rows = []
+    for backend, bdata in all_results.items():
+        base = {
+            "backend": backend,
+            "scoring_method": bdata.get("scoring_method"),
+            "use_weighted_cp": bdata.get("use_weighted_cp"),
+            "n_calibration": bdata.get("n_calibration"),
+        }
+        for variant, m in bdata.get("per_variant", {}).items():
+            if "error" in m:
+                continue
+            rows.append({
+                **base,
+                "variant": variant,
+                "n": m.get("n"),
+                "recall": m.get("recall"),
+                "precision": m.get("precision"),
+                "f1": m.get("f1"),
+                "auroc": m.get("auroc"),
+                "safety_recall_ok": m.get("safety_recall_ok"),
+            })
+
+    if rows:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"✅ CSV 저장: {csv_path}")
+
+
+# ── 진입점 ────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="UASEF MedAbstain 분류 정확도 평가")
+    parser.add_argument(
+        "--backend", type=str, default=None,
+        choices=["lmstudio", "openai"],
+        help="단일 백엔드만 실행 (기본: 양쪽 모두)",
+    )
+    parser.add_argument("--n-cal", type=int, default=500,
+                        help="캘리브레이션 질문 수 (권장: 500)")
+    parser.add_argument("--n", type=int, default=50,
+                        help="변형별 케이스 수 (권장: 100)")
+    parser.add_argument(
+        "--variants", nargs="+", default=["AP", "NAP", "A", "NA"],
+        choices=["AP", "NAP", "A", "NA"],
+        help="평가할 MedAbstain 변형 (기본: 전체 4종)",
+    )
+    parser.add_argument(
+        "--scoring-method", type=str, default="logprob",
+        choices=["logprob", "self_consistency"],
+    )
+    parser.add_argument(
+        "--weighted-cp", action="store_true",
+        help="Weighted CP 사용 (Tibshirani et al., 2019)",
+    )
+    parser.add_argument(
+        "--no-routine-cal", action="store_true",
+        help="루틴 캘리브레이션 비활성화 → 전체 MedQA로 캘리브레이션 (기본: 루틴만 사용)",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    backends = [args.backend] if args.backend else ["lmstudio", "openai"]
+
+    all_results = {}
+    for backend in backends:
+        try:
+            result = run_medabstain_eval(
+                backend=backend,
+                n_cal=args.n_cal,
+                n_per_variant=args.n,
+                scoring_method=args.scoring_method,
+                variants=args.variants,
+                use_weighted_cp=args.weighted_cp,
+                use_routine_cal=not args.no_routine_cal,
+                seed=args.seed,
+            )
+            if result:
+                all_results[backend] = result
+                _print_metric_table(result)
+        except Exception as e:
+            print(f"\n[SKIP] {backend}: {e}")
+
+    if all_results:
+        save_eval_results(all_results)
