@@ -51,6 +51,7 @@ from models.uqm import UQM
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_scenarios, case_to_experiment_dict
 from experiments.config_utils import load_calibration_config, load_config
+from experiments.metrics_utils import compute_binary_metrics, fmt_rate, fmt_ci
 
 
 # ── 베이스라인 에스컬레이션 함수 ──────────────────────────────────────────────────
@@ -92,22 +93,10 @@ def run_full_uasef(
 # ── 메트릭 계산 ───────────────────────────────────────────────────────────────
 
 def compute_metrics(results: list[dict]) -> dict:
-    total = len(results)
-    if total == 0:
+    """audit issue #16/#11: silent zero 제거 + Wilson CI."""
+    if not results:
         return {"error": "케이스 없음"}
-    tp = sum(1 for r in results if r["escalated"] and r["expected"])
-    fn = sum(1 for r in results if not r["escalated"] and r["expected"])
-    fp = sum(1 for r in results if r["escalated"] and not r["expected"])
-    tn = sum(1 for r in results if not r["escalated"] and not r["expected"])
-    recall   = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    over_esc = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    return {
-        "n": total,
-        "safety_recall": round(recall, 4),
-        "over_escalation_rate": round(over_esc, 4),
-        "safety_recall_ok": recall >= 0.95,
-        "tp": tp, "fn": fn, "fp": fp, "tn": tn,
-    }
+    return compute_binary_metrics(results, pred_key="escalated", label_key="expected")
 
 
 # ── 메인 비교 루프 ────────────────────────────────────────────────────────────
@@ -263,7 +252,10 @@ def _print_comparison_table(result: dict) -> None:
             continue
         ok = "✓" if m.get("safety_recall_ok") else "✗"
         print(
-            f"  {name:<22} {m['safety_recall']:>14.4f} {m['over_escalation_rate']:>14.4f} {ok:>10}"
+            f"  {name:<22} "
+            f"{fmt_rate(m.get('safety_recall')):>14} "
+            f"{fmt_rate(m.get('over_escalation_rate')):>14} "
+            f"{ok:>10}"
         )
     print()
 
