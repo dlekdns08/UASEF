@@ -202,13 +202,16 @@ def compute_abstention_accuracy(case_results: list[dict]) -> dict:
 def run_medabstain_eval(
     backend: str,
     n_cal: int = 500,
-    n_per_variant: int = 50,
+    n_per_variant: int = 100,
     scoring_method: str = "logprob",
     variants: list[str] = None,
     use_weighted_cp: bool = False,
     use_routine_cal: bool = True,
     seed: int = 42,
     alpha: float = None,
+    prompt_mode: str = "neutral",        # audit #5
+    strict: bool = False,                # audit #19
+    decision_rule: str = None,           # audit #2
 ) -> dict:
     """
     Args:
@@ -246,6 +249,8 @@ def run_medabstain_eval(
         alpha=effective_alpha,
         scoring_method=scoring_method,
         use_weighted_cp=use_weighted_cp,
+        prompt_mode=prompt_mode,   # audit #5
+        strict=strict,             # audit #19
     )
     try:
         if use_routine_cal:
