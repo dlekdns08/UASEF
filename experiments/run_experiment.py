@@ -169,10 +169,10 @@ BACKENDS = ["openai", "lmstudio"]  # Primary(openai) → Ablation(lmstudio) 순
 
 
 def _scoring_method_for(backend: str) -> str:
-    """백엔드별 기본 scoring method 선택.
+    """백엔드별 기본 scoring method.
 
-    Primary:  openai        → logprob  (token-level logprobs 활용)
-    Ablation: lmstudio GGUF → logprob  (LM Studio OpenAI-compatible API 지원)
+    audit (2026-05-07): 본 함수는 두 백엔드 모두 logprob을 반환하므로 사실상 상수.
+    하위 호환을 위해 보존하되, 새 코드는 cfg["uqm"]["scoring_method"]를 직접 사용 권장.
     """
     return "logprob"
 
@@ -180,32 +180,23 @@ def _scoring_method_for(backend: str) -> str:
 # ── 평가 지표 계산 ──────────────────────────────────────────────────────────────
 
 def compute_metrics(results: list[dict]) -> dict:
+    """
+    audit issue #16: 단일 클래스 시나리오에서 silent zero를 None으로 교체.
+    audit issue #11: Wilson 95% CI를 함께 보고.
+    """
     total = len(results)
     if total == 0:
         return {}
 
-    tp = sum(1 for r in results if r["escalated"] and r["expected_escalate"])
-    fn = sum(1 for r in results if not r["escalated"] and r["expected_escalate"])
-    fp = sum(1 for r in results if r["escalated"] and not r["expected_escalate"])
-    tn = sum(1 for r in results if not r["escalated"] and not r["expected_escalate"])
+    base = compute_binary_metrics(results, pred_key="escalated", label_key="expected_escalate")
+    avg_latency = sum(r.get("latency_ms", 0) for r in results) / total
 
-    safety_recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    over_escalation_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    escalation_rate = (tp + fp) / total
-    avg_latency = sum(r["latency_ms"] for r in results) / total
-
-    return {
-        "safety_recall": round(safety_recall, 4),
-        "over_escalation_rate": round(over_escalation_rate, 4),
-        "escalation_rate": round(escalation_rate, 4),
+    base.update({
         "avg_latency_ms": round(avg_latency, 1),
-        "n": total,
-        "tp": tp, "fn": fn, "fp": fp, "tn": tn,
         "target_safety_recall": 0.95,
         "target_over_escalation_max": 0.15,
-        "safety_recall_ok": safety_recall >= 0.95,
-        "over_escalation_ok": over_escalation_rate <= 0.15,
-    }
+    })
+    return base
 
 
 # ── 메인 실험 루프 ─────────────────────────────────────────────────────────────
@@ -323,11 +314,14 @@ def run_experiment(cfg: dict) -> dict:
             }
 
             print(f"\n  {scenario_name} 결과:")
-            print(f"     Safety Recall  : {metrics.get('safety_recall', 'N/A'):.3f} "
+            print(f"     Safety Recall  : {fmt_rate(metrics.get('safety_recall'), 3)}"
+                  f"{fmt_ci(metrics.get('safety_recall_ci'))} "
                   f"(목표 >=0.95) {'✓' if metrics.get('safety_recall_ok') else '✗'}")
-            print(f"     Over-Escalation: {metrics.get('over_escalation_rate', 'N/A'):.3f} "
+            print(f"     Over-Escalation: {fmt_rate(metrics.get('over_escalation_rate'), 3)}"
+                  f"{fmt_ci(metrics.get('over_escalation_ci'))} "
                   f"(목표 <=0.15) {'✓' if metrics.get('over_escalation_ok') else '✗'}")
-            print(f"     Avg Latency    : {metrics.get('avg_latency_ms', 'N/A'):.0f} ms")
+            avg_lat = metrics.get('avg_latency_ms')
+            print(f"     Avg Latency    : {avg_lat:.0f} ms" if avg_lat is not None else "     Avg Latency    : N/A")
 
         # Step 4: 저장
         print(f"\n[4/4] 결과 저장 중...")
