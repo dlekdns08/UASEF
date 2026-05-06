@@ -244,21 +244,30 @@ def run_experiment(cfg: dict) -> dict:
             continue
 
         # Step 2: RTC 설정 (config 기반 배율 주입)
-        rtc_multipliers = cfg.get("rtc")  # base_config.yaml rtc 섹션 (캘리브레이션 결과)
+        rtc_multipliers = cfg.get("rtc")
+        scenario_multipliers = cfg.get("scenario_multipliers")  # audit issue #20
         print(f"\n[2/4] RTC 설정 (base_threshold={base_threshold:.4f})...")
         if rtc_multipliers:
             print(f"  배율 출처: base_config.yaml (데이터 기반)")
         else:
             print(f"  배율 출처: 모듈 기본값 RISK_THRESHOLD_MULTIPLIER")
-        rtc = RTC(base_threshold=base_threshold, multipliers=rtc_multipliers)
+        rtc = RTC(
+            base_threshold=base_threshold,
+            multipliers=rtc_multipliers,
+            scenario_multipliers=scenario_multipliers,
+        )
 
         # EDE 계수 로드 (config 기반)
+        # audit issue #2: decision_rule, confidence_threshold 추가
+        # audit issue #7: entropy_threshold fallback 0.6
         ede_cfg = cfg.get("ede", {})
-        entropy_threshold = cfg.get("entropy_threshold", 2.0)
+        entropy_threshold = cfg.get("entropy_threshold", 0.6)
         ede_kwargs = {
             "t1_weight": ede_cfg.get("t1_weight", 0.4),
             "entropy_boost": ede_cfg.get("entropy_boost", 0.15),
             "entropy_threshold": entropy_threshold,
+            "decision_rule": ede_cfg.get("decision_rule", "trigger_count"),
+            "confidence_threshold": ede_cfg.get("confidence_threshold", 0.5),
         }
 
         # Step 3: 각 시나리오 실험
