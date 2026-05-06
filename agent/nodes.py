@@ -233,13 +233,16 @@ def act(state: MedicalAgentState, components: AgentComponents) -> dict:
 def uasef_check(state: MedicalAgentState, components: AgentComponents) -> dict:
     """
     [uasef_check 노드] UASEF 안전 게이트.
-    원본 질문(state['question'])을 UQM.evaluate()에 전달 — 독립적 재판 역할.
-    최신 AIMessage 텍스트도 EDE trigger 분석에 사용.
 
-    UQM은 내부적으로 query_model()을 재호출하므로 LangGraph 히스토리와 독립적.
-    이 설계가 의도적: UASEF는 에이전트 출력을 외부에서 감사(audit)하는 구조.
+    audit issue #12 (2026-05-07): 과거에는 원본 질문만 평가하여 ReAct 도구 추론으로
+    획득한 정보가 점수에 반영되지 않았다. 이제는 우선 ReAct 응답의 logprobs를
+    재사용하고, 그것이 없으면 (LMStudio·도구 결과 등) 마지막 응답 텍스트를 prompt에
+    추가해 한 번 더 logprobs 호출을 수행한다.
+
+    audit issue #17: LMStudio backend에서는 ChatOpenAI가 logprobs를 못 받으므로
+    query_model의 /v1/responses를 직접 사용한다.
     """
-    # 최신 AIMessage 텍스트 + 가능하면 logprobs 추출 (LLM 재호출 방지)
+    # 1) 최신 응답 텍스트 + logprobs 추출
     response_text = ""
     pre_resp = None
     for msg in reversed(state["messages"]):
@@ -248,8 +251,26 @@ def uasef_check(state: MedicalAgentState, components: AgentComponents) -> dict:
             pre_resp = _extract_model_response(msg, components.backend)
             break
 
-    # UQM 평가 (calibration과 동일한 distribution_source 유지 — CP exchangeability)
-    # pre_resp가 있으면 logprob 모드에서 LLM 재호출 생략
+    # 2) logprobs가 없으면 (LMStudio agent 응답 등) — query_model로 보충
+    if pre_resp is None and response_text:
+        try:
+            sys_prompt = (
+                components.uqm._system_prompt
+                if hasattr(components.uqm, "_system_prompt")
+                else components.uqm.SYSTEM_PROMPT
+            )
+            # 응답을 평가 입력으로 전달 — agent가 도출한 결론에 대한 score를 측정
+            pre_resp = query_model(
+                components.backend,
+                sys_prompt,
+                f"{state['question']}\n\nProposed answer:\n{response_text}",
+                temperature=0.0,
+                logprobs=True,
+            )
+        except Exception:
+            pre_resp = None  # 실패 시 UQM이 원본 질문으로 fallback
+
+    # 3) UQM 평가 (calibration과 동일한 distribution_source 유지 — CP exchangeability)
     unc = components.uqm.evaluate(
         state["question"],
         distribution_source=components.distribution_source,
@@ -265,9 +286,14 @@ def uasef_check(state: MedicalAgentState, components: AgentComponents) -> dict:
     # EDE 에스컬레이션 결정
     decision = components.ede.decide(unc, rtc_config, response_text)
 
+    # 보고용 effective threshold (Weighted CP가 켜졌으면 per-question q̂_w × multiplier)
+    effective_thr = rtc_config.effective_threshold(
+        uncertainty_threshold=unc.threshold_used if unc.weighted_cp_used else None
+    )
+
     return {
         "uasef_score": round(unc.nonconformity_score, 4),
-        "uasef_threshold": round(rtc_config.adjusted_threshold, 4),
+        "uasef_threshold": round(effective_thr, 4),
         "uasef_triggers": [t.value for t in decision.triggers],
         "uasef_confidence": round(decision.confidence, 4),
         "uasef_explanation": decision.explanation,
