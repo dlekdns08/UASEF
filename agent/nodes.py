@@ -103,23 +103,29 @@ class AgentComponents:
 # ── LLM 초기화 헬퍼 ──────────────────────────────────────────────────────────
 
 def _make_llm(backend: str, bind_tools: bool = True) -> ChatOpenAI:
-    # logprobs=True: uasef_check에서 LLM 재호출 없이 응답을 재사용하기 위해 활성화.
-    # LMStudio가 지원하지 않으면 response_metadata에서 조용히 None이 됩니다.
-    logprobs_kwargs = {"logprobs": True, "top_logprobs": 5}
+    """
+    LangChain ChatOpenAI 인스턴스를 생성한다.
+
+    LMStudio 주의 (audit issue #17):
+        LMStudio의 /v1/chat/completions는 logprobs를 지원하지 않는다. 따라서 logprobs를
+        요청해도 응답은 무시되고 _extract_model_response가 None을 반환한다. 그러면
+        UQM이 별도로 query_model()을 호출해 /v1/responses 엔드포인트로 logprobs를 얻는다.
+        성능을 위해 LMStudio backend에서는 logprobs 요청 자체를 생략한다.
+    """
     if backend == "lmstudio":
         llm = ChatOpenAI(
             base_url="http://localhost:1234/v1",
             api_key="lm-studio",
             model=os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct"),
             temperature=0.0,
-            model_kwargs=logprobs_kwargs,
         )
     else:
+        # OpenAI 등 logprobs를 지원하는 백엔드에만 요청
         llm = ChatOpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             temperature=0.0,
-            model_kwargs=logprobs_kwargs,
+            model_kwargs={"logprobs": True, "top_logprobs": 5},
         )
     return llm.bind_tools(MEDICAL_TOOLS) if bind_tools else llm
 
