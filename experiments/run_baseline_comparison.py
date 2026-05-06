@@ -336,6 +336,21 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=None,
                         help="Conformal prediction α (기본: base_config.yaml uqm.alpha = 0.10)")
     parser.add_argument("--seed", type=int, default=42)
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     backends = [args.backend] if args.backend else ["openai", "lmstudio"]
@@ -350,6 +365,9 @@ if __name__ == "__main__":
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
