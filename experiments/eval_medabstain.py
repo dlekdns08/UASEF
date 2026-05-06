@@ -259,7 +259,13 @@ def run_medabstain_eval(
 
     calibration_source = "medqa_routine" if use_routine_cal else "medqa"
     rtc_multipliers, ede_kwargs = load_calibration_config()
-    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
+    from experiments.config_utils import load_scenario_multipliers
+    scenario_multipliers = load_scenario_multipliers()
+    rtc = RTC(
+        base_threshold=uqm.calibrator.threshold,
+        multipliers=rtc_multipliers,
+        scenario_multipliers=scenario_multipliers,
+    )
     ede = EDE(**ede_kwargs)
 
     # Step 2: MedAbstain 케이스 로드
