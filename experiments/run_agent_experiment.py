@@ -36,6 +36,7 @@ import csv
 import sys
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
