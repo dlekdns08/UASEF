@@ -550,3 +550,138 @@ from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES  # 37개 
 **--no-routine-cal 플래그**:
 - eval_medabstain.py에 `--no-routine-cal` 추가하여 기존 동작(전체 MedQA 캘리브레이션) 재현 가능
 - 논문에서 기존 방식과 one-class CP 방식의 차이를 ablation으로 보고 가능
+
+---
+
+## 6라운드 개선 (2026-05-07, 종합 audit & 결정 로직 정합성 복구)
+
+### 배경
+
+라운드 5까지의 모든 변경을 적용한 상태에서 `agent/`, `models/`, `experiments/`, `data/` 전 영역에 대한 종합 코드 audit을 실행했다. **실험 결과 자체를 무효화할 수 있는 8건의 critical 버그**와 LLM 비용·통계 검정력·외부 타당성에 영향을 주는 다수의 high/medium 이슈를 발견했고, 모두 동일 라운드에서 수정했다.
+
+### 6.1 발견된 핵심 문제 (audit 결과)
+
+| ID  | 분류     | 위치                                     | 증상                                                                                                                       |
+| --- | -------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| #1  | CRITICAL | `models/rtc_ede.py` EDE.decide           | EDE Trigger 1이 standard threshold만 사용 → WeightedCP가 켜져도 per-question q̂_w가 결정에 반영되지 않음                  |
+| #2  | CRITICAL | `models/ede_coefficient_search.py`       | grid search는 `confidence>0.5`로 평가하지만 실제 결정은 `len(triggers)>0` → 최적 계수가 결정에 영향 없음                   |
+| #3  | CRITICAL | `data/loader.py` fallback                | MedQA 로드 실패 시 30개 질문을 17번 반복 사용 → holdout coverage가 항상 ~1.0(가짜)로 보고되어 CP 보장이 무효화됨            |
+| #5  | CRITICAL | `models/uqm.py`, `agent/nodes.py` prompt | SYSTEM_PROMPT가 모델에게 NO_EVIDENCE 문구를 명시 지시 → EDE Trigger 3와 circular evaluation                                |
+| #6  | CRITICAL | `models/rtc_ede.py` NO_EVIDENCE          | "may vary", "limited evidence", "consult specialist" 등 정상 임상 답변 문구가 단독 트리거 → over-escalation 인플레이션      |
+| #7  | CRITICAL | `models/rtc_ede.py` ENTROPY 기본값        | `ENTROPY_HIGH_THRESHOLD = 2.0`이 top_logprobs=5의 entropy 상한 ln(5)≈1.609 초과 → fallback 시 entropy_boost가 영원히 0     |
+| #8  | CRITICAL | `experiments/eval_medabstain.py`         | `use_weighted_cp` 인자가 무시되고 항상 True로 UQM 생성 → 메타데이터와 실제 동작 불일치, CLI `--weighted-cp` 토글 무의미    |
+| #9  | HIGH     | `experiments/pareto_sweep.py`            | α마다 UQM 재보정 → 동일 cal_questions에 LLM 6× 중복 호출                                                                    |
+| #10 | HIGH     | `models/uqm.py` self-consistency         | 첫 호출 응답이 버려지고 N개 추가 호출 → 실제 N+1회 호출 발생                                                                |
+| #11 | HIGH     | `experiments/configs/base_config.yaml`   | `n_test_per_scenario: 50` → Wilson 95% CI ±0.08, 0.95 vs 0.90 통계적 구분 불가                                              |
+| #12 | HIGH     | `agent/nodes.py` uasef_check             | UASEF auditor가 원본 질문만 평가 → ReAct 도구 추론으로 얻은 정보가 score에 반영 안 됨                                       |
+| #13 | HIGH     | `data/loader.py` distribution_source     | MedAbstain 변형(AP/NAP/A/NA) 모두 `"medabstain"`으로 단일화 → shift 감지 정밀도 손실                                       |
+| #15 | MEDIUM   | `models/rtc_ede.py` CRITICAL_KEYWORDS     | `"code blue"`가 무조건 트리거 → "in the event of code blue, perform CPR" 같은 표준 답변에서도 발동                          |
+| #16 | MEDIUM   | 모든 runner `compute_metrics`            | 단일 클래스 시나리오에서 `over_escalation_rate=0.0` silent zero → 실제로는 정의 불가                                        |
+| #17 | MEDIUM   | `agent/nodes.py` `_make_llm`             | LMStudio agent에 logprobs 요청 → ChatOpenAI는 받지 못하고 UQM이 별도 호출 → latency 2×                                       |
+| #18 | MEDIUM   | `models/uqm.py` calibrate retry          | ValueError 같은 결정적 오류도 3회 재시도 → 시간 낭비, skip 통계 부정확                                                      |
+| #19 | MEDIUM   | `models/uqm.py` ConformalCalibrator       | n<min_n 시 warning만 → 자동화 실험에서 묻혀 잘못된 결과 출판 위험                                                            |
+| #20 | MEDIUM   | `models/rtc_ede.py` 시나리오 배율         | 0.90이 코드 하드코딩 → 재현·튜닝 불가                                                                                       |
+| #21 | LOW      | `models/uqm.py` `ScoringMethod.AUTO`     | 첫 호출의 logprobs 유무로 모드 결정 → 일시 장애 시 비결정적 모드 전환                                                        |
+
+### 6.2 수정 내용
+
+| ID  | 파일(들)                                                                                | 변경 요약                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #1  | `models/rtc_ede.py`                                                                     | `RTCConfig.multiplier_value` 필드 추가 + `effective_threshold(uncertainty_threshold)` 메서드 신설. EDE.decide의 Trigger 1이 `unc.weighted_cp_used`이면 weighted q̂_w × multiplier 사용. |
+| #2  | `models/rtc_ede.py`, `models/ede_coefficient_search.py`, `experiments/run_calibration_pipeline.py` | EDE에 `decision_rule` ∈ {"trigger_count"(default), "confidence"} + `confidence_threshold` 추가. grid search가 `confidence_threshold`까지 함께 최적화하고 권장 rule을 결과에 포함. |
+| #3  | `data/loader.py`                                                                        | `_refuse_fallback()` 도입. 환경변수 `UASEF_ALLOW_FALLBACK=1`이 없으면 fallback 호출 시 RuntimeError. 단위테스트만 명시적으로 활성화.                                                       |
+| #5  | `models/uqm.py`, `agent/nodes.py`                                                       | `SYSTEM_PROMPT_NEUTRAL`(default) / `SYSTEM_PROMPT_INSTRUCTED` 분리. `UQM(prompt_mode=...)` + `AgentComponents.prompt_mode` 신규.                                                          |
+| #6  | `models/rtc_ede.py`                                                                     | NO_EVIDENCE_PHRASES에 `strength` 필드(strong/weak) 추가. `detect_no_evidence`가 strong은 단독 트리거, weak는 `UNCERTAINTY_MODIFIERS` 동반 시만 트리거. (strong=30, weak=14)               |
+| #7  | `models/rtc_ede.py`, `models/entropy_calibration.py`, `experiments/config_utils.py`     | `ENTROPY_HIGH_THRESHOLD = 2.0 → 0.6` (top_logprobs=5 도달 가능 영역). `find_entropy_threshold` fallback도 동일 갱신.                                                                       |
+| #8  | `experiments/eval_medabstain.py`                                                        | `UQM(use_weighted_cp=use_weighted_cp)` — 인자 그대로 전달. CLI `--weighted-cp` 토글 의미 회복.                                                                                              |
+| #9  | `experiments/pareto_sweep.py`                                                           | `_compute_scores`로 cal/test scores를 (backend, scoring_method)당 1회만 계산 → α는 `ConformalCalibrator.fit`만 반복. **LLM 호출 6× 절감.**                                              |
+| #10 | `models/uqm.py`                                                                         | `compute_self_consistency_score(seed_response=...)`로 첫 호출 응답을 N개의 일부로 재사용 → N+1회 → N회.                                                                                   |
+| #11 | `experiments/configs/base_config.yaml`, `experiments/metrics_utils.py`                  | `n_test_per_scenario: 50 → 200`. 새 `metrics_utils.wilson_ci`로 Wilson 95% CI를 모든 metric 표에 자동 출력.                                                                                |
+| #12 | `agent/nodes.py`                                                                        | `uasef_check`가 ReAct 응답 텍스트를 prompt에 포함해 logprobs 재평가. logprobs를 못 받으면 그래프 그대로 fallback.                                                                          |
+| #13 | `data/loader.py`                                                                        | `_distribution_source_for(case)`로 `medabstain_AP/NAP/A/NA` 보존. `case_to_experiment_dict`/`case_to_agent_dict` 모두 사용.                                                              |
+| #15 | `models/rtc_ede.py`                                                                     | `"code blue"`를 CRITICAL → PROCEDURAL로 강등(맥락 조건부).                                                                                                                                 |
+| #16 | `experiments/metrics_utils.py` 신설, `eval_medabstain.py`/`run_experiment.py`/`run_baseline_comparison.py` | `compute_binary_metrics` 공통 헬퍼: 단일 클래스 시 None 반환. `fmt_rate`/`fmt_ci`로 N/A 안전 출력.                                                              |
+| #17 | `agent/nodes.py` `_make_llm`                                                            | LMStudio에서는 logprobs 요청 자체를 생략 → ChatOpenAI 응답 latency 절감, UQM의 `/v1/responses` 호출 1회만 발생.                                                                            |
+| #18 | `models/uqm.py` calibrate                                                               | `ConnectionError`/`TimeoutError`/`OSError`만 재시도. 결정적 오류는 즉시 skip. skip 비율 >10% 시 UserWarning.                                                                              |
+| #19 | `models/uqm.py` `ConformalCalibrator(strict=True)`                                      | 신규 파라미터. n<min_n 시 RuntimeError.                                                                                                                                                   |
+| #20 | `models/rtc_ede.py`, `experiments/configs/base_config.yaml`, `experiments/config_utils.py` | `RTCConfig.scenario_multipliers` + `RTC(scenario_multipliers=...)` + `load_scenario_multipliers()`. base_config의 `scenario_multipliers` 섹션으로 노출.                                |
+| #21 | `models/uqm.py`                                                                         | `ScoringMethod.AUTO`에 `DeprecationWarning` (UserWarning에서 격상).                                                                                                                       |
+| —   | `data/loader.py`                                                                        | (cleanup) `hash()` → `hashlib.md5` 기반 안정 ID. PYTHONHASHSEED 영향 제거.                                                                                                                |
+
+### 6.3 신규 파일 / 신규 인터페이스
+
+| 항목                                       | 위치                                       | 설명                                                                                                              |
+| ------------------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `metrics_utils.py`                         | `experiments/metrics_utils.py`             | `compute_binary_metrics`, `wilson_ci`, `safe_rate`, `fmt_rate`, `fmt_ci` — 모든 runner 공통 사용.                |
+| `RTCConfig.effective_threshold()`          | `models/rtc_ede.py`                        | per-question weighted q̂_w를 RTC 배율로 스케일.                                                                   |
+| `RTCConfig.scenario_multipliers`           | `models/rtc_ede.py`                        | dict[str,float]. 시나리오별 추가 배율을 데이터로 노출.                                                            |
+| `EDE(decision_rule, confidence_threshold)` | `models/rtc_ede.py`                        | "trigger_count"(back-compat) / "confidence" — 후자만 grid search와 정합.                                          |
+| `UQM(prompt_mode, strict)`                 | `models/uqm.py`                            | "neutral"(default)/"instructed". `strict=True`로 n<min_n 시 RuntimeError.                                          |
+| `_refuse_fallback()`, `ALLOW_FALLBACK_ENV` | `data/loader.py`                           | `UASEF_ALLOW_FALLBACK=1` 환경변수로만 fallback 허용.                                                              |
+| `_distribution_source_for(case)`           | `data/loader.py`                           | medabstain 변형 단위로 distribution_source 분리.                                                                  |
+| `load_scenario_multipliers()`              | `experiments/config_utils.py`              | base_config의 `scenario_multipliers` 섹션 로드.                                                                   |
+
+### 6.4 base_config.yaml 변경
+
+| 키                                | 변경 전        | 변경 후         | 근거                              |
+| --------------------------------- | -------------- | --------------- | --------------------------------- |
+| `data.n_test_per_scenario`        | `50`           | `200`           | Wilson CI ±0.08 → ±0.03 (audit #11) |
+| `scenario_multipliers` 섹션 신설  | (코드 하드코딩) | `0.90/0.90/1.00/1.00` | audit #20                         |
+| `ede.decision_rule`               | (없음)         | `trigger_count` | audit #2 (back-compat)            |
+| `ede.confidence_threshold`        | (없음)         | `0.5`           | audit #2                          |
+| `uqm.prompt_mode`                 | (없음)         | `neutral`       | audit #5                          |
+| `uqm.strict`                      | (없음)         | `false`         | audit #19                         |
+| `entropy_threshold` fallback (코드) | `2.0`          | `0.6`           | audit #7                          |
+
+### 6.5 단위 테스트 (포함된 검증)
+
+수정 직후 다음 항목을 명시적으로 확인:
+
+- `RTCConfig.effective_threshold(2.5)` → `2.5 × multiplier_value` 산출 (audit #1)
+- `EDE(decision_rule="trigger_count")` ↔ `EDE(decision_rule="confidence")` 결정 분기 동작 (audit #2)
+- `detect_no_evidence("Treatment may vary.")` → False (weak only) / `"...uncertain"` → True / `"may vary; consider escalation if borderline"` → True (audit #6)
+- WeightedCP 통합: score=1.20, adj=1.08, weighted_eff=1.35 → escalate=False (weighted threshold 사용 확인)
+- `compute_binary_metrics(all_positive_cases)` → over_escalation_rate=None (audit #16)
+- `load_calibration_questions(n=5)` (env 미설정) — fallback 호출 시 RuntimeError, HF 사용 시 정상 (audit #3)
+- 16개 모듈 모두 import OK
+
+### 6.6 재현 절차 변경
+
+```bash
+# 0) 데이터셋 확보 — fallback 차단되었으므로 반드시 필요
+#    (HuggingFace `GBaker/MedQA-USMLE-4-options` 자동 다운로드 또는 data/raw/*.jsonl 배치)
+
+# 1) 캘리브레이션 (decision_rule="confidence"가 산출되어 base_config에 저장됨)
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
+
+# 2) 전체 실험 (200/시나리오, Wilson CI 자동 출력)
+python experiments/run_all_experiments.py --backend openai --n-cal 500 --n-test 200
+
+# 3) Pareto sweep (audit #9 캐싱으로 6× 빨라짐)
+python experiments/pareto_sweep.py --backend openai --n-cal 500 --n-test 100
+
+# 4) (선택) prompt_mode ablation
+#    UQM(prompt_mode='neutral')과 UQM(prompt_mode='instructed') 결과 비교
+```
+
+### 6.7 논문 Limitations 권장 추가 항목
+
+audit 결과 명시 권장:
+
+1. **Mock tools** — `agent/tools.py`의 4개 도구는 mock. 실제 임상 도구 신뢰도와의 격차는 별도 ablation 필요.
+2. **Heuristic labels** — `_classify_case`의 키워드 기반 ground truth는 임상 전문가 검증 부재. MedAbstain/PubMedQA 외부 라벨과 분리해 보고 권장.
+3. **Prompt-induced abstention** — `SYSTEM_PROMPT_INSTRUCTED` 사용 시 NO_EVIDENCE Trigger의 일부는 프롬프트 효과. `prompt_mode="neutral"` 결과를 primary로, `instructed`를 ablation으로 보고.
+4. **Jaccard 기반 weighted CP** — 진정한 density ratio가 아니므로 보장이 보수적. TF-IDF/embedding 기반으로 향상 가능.
+
+### 6라운드 변경 파일 일람
+
+| 영역          | 파일                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `models/`     | `uqm.py`, `rtc_ede.py`, `entropy_calibration.py`, `ede_coefficient_search.py`                                                |
+| `agent/`      | `nodes.py`                                                                                                                   |
+| `data/`       | `loader.py`                                                                                                                  |
+| `experiments/`| `metrics_utils.py` (신규), `config_utils.py`, `eval_medabstain.py`, `pareto_sweep.py`, `run_experiment.py`, `run_baseline_comparison.py`, `run_agent_experiment.py`, `run_calibration_pipeline.py` |
+| `configs/`    | `base_config.yaml`                                                                                                           |
+
+스냅샷은 `improvements/improved/` 하위에 저장된다.
+
