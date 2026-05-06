@@ -266,6 +266,8 @@ def run_medabstain_eval(
     rtc_multipliers, ede_kwargs = load_calibration_config()
     from experiments.config_utils import load_scenario_multipliers
     scenario_multipliers = load_scenario_multipliers()
+    if decision_rule is not None:
+        ede_kwargs["decision_rule"] = decision_rule  # audit #2
     rtc = RTC(
         base_threshold=uqm.calibrator.threshold,
         multipliers=rtc_multipliers,
@@ -467,6 +469,21 @@ if __name__ == "__main__":
         help="루틴 캘리브레이션 비활성화 → 전체 MedQA로 캘리브레이션 (기본: 루틴만 사용)",
     )
     parser.add_argument("--seed", type=int, default=42)
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     backends = [args.backend] if args.backend else ["lmstudio", "openai"]
