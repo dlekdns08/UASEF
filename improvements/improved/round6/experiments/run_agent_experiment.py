@@ -104,6 +104,9 @@ def run_backend_experiment(
     scoring_method: str = "auto",
     alpha: Optional[float] = None,
     distribution_source: str = "medqa",
+    prompt_mode: str = "neutral",         # audit #5
+    strict: bool = False,                 # audit #19
+    decision_rule: Optional[str] = None,  # audit #2
 ) -> dict:
     cfg = load_config()
     alpha = alpha if alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
@@ -117,11 +120,15 @@ def run_backend_experiment(
     print(f"\n{'='*65}")
     print(f"  UASEF Agent Experiment — Backend: {backend.upper()}  {role}")
     print(f"  scoring={effective_method}, α={alpha}, dist={distribution_source}")
+    print(f"  prompt_mode={prompt_mode}, strict={strict}, decision_rule={decision_rule or '(config)'}")
     print(f"{'='*65}")
 
     # Step 1: UQM 보정 (한 번만 실행, 모든 시나리오 공유)
     print(f"\n[1/3] UQM 보정 중 ({len(cal_questions)}개)...")
-    uqm = UQM(backend=backend, alpha=alpha, scoring_method=effective_method)
+    uqm = UQM(
+        backend=backend, alpha=alpha, scoring_method=effective_method,
+        prompt_mode=prompt_mode, strict=strict,
+    )
     try:
         coverage_report = uqm.calibrate(cal_questions, distribution_source=distribution_source)
     except Exception as e:
@@ -134,6 +141,9 @@ def run_backend_experiment(
     rtc_multipliers, ede_kwargs = load_calibration_config()
     from experiments.config_utils import load_scenario_multipliers
     _scenario_multipliers = load_scenario_multipliers()  # audit issue #20
+    # CLI override (audit #2): decision_rule이 명시되면 base_config 값을 덮어씀
+    if decision_rule is not None:
+        ede_kwargs["decision_rule"] = decision_rule
 
     # Step 3: 시나리오별 실행
     print(f"\n[3/3] {len(agent_scenarios)}개 시나리오 실행...")
@@ -164,6 +174,7 @@ def run_backend_experiment(
             specialty=specialty,
             scenario_type=scenario_type,
             distribution_source=case_dist_source,
+            prompt_mode=prompt_mode,   # audit #5
         )
 
         graph = build_graph(components)
@@ -340,6 +351,21 @@ if __name__ == "__main__":
         "--include-pubmedqa", action="store_true",
         help="PubMedQA 'maybe' 케이스를 rare_disease 버킷에 추가",
     )
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM/Agent SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     tracing = os.getenv("LANGCHAIN_TRACING_V2", "false").lower()
@@ -375,6 +401,9 @@ if __name__ == "__main__":
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 distribution_source="medqa",
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result

@@ -202,13 +202,16 @@ def compute_abstention_accuracy(case_results: list[dict]) -> dict:
 def run_medabstain_eval(
     backend: str,
     n_cal: int = 500,
-    n_per_variant: int = 50,
+    n_per_variant: int = 100,
     scoring_method: str = "logprob",
     variants: list[str] = None,
     use_weighted_cp: bool = False,
     use_routine_cal: bool = True,
     seed: int = 42,
     alpha: float = None,
+    prompt_mode: str = "neutral",        # audit #5
+    strict: bool = False,                # audit #19
+    decision_rule: str = None,           # audit #2
 ) -> dict:
     """
     Args:
@@ -246,6 +249,8 @@ def run_medabstain_eval(
         alpha=effective_alpha,
         scoring_method=scoring_method,
         use_weighted_cp=use_weighted_cp,
+        prompt_mode=prompt_mode,   # audit #5
+        strict=strict,             # audit #19
     )
     try:
         if use_routine_cal:
@@ -261,6 +266,8 @@ def run_medabstain_eval(
     rtc_multipliers, ede_kwargs = load_calibration_config()
     from experiments.config_utils import load_scenario_multipliers
     scenario_multipliers = load_scenario_multipliers()
+    if decision_rule is not None:
+        ede_kwargs["decision_rule"] = decision_rule  # audit #2
     rtc = RTC(
         base_threshold=uqm.calibrator.threshold,
         multipliers=rtc_multipliers,
@@ -462,6 +469,21 @@ if __name__ == "__main__":
         help="루틴 캘리브레이션 비활성화 → 전체 MedQA로 캘리브레이션 (기본: 루틴만 사용)",
     )
     parser.add_argument("--seed", type=int, default=42)
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     backends = [args.backend] if args.backend else ["lmstudio", "openai"]
@@ -478,6 +500,9 @@ if __name__ == "__main__":
                 use_weighted_cp=args.weighted_cp,
                 use_routine_cal=not args.no_routine_cal,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result

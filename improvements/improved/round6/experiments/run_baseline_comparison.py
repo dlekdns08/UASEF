@@ -118,10 +118,13 @@ def _scoring_method_for(backend: str) -> str:
 def run_baseline_comparison(
     backend: str,
     n_cal: int = 500,
-    n_test: int = 50,
+    n_test: int = 200,
     scoring_method: str = "auto",
-    alpha: float = None,
+    alpha: Optional[float] = None,
     seed: int = 42,
+    prompt_mode: str = "neutral",      # audit #5
+    strict: bool = False,              # audit #19
+    decision_rule: Optional[str] = None,  # audit #2 — None이면 base_config 값
 ) -> dict:
     effective_method = (
         _scoring_method_for(backend) if scoring_method == "auto" else scoring_method
@@ -134,11 +137,15 @@ def run_baseline_comparison(
     print(f"\n{'='*65}")
     print(f"  베이스라인 비교 — Backend: {backend.upper()}  {role}")
     print(f"  scoring={effective_method}, n_cal={n_cal}, n_test={n_test}, α={effective_alpha}")
+    print(f"  prompt_mode={prompt_mode}, strict={strict}, decision_rule={decision_rule or '(config)'}")
     print(f"{'='*65}")
 
     # UQM 보정
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
-    uqm = UQM(backend=backend, alpha=effective_alpha, scoring_method=effective_method)
+    uqm = UQM(
+        backend=backend, alpha=effective_alpha, scoring_method=effective_method,
+        prompt_mode=prompt_mode, strict=strict,
+    )
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
         uqm.calibrate(cal_questions, distribution_source="medqa")
@@ -149,6 +156,9 @@ def run_baseline_comparison(
     rtc_multipliers, ede_kwargs = load_calibration_config()
     from experiments.config_utils import load_scenario_multipliers
     scenario_multipliers = load_scenario_multipliers()
+    # CLI override 우선 (audit #2)
+    if decision_rule is not None:
+        ede_kwargs["decision_rule"] = decision_rule
     rtc = RTC(
         base_threshold=uqm.calibrator.threshold,
         multipliers=rtc_multipliers,
@@ -326,6 +336,21 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=None,
                         help="Conformal prediction α (기본: base_config.yaml uqm.alpha = 0.10)")
     parser.add_argument("--seed", type=int, default=42)
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     backends = [args.backend] if args.backend else ["openai", "lmstudio"]
@@ -340,6 +365,9 @@ if __name__ == "__main__":
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result

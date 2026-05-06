@@ -84,11 +84,14 @@ def _compute_scores(
     questions: list[str],
     scoring_method: str,
     label: str = "",
+    prompt_mode: str = "neutral",
 ) -> list[float]:
-    """audit issue #9: 캐싱용 점수 계산 — α/specialty와 무관하게 한 번만 호출."""
+    """audit issue #9: 캐싱용 점수 계산 — α/specialty와 무관하게 한 번만 호출.
+    audit #5: prompt_mode 명시 (neutral=default).
+    """
     if scoring_method != "logprob":
         # self_consistency는 randomized하므로 일관성을 위해 UQM 인스턴스를 사용
-        uqm = UQM(backend=backend, alpha=0.10, scoring_method=scoring_method)
+        uqm = UQM(backend=backend, alpha=0.10, scoring_method=scoring_method, prompt_mode=prompt_mode)
         scores = []
         for q in questions:
             try:
@@ -98,8 +101,11 @@ def _compute_scores(
                 continue
         return scores
 
-    # logprob: query_model로 직접 호출
-    sys_prompt = UQM.SYSTEM_PROMPT
+    # logprob: query_model로 직접 호출 (prompt_mode 반영)
+    sys_prompt = (
+        UQM.SYSTEM_PROMPT_INSTRUCTED if prompt_mode == "instructed"
+        else UQM.SYSTEM_PROMPT_NEUTRAL
+    )
     scores = []
     for i, q in enumerate(questions):
         try:
@@ -207,6 +213,7 @@ def run_pareto_sweep(
     n_test: int = 100,
     seed: int = 42,
     scoring_method: str = "logprob",
+    prompt_mode: str = "neutral",  # audit #5
 ) -> list[dict]:
     """
     모든 (α, specialty) 조합에 대해 Pareto point를 측정합니다.
@@ -230,8 +237,8 @@ def run_pareto_sweep(
     scenario_map = load_scenarios(n_per_scenario=n_test, split="test", seed=seed)
 
     # ── 1단계: cal_scores 한 번만 계산 ──────────────────────────────────────
-    print(f"\n[Phase 1] Calibration scores 계산 (1회) ...")
-    cal_scores_all = _compute_scores(backend, cal_questions, scoring_method, "cal")
+    print(f"\n[Phase 1] Calibration scores 계산 (1회, prompt_mode={prompt_mode}) ...")
+    cal_scores_all = _compute_scores(backend, cal_questions, scoring_method, "cal", prompt_mode=prompt_mode)
     cal_scores, holdout_scores = _split_cal_holdout(cal_scores_all, holdout_fraction=0.2, seed=seed)
     print(f"  cal n={len(cal_scores)} / holdout n={len(holdout_scores)}")
 
@@ -244,7 +251,7 @@ def run_pareto_sweep(
             print(f"  [{scenario_type}] 테스트 케이스 없음 — 건너뜀")
             continue
         test_qs = [c.question for c in test_cases_raw]
-        ts = _compute_scores(backend, test_qs, scoring_method, f"test/{scenario_type}")
+        ts = _compute_scores(backend, test_qs, scoring_method, f"test/{scenario_type}", prompt_mode=prompt_mode)
         test_scores_by_scenario[scenario_type] = ts
         print(f"  [{scenario_type}] n={len(ts)}")
 
@@ -540,6 +547,11 @@ if __name__ == "__main__":
         choices=["logprob", "self_consistency"],
         help="비적합 점수 방식 (logprob=primary, self_consistency=ablation)",
     )
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM SYSTEM_PROMPT (audit #5)",
+    )
     args = parser.parse_args()
 
     backends = [args.backend] if args.backend else ["lmstudio", "openai"]
@@ -552,6 +564,7 @@ if __name__ == "__main__":
                 n_calibration=args.n_cal,
                 n_test=args.n_test,
                 scoring_method=args.scoring_method,
+                prompt_mode=args.prompt_mode,
             )
             if results:
                 all_results[backend] = results
