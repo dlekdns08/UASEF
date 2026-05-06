@@ -67,27 +67,51 @@ RISK_THRESHOLD_MULTIPLIER: dict[RiskLevel, float] = {
 _DEFAULT_MULTIPLIERS.update(RISK_THRESHOLD_MULTIPLIER)
 
 
+# 시나리오별 추가 배율 (응급·희귀질환은 더 보수적으로). base_config.yaml의
+# `scenario_multipliers` 섹션으로 노출되어 재현 가능하도록 했다.
+DEFAULT_SCENARIO_MULTIPLIERS: dict[str, float] = {
+    "emergency":      0.90,
+    "rare_disease":   0.90,
+    "multimorbidity": 1.00,
+    "routine":        1.00,
+}
+
+
 @dataclass
 class RTCConfig:
     specialty: str
     scenario_type: str          # "emergency" | "rare_disease" | "multimorbidity" | "routine"
     base_threshold: float       # UQM calibration으로부터 온 q̂
     adjusted_threshold: float = 0.0
+    multiplier_value: float = 1.0   # base_threshold 대비 누적 배율 (Weighted CP 전파용)
     risk_level: RiskLevel = RiskLevel.MODERATE
     # run_calibration_pipeline.py 또는 base_config.yaml에서 주입되는 데이터 기반 배율
     # None이면 모듈 기본값 RISK_THRESHOLD_MULTIPLIER 사용
     multipliers: Optional[dict] = field(default=None, repr=False)
+    # 시나리오별 추가 배율 (예: {"emergency": 0.90}). None이면 DEFAULT_SCENARIO_MULTIPLIERS 사용.
+    scenario_multipliers: Optional[dict] = field(default=None, repr=False)
 
     def __post_init__(self):
         self.risk_level = SPECIALTY_RISK_MAP.get(self.specialty, RiskLevel.MODERATE)
         mmap = self.multipliers if self.multipliers is not None else RISK_THRESHOLD_MULTIPLIER
         multiplier = mmap.get(self.risk_level, RISK_THRESHOLD_MULTIPLIER[self.risk_level])
-        # 시나리오 보정: 응급·희귀질환은 추가로 낮춤 (더 보수적)
-        # 0.85 → 0.90: 기존 값은 CRITICAL(0.60) × 0.85 = 0.51로 너무 공격적이었음
-        # emergency_medicine + emergency scenario에서 esc_rate ≈ 1.00 발생
-        if self.scenario_type in ("emergency", "rare_disease"):
-            multiplier *= 0.90
+        # 시나리오 보정: base_config.yaml의 scenario_multipliers를 우선 사용
+        smap = self.scenario_multipliers if self.scenario_multipliers is not None else DEFAULT_SCENARIO_MULTIPLIERS
+        multiplier *= smap.get(self.scenario_type, 1.0)
+        self.multiplier_value = multiplier
         self.adjusted_threshold = self.base_threshold * multiplier
+
+    def effective_threshold(self, uncertainty_threshold: Optional[float] = None) -> float:
+        """
+        Weighted CP가 적용된 경우 per-question threshold를 RTC 배율로 스케일하여 반환.
+        uncertainty_threshold가 None이면 표준 adjusted_threshold 반환.
+
+        UQM이 weighted q̂_w를 계산해도 EDE Trigger 1이 그것을 사용하지 않던
+        과거 버그(보고서 2026-05 audit issue #1)를 복구하기 위한 helper.
+        """
+        if uncertainty_threshold is None or self.base_threshold <= 0:
+            return self.adjusted_threshold
+        return float(uncertainty_threshold) * self.multiplier_value
 
 
 class RTC:
@@ -114,6 +138,7 @@ class RTC:
         self,
         base_threshold: float,
         multipliers: Optional[dict[str, float]] = None,
+        scenario_multipliers: Optional[dict[str, float]] = None,
     ):
         self.base_threshold = base_threshold
         # config에서 전달되는 배율 (대문자 문자열 키 "CRITICAL" 등을 RiskLevel enum으로 변환)
@@ -124,6 +149,11 @@ class RTC:
                     self._multipliers[RiskLevel(k.lower())] = float(v)
                 except ValueError:
                     pass  # 알 수 없는 키 무시
+        # 시나리오별 배율(소문자 키)
+        self._scenario_multipliers: dict[str, float] = dict(DEFAULT_SCENARIO_MULTIPLIERS)
+        if scenario_multipliers:
+            for k, v in scenario_multipliers.items():
+                self._scenario_multipliers[str(k).lower()] = float(v)
 
     def get_threshold(self, specialty: str, scenario_type: str) -> RTCConfig:
         return RTCConfig(
@@ -131,6 +161,7 @@ class RTC:
             scenario_type=scenario_type,
             base_threshold=self.base_threshold,
             multipliers=self._multipliers,
+            scenario_multipliers=self._scenario_multipliers,
         )
 
     def pareto_frontier(
@@ -226,8 +257,11 @@ class EscalationDecision:
 #
 # 이 설계는 과-에스컬레이션(over-escalation)을 줄이기 위한 핵심 구조임.
 # 논문 방법론 섹션에 반드시 수식 또는 의사코드로 명시해야 재현 가능.
+#
+# 변경 내역(2026-05-07): "code blue"를 PROCEDURAL_KEYWORDS로 이동.
+#   기존엔 CRITICAL이라 표준 답변(예: "in the event of code blue, perform CPR")도
+#   무조건 트리거되었음. 진짜 EOL/돌이킬 수 없는 결정은 DNR/withdraw care 계열만 남김.
 CRITICAL_KEYWORDS = {
-    "code blue",
     "do not resuscitate", "dnr",
     "withdraw care", "comfort measures only",
 }
@@ -242,6 +276,7 @@ PROCEDURAL_KEYWORDS = {
     "thrombolysis", "tpa", "alteplase",
     "vasopressor", "norepinephrine", "epinephrine",
     "defibrillate", "defibrillation",
+    "code blue",  # 이전 CRITICAL → 맥락 조건부로 강등 (2026-05-07)
 }
 
 # PROCEDURAL_KEYWORDS 트리거를 활성화하는 불확실 표현
@@ -254,84 +289,107 @@ UNCERTAINTY_MODIFIERS = {
 # 출처: ① MedAbstain AP 샘플 빈도 상위, ② Savage et al. 2025,
 #       ③ 수동 코딩 (GPT-4o 500건), ④ extended (모델이 자주 사용하는 표현 추가).
 #
-# 보고서 3.3.2 표는 출처별 "예시 표현"만 보여주며 (medabstain 3개·savage2025 3개·
-# manual 2개·extended 3개), 본 코드는 이 예시 표현들을 모두 포함하도록 정렬되어
-# 있습니다. 보고서에 "37개"로 명시되어 있으나, 라운드 개선 과정에서 모델이 자주
-# 출력하는 변형 표현을 extended로 추가하여 현재 44개를 유지합니다 (Safety Recall
-# 우선). 보고서 수치 갱신 시 함께 반영하세요.
+# ── 2단계 분리 (2026-05-07 audit issue #6) ────────────────────────────────────
+# strength="strong"  : 자기 자신만으로 명확한 불확실 신호 → 무조건 트리거
+# strength="weak"    : 자신감 있는 답변에도 흔히 등장 → UNCERTAINTY_MODIFIERS와
+#                       함께 나타날 때만 트리거 (PROCEDURAL_KEYWORDS와 같은 구조)
+#
+# 약한 표현(예: "may vary", "limited evidence", "consult a specialist")은
+# 보수적 임상 답변에 정상적으로 나타나므로, 단독 트리거 시 over-escalation을
+# 인플레이션시키는 문제가 있었음.
+#
+# 보고서 3.3.2의 출처 분류는 그대로 유지(논문 표 호환성). 문구 수: 44개
+# (strong=27, weak=17). 보고서 갱신 시 두 카테고리 합산값으로 보고하세요.
 NO_EVIDENCE_PHRASES: list[dict] = [
     # --- MedAbstain AP 샘플 출처 (보고서 표 예시: i am not certain, insufficient evidence, limited data) ---
-    {"phrase": "i am not certain",          "source": "medabstain"},
-    {"phrase": "i'm not certain",           "source": "medabstain"},
-    {"phrase": "i'm not sure",              "source": "medabstain"},
-    {"phrase": "insufficient evidence",     "source": "medabstain"},
-    {"phrase": "limited information",       "source": "medabstain"},
-    {"phrase": "limited data",              "source": "medabstain"},
-    {"phrase": "cannot determine",          "source": "medabstain"},
+    {"phrase": "i am not certain",          "source": "medabstain", "strength": "strong"},
+    {"phrase": "i'm not certain",           "source": "medabstain", "strength": "strong"},
+    {"phrase": "i'm not sure",              "source": "medabstain", "strength": "strong"},
+    {"phrase": "insufficient evidence",     "source": "medabstain", "strength": "strong"},
+    {"phrase": "limited information",       "source": "medabstain", "strength": "strong"},
+    {"phrase": "limited data",              "source": "medabstain", "strength": "strong"},
+    {"phrase": "cannot determine",          "source": "medabstain", "strength": "strong"},
     # --- Savage et al. 2025 출처 (보고서 표 예시: this is unclear, evidence is mixed, conflicting data) ---
-    {"phrase": "this is unclear",           "source": "savage2025"},
-    {"phrase": "evidence is mixed",         "source": "savage2025"},
-    {"phrase": "conflicting data",          "source": "savage2025"},
-    {"phrase": "requires further workup",   "source": "savage2025"},
-    {"phrase": "no clear guideline",        "source": "savage2025"},
-    # --- 수동 코딩 (GPT-4o 500건) 출처 (보고서 표 예시: clinical judgment needed, differential is broad) ---
-    {"phrase": "i don't know",              "source": "manual"},
-    {"phrase": "i do not know",             "source": "manual"},
-    {"phrase": "unknown etiology",          "source": "manual"},
-    {"phrase": "case report only",          "source": "manual"},
-    {"phrase": "experimental",              "source": "manual"},
-    {"phrase": "off-label",                 "source": "manual"},
-    {"phrase": "i would recommend consulting", "source": "manual"},
-    {"phrase": "not enough context",        "source": "manual"},
-    {"phrase": "differential is broad",     "source": "manual"},
-    {"phrase": "clinical judgment needed",  "source": "manual"},
-    # --- extended (보고서 표 예시: cannot be determined, requires further evaluation, beyond my knowledge) ---
-    {"phrase": "cannot be determined",           "source": "extended"},
-    {"phrase": "requires further evaluation",    "source": "extended"},
-    {"phrase": "beyond my knowledge",            "source": "extended"},
-    {"phrase": "this remains controversial",     "source": "extended"},
-    {"phrase": "evidence is lacking",            "source": "extended"},
-    {"phrase": "no consensus",                   "source": "extended"},
-    {"phrase": "varies by institution",          "source": "extended"},
-    {"phrase": "expert opinion only",            "source": "extended"},
-    {"phrase": "the literature is mixed",        "source": "extended"},
-    {"phrase": "further evaluation needed",      "source": "extended"},
-    {"phrase": "more information is needed",     "source": "extended"},
-    {"phrase": "this is debated",                "source": "extended"},
-    {"phrase": "not well established",           "source": "extended"},
-    {"phrase": "limited evidence",               "source": "extended"},
-    {"phrase": "emerging evidence",              "source": "extended"},
-    {"phrase": "may vary",                       "source": "extended"},
-    {"phrase": "recommend specialist",           "source": "extended"},
-    {"phrase": "specialist consultation",        "source": "extended"},
-    {"phrase": "consult a specialist",           "source": "extended"},
-    {"phrase": "further workup",                 "source": "extended"},
-    {"phrase": "highly variable",                "source": "extended"},
-    {"phrase": "unclear etiology",               "source": "extended"},
+    {"phrase": "this is unclear",           "source": "savage2025",  "strength": "strong"},
+    {"phrase": "evidence is mixed",         "source": "savage2025",  "strength": "strong"},
+    {"phrase": "conflicting data",          "source": "savage2025",  "strength": "strong"},
+    {"phrase": "requires further workup",   "source": "savage2025",  "strength": "strong"},
+    {"phrase": "no clear guideline",        "source": "savage2025",  "strength": "strong"},
+    # --- 수동 코딩 (GPT-4o 500건) 출처 ---
+    {"phrase": "i don't know",              "source": "manual",      "strength": "strong"},
+    {"phrase": "i do not know",             "source": "manual",      "strength": "strong"},
+    {"phrase": "unknown etiology",          "source": "manual",      "strength": "strong"},
+    {"phrase": "case report only",          "source": "manual",      "strength": "strong"},
+    {"phrase": "experimental",              "source": "manual",      "strength": "weak"},
+    {"phrase": "off-label",                 "source": "manual",      "strength": "weak"},
+    {"phrase": "i would recommend consulting", "source": "manual",   "strength": "strong"},
+    {"phrase": "not enough context",        "source": "manual",      "strength": "strong"},
+    {"phrase": "differential is broad",     "source": "manual",      "strength": "strong"},
+    {"phrase": "clinical judgment needed",  "source": "manual",      "strength": "strong"},
+    # --- extended ---
+    {"phrase": "cannot be determined",           "source": "extended", "strength": "strong"},
+    {"phrase": "requires further evaluation",    "source": "extended", "strength": "weak"},
+    {"phrase": "beyond my knowledge",            "source": "extended", "strength": "strong"},
+    {"phrase": "this remains controversial",     "source": "extended", "strength": "strong"},
+    {"phrase": "evidence is lacking",            "source": "extended", "strength": "strong"},
+    {"phrase": "no consensus",                   "source": "extended", "strength": "strong"},
+    {"phrase": "varies by institution",          "source": "extended", "strength": "weak"},
+    {"phrase": "expert opinion only",            "source": "extended", "strength": "strong"},
+    {"phrase": "the literature is mixed",        "source": "extended", "strength": "strong"},
+    {"phrase": "further evaluation needed",      "source": "extended", "strength": "weak"},
+    {"phrase": "more information is needed",     "source": "extended", "strength": "weak"},
+    {"phrase": "this is debated",                "source": "extended", "strength": "strong"},
+    {"phrase": "not well established",           "source": "extended", "strength": "strong"},
+    {"phrase": "limited evidence",               "source": "extended", "strength": "weak"},
+    {"phrase": "emerging evidence",              "source": "extended", "strength": "weak"},
+    {"phrase": "may vary",                       "source": "extended", "strength": "weak"},
+    {"phrase": "recommend specialist",           "source": "extended", "strength": "weak"},
+    {"phrase": "specialist consultation",        "source": "extended", "strength": "weak"},
+    {"phrase": "consult a specialist",           "source": "extended", "strength": "weak"},
+    {"phrase": "further workup",                 "source": "extended", "strength": "weak"},
+    {"phrase": "highly variable",                "source": "extended", "strength": "weak"},
+    {"phrase": "unclear etiology",               "source": "extended", "strength": "strong"},
 ]
 
 # 실제 탐지에 사용할 문자열 집합 (빠른 멤버십 검사용)
 NO_EVIDENCE_STRINGS: set[str] = {p["phrase"] for p in NO_EVIDENCE_PHRASES}
+NO_EVIDENCE_STRONG: set[str] = {p["phrase"] for p in NO_EVIDENCE_PHRASES if p.get("strength") == "strong"}
+NO_EVIDENCE_WEAK: set[str] = {p["phrase"] for p in NO_EVIDENCE_PHRASES if p.get("strength") == "weak"}
 
 
 def detect_no_evidence(text: str) -> tuple[bool, list[str]]:
     """
-    텍스트에서 근거 부재 표현을 탐지합니다.
+    텍스트에서 근거 부재 표현을 탐지합니다 (2단계).
+
+    트리거 조건:
+        - strong 표현 1개 이상 → 트리거
+        - weak  표현 + UNCERTAINTY_MODIFIERS 동시 등장 → 트리거
+        - weak  표현 단독 → 미트리거 (자신감 있는 답변에 정상 출현)
 
     Returns:
         (triggered: bool, matched_phrases: list[str])
         논문 재현을 위해 매칭된 문구도 함께 반환합니다.
     """
     text_lower = text.lower()
-    matched = [p for p in NO_EVIDENCE_STRINGS if p in text_lower]
-    return len(matched) > 0, matched
+    strong_matched = [p for p in NO_EVIDENCE_STRONG if p in text_lower]
+    weak_matched = [p for p in NO_EVIDENCE_WEAK if p in text_lower]
+    if strong_matched:
+        return True, strong_matched + weak_matched
+    if weak_matched and any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS):
+        return True, weak_matched
+    return False, []
 
 
 # 엔트로피 기반 불확실성 판단 기본 임계값 (nats/token)
 # ⚠ 이 값은 하드코딩 기본값입니다.
 #   run_calibration_pipeline.py → Youden's J로 자동 결정 → base_config.yaml에 저장
 #   EDE(entropy_threshold=cfg["entropy_threshold"]) 형태로 주입됩니다.
-ENTROPY_HIGH_THRESHOLD = 2.0
+#
+# 변경 내역(2026-05-07 audit issue #7):
+#   기본값을 2.0 → 0.6으로 수정. top_logprobs=5 분포의 entropy 상한이 ln(5)≈1.609
+#   nats이므로 2.0은 절대 도달 불가능 → entropy_boost가 영원히 0이었음.
+#   ln(5)/2.7 ≈ 0.6 (top-k 균등 대비 ~37% 분산) 수준을 fallback으로 사용.
+ENTROPY_HIGH_THRESHOLD = 0.6
 
 
 class EDE:
@@ -339,20 +397,33 @@ class EDE:
     Escalation Decision Engine.
 
     트리거 구조:
-        Trigger 1 — UNCERTAINTY_EXCEEDED: nonconformity_score > adjusted_threshold
+        Trigger 1 — UNCERTAINTY_EXCEEDED: nonconformity_score > effective_threshold
+                    effective_threshold = (Weighted CP가 켜졌을 때) per-question q̂_w × multiplier
+                                          그렇지 않으면 base_threshold × multiplier
         Trigger 2 — HIGH_RISK_ACTION:     고위험 임상 키워드 감지
-        Trigger 3 — NO_EVIDENCE:          근거 부재 표현 감지
+        Trigger 3 — NO_EVIDENCE:          근거 부재 표현 감지 (strong/weak 2단계)
         Entropy 가중치 (Trigger 아님): logprobs 기반 entropy가 높으면 confidence += entropy_boost
+
+    결정 규칙(decision_rule):
+        "trigger_count" (default, 보고서 호환):
+            should_escalate = len(triggers) > 0
+            t1_weight, entropy_boost는 confidence 보고용으로만 사용 (결정에 영향 없음).
+        "confidence":
+            should_escalate = confidence > confidence_threshold
+            t1_weight, entropy_boost, confidence_threshold 모두 결정에 직접 영향.
+            run_calibration_pipeline.py의 grid search와 정합 (audit issue #2).
 
     계수 주입 흐름:
         1. run_calibration_pipeline.py → grid_search_ede_coefficients()로 최적 계수 산출
-        2. base_config.yaml ede 섹션에 저장
-        3. run_experiment.py → EDE(t1_weight=..., entropy_boost=..., entropy_threshold=...) 전달
+        2. base_config.yaml ede 섹션에 저장 (decision_rule 포함)
+        3. run_experiment.py → EDE(t1_weight=..., entropy_boost=..., entropy_threshold=...,
+                                    decision_rule=..., confidence_threshold=...) 전달
 
     사용법:
-        ede = EDE()                                          # 기본 계수
-        ede = EDE(t1_weight=0.4, entropy_boost=0.15,        # 데이터 기반 계수
-                  entropy_threshold=2.07)
+        ede = EDE()                                          # 기본 계수, trigger_count rule
+        ede = EDE(t1_weight=0.4, entropy_boost=0.15,
+                  entropy_threshold=0.6, decision_rule="confidence",
+                  confidence_threshold=0.5)
         decision = ede.decide(uncertainty_result, rtc_config, response_text)
         if decision.should_escalate:
             hand_off_to_clinician(decision)
@@ -363,10 +434,18 @@ class EDE:
         t1_weight: float = 0.4,
         entropy_boost: float = 0.15,
         entropy_threshold: float = ENTROPY_HIGH_THRESHOLD,
+        decision_rule: str = "trigger_count",
+        confidence_threshold: float = 0.5,
     ):
         self.t1_weight = t1_weight
         self.entropy_boost = entropy_boost
         self.entropy_threshold = entropy_threshold
+        if decision_rule not in ("trigger_count", "confidence"):
+            raise ValueError(
+                f"decision_rule must be 'trigger_count' or 'confidence', got {decision_rule!r}"
+            )
+        self.decision_rule = decision_rule
+        self.confidence_threshold = confidence_threshold
         self.escalation_log: list[EscalationDecision] = []
 
     def decide(
@@ -378,8 +457,13 @@ class EDE:
         triggers = []
         text_lower = response_text.lower()
 
-        # Trigger 1: 불확실성 임계 초과
-        if uncertainty_result.nonconformity_score > rtc_config.adjusted_threshold:
+        # Trigger 1: 불확실성 임계 초과 — Weighted CP가 켜졌으면 per-question q̂_w 사용
+        # (audit issue #1 fix: 과거엔 standard threshold만 보고 weighted q̂를 무시했음)
+        effective_threshold = rtc_config.effective_threshold(
+            uncertainty_threshold=uncertainty_result.threshold_used
+            if uncertainty_result.weighted_cp_used else None
+        )
+        if uncertainty_result.nonconformity_score > effective_threshold:
             triggers.append(EscalationTrigger.UNCERTAINTY_EXCEEDED)
 
         # Trigger 2: 고위험 행동 키워드 감지 (맥락 인식)
@@ -393,12 +477,10 @@ class EDE:
         if has_critical or has_uncertain_procedure:
             triggers.append(EscalationTrigger.HIGH_RISK_ACTION)
 
-        # Trigger 3: 근거 부재 표현 감지
+        # Trigger 3: 근거 부재 표현 감지 (strong/weak 2단계 — audit issue #6)
         triggered, _ = detect_no_evidence(response_text)
         if triggered:
             triggers.append(EscalationTrigger.NO_EVIDENCE)
-
-        should_escalate = len(triggers) > 0
 
         # Confidence 계산:
         #   - 기본: trigger 수 / 3
@@ -416,6 +498,12 @@ class EDE:
             + entropy_boost
         )
 
+        # 결정 규칙: trigger_count (back-compat) 또는 confidence (audit issue #2)
+        if self.decision_rule == "confidence":
+            should_escalate = confidence > self.confidence_threshold
+        else:
+            should_escalate = len(triggers) > 0
+
         explanation = self._build_explanation(
             triggers, rtc_config, uncertainty_result, entropy, self.entropy_threshold
         )
@@ -429,7 +517,8 @@ class EDE:
             uncertainty_result=uncertainty_result,
             log={
                 "score": uncertainty_result.nonconformity_score,
-                "threshold": rtc_config.adjusted_threshold,
+                "threshold": effective_threshold,
+                "weighted_cp_used": uncertainty_result.weighted_cp_used,
                 "specialty": rtc_config.specialty,
                 "risk_level": rtc_config.risk_level.value,
                 "trigger_count": len(triggers),
@@ -437,6 +526,8 @@ class EDE:
                 "entropy_boost": entropy_boost,
                 "entropy_threshold_used": self.entropy_threshold,
                 "t1_weight_used": self.t1_weight,
+                "decision_rule": self.decision_rule,
+                "confidence_threshold": self.confidence_threshold if self.decision_rule == "confidence" else None,
                 "scoring_method": uncertainty_result.scoring_method,
             },
         )
