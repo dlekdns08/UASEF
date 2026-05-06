@@ -26,6 +26,7 @@ results/*.json
 results/*.csv
 results/*.png
 results/*.pdf
+uasef-pptx/
 
 # Jupyter
 .ipynb_checkpoints/
