@@ -53,8 +53,10 @@ def find_entropy_threshold(
     ]
 
     if len(valid) < 10:
+        # audit issue #7: 과거 fallback=2.0은 top_logprobs=5의 entropy 상한 ln(5)≈1.609를 초과 →
+        # entropy_boost 영원히 0. 0.6은 ln(5)/2.7 수준 (top-k 균등 분포 대비 약 37% 분산).
         return {
-            "threshold": 2.0,
+            "threshold": 0.6,
             "youdens_j": float("nan"),
             "sensitivity": float("nan"),
             "specificity": float("nan"),
@@ -69,7 +71,7 @@ def find_entropy_threshold(
 
     thresholds = np.linspace(min(ents), max(ents), n_thresholds)
     best: dict = {
-        "threshold": 2.0,
+        "threshold": 0.6,    # 데이터 미달 시에도 합리적 기본값 (audit issue #7)
         "youdens_j": -1.0,
         "sensitivity": 0.0,
         "specificity": 0.0,
