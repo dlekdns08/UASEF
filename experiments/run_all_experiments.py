@@ -434,6 +434,20 @@ def build_markdown_report(summary: dict) -> str:
     lines.append(f"- **α**: {cfg['alpha']}")
     lines.append(f"- **n_cal**: {cfg['n_cal']} | **n_test**: {cfg['n_test']} | "
                  f"**n_medabstain**: {cfg['n_medabstain']} | **n_pareto_test**: {cfg['n_pareto_test']}")
+    # audit 6라운드 메타 (재현성)
+    lines.append(f"- **prompt_mode**: `{cfg.get('prompt_mode')}` | "
+                 f"**decision_rule**: `{cfg.get('decision_rule')}` | "
+                 f"**weighted_cp**: {cfg.get('weighted_cp')} | "
+                 f"**strict**: {cfg.get('strict')}")
+    cal_art = meta.get("calibration_artifacts", {})
+    if cal_art:
+        rtc_str = ", ".join(f"{k}={v}" for k, v in (cal_art.get("rtc_multipliers") or {}).items())
+        ede_str = ", ".join(f"{k}={v}" for k, v in (cal_art.get("ede") or {}).items())
+        lines.append(f"- **RTC multipliers**: {rtc_str or 'default'}")
+        lines.append(f"- **EDE config**: {ede_str or 'default'}")
+        sm = cal_art.get("scenario_multipliers")
+        if sm:
+            lines.append(f"- **Scenario multipliers**: {sm}")
     lines.append(f"\n> **실험 구조**")
     lines.append(f"> - `[Primary]` **OpenAI** — logprob-based CP: token-level logprobs 기반 비적합 점수. **논문 주요 결과.**")
     lines.append(f"> - `[Ablation]` **LMStudio GGUF** — logprob-based CP: LM Studio OpenAI-compatible API를 통해 token-level logprobs 추출. 로컬 GGUF 모델 적용 가능성 검증.")
