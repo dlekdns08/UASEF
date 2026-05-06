@@ -97,6 +97,7 @@ class AgentComponents:
     specialty: str = "internal_medicine"
     scenario_type: str = "routine"
     distribution_source: str = "medqa"   # calibration과 동일한 소스를 유지해야 CP 보장
+    prompt_mode: str = "neutral"         # "neutral" | "instructed" (audit issue #5)
 
 
 # ── LLM 초기화 헬퍼 ──────────────────────────────────────────────────────────
