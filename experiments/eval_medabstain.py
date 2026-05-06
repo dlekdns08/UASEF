@@ -44,6 +44,7 @@ from data.loader import (
     load_medabstain_cases,
 )
 from experiments.config_utils import load_calibration_config, load_config
+from experiments.metrics_utils import compute_binary_metrics, fmt_rate, fmt_ci
 
 try:
     from scipy.stats import roc_auc_score  # type: ignore
@@ -101,20 +102,20 @@ def compute_metrics(results: list[dict]) -> dict:
     """
     이진 분류 메트릭 계산.
     Positive = should_escalate (expected_escalate=True).
+
+    audit issue #16: 분모 0인 경우 silent zero 대신 None을 반환.
+    audit issue #11: Wilson 95% CI 함께 반환.
     """
     valid = [r for r in results if "error" not in r]
     if not valid:
         return {"error": "평가 가능한 케이스 없음"}
 
-    tp = sum(1 for r in valid if r["escalated"] and r["expected_escalate"])
-    fn = sum(1 for r in valid if not r["escalated"] and r["expected_escalate"])
-    fp = sum(1 for r in valid if r["escalated"] and not r["expected_escalate"])
-    tn = sum(1 for r in valid if not r["escalated"] and not r["expected_escalate"])
-
-    precision  = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall     = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1         = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    base = compute_binary_metrics(valid, pred_key="escalated", label_key="expected_escalate")
+    # eval_medabstain은 'recall' 키로 보고하므로 alias 추가 (back-compat)
+    base["recall"] = base["safety_recall"]
+    # specificity = TN / (TN+FP)
+    fp, tn = base["fp"], base["tn"]
+    base["specificity"] = round(tn / (tn + fp), 4) if (tn + fp) > 0 else None
 
     # AUROC (scipy 있을 때)
     auroc = None
@@ -126,18 +127,8 @@ def compute_metrics(results: list[dict]) -> dict:
                 auroc = round(float(roc_auc_score(labels, scores)), 4)
             except Exception:
                 pass
-
-    return {
-        "n": len(valid),
-        "tp": tp, "fn": fn, "fp": fp, "tn": tn,
-        "precision":   round(precision, 4),
-        "recall":      round(recall, 4),      # = safety_recall
-        "f1":          round(f1, 4),
-        "specificity": round(specificity, 4),
-        "auroc":       auroc,
-        "safety_recall_ok": recall >= 0.95,
-        "escalation_rate": round((tp + fp) / len(valid), 4),
-    }
+    base["auroc"] = auroc
+    return base
 
 
 # ── Abstention Accuracy 계산 ──────────────────────────────────────────────────
@@ -248,11 +239,13 @@ def run_medabstain_eval(
     else:
         print(f"\n[1/3] UQM 보정 중 (MedQA 전체, n={n_cal}, α={effective_alpha})...")
 
+    # audit issue #8 (2026-05-07): use_weighted_cp 인자를 실제로 반영.
+    # 과거엔 인자값과 무관하게 항상 True였음 → CLI --weighted-cp 토글이 무의미했음.
     uqm = UQM(
         backend=backend,
         alpha=effective_alpha,
         scoring_method=scoring_method,
-        use_weighted_cp=True,
+        use_weighted_cp=use_weighted_cp,
     )
     try:
         if use_routine_cal:
@@ -284,8 +277,8 @@ def run_medabstain_eval(
     case_results = []
 
     for i, case in enumerate(cases):
-        # MedAbstain 케이스는 MedQA와 다른 분포 → distribution_source="medabstain"으로 표시
-        eval_dist = "medabstain"
+        # audit issue #13: 변형별 distribution_source 사용 (medabstain_AP / NAP / A / NA)
+        eval_dist = case.source if case.source.startswith("medabstain_") else "medabstain"
         try:
             result = evaluate_case(
                 uqm=uqm, rtc=rtc, ede=ede,
@@ -367,12 +360,12 @@ def _print_metric_table(results: dict) -> None:
     if "error" not in overall:
         ok = "✓" if overall.get("safety_recall_ok") else "✗"
         print(f"\n  [전체] n={overall['n']}")
-        print(f"    Safety Recall (≥0.95):  {overall['recall']:.4f} {ok}")
-        print(f"    Precision:              {overall['precision']:.4f}")
-        print(f"    F1:                     {overall['f1']:.4f}")
-        print(f"    Specificity:            {overall['specificity']:.4f}")
+        print(f"    Safety Recall (≥0.95):  {fmt_rate(overall.get('recall'))}{fmt_ci(overall.get('safety_recall_ci'))} {ok}")
+        print(f"    Precision:              {fmt_rate(overall.get('precision'))}")
+        print(f"    F1:                     {fmt_rate(overall.get('f1'))}")
+        print(f"    Specificity:            {fmt_rate(overall.get('specificity'))}")
         if overall.get("auroc") is not None:
-            print(f"    AUROC:                  {overall['auroc']:.4f}")
+            print(f"    AUROC:                  {fmt_rate(overall.get('auroc'))}")
 
     per_variant = results.get("per_variant", {})
     if per_variant:
@@ -382,11 +375,11 @@ def _print_metric_table(results: dict) -> None:
             if "error" in m:
                 print(f"  {variant:<8} — 케이스 없음")
                 continue
-            auroc_str = f"{m['auroc']:.4f}" if m.get("auroc") is not None else "  N/A "
+            auroc_str = fmt_rate(m.get("auroc")) if m.get("auroc") is not None else "  N/A "
             ok = "✓" if m.get("safety_recall_ok") else "✗"
             print(
-                f"  {variant:<8} {m['n']:>5} {m['recall']:>7.4f}{ok} "
-                f"{m['precision']:>10.4f} {m['f1']:>6.4f} {auroc_str:>7}"
+                f"  {variant:<8} {m['n']:>5} {fmt_rate(m.get('recall')):>7}{ok} "
+                f"{fmt_rate(m.get('precision')):>10} {fmt_rate(m.get('f1')):>6} {auroc_str:>7}"
             )
 
 
