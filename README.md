@@ -1061,9 +1061,14 @@ n = 500, α = 0.15 → 이론 coverage ≥ 0.85, LMStudio에서 실측 0.81 → 
 
 ---
 
-## 12. 2026-05-07 Audit & Fixes
+## 12. 참고문헌 변경 이력
 
-`agent/`, `models/`, `experiments/`, `data/` 전 영역에 대한 audit이 수행되어 실험 결과 신뢰성에 영향을 주는 다수의 버그가 수정되었습니다. 자세한 변경 이력은 [CHANGELOG.md](CHANGELOG.md)에 기록되어 있습니다. 본 섹션은 **연구자가 즉시 알아야 할 핵심 변경**을 요약합니다.
+> 본 섹션은 더 이상 README에서 관리하지 않습니다. 모든 코드 변경 / audit 수정 이력은
+> [`improvements/README.md`](improvements/README.md)에서 라운드별로 정리합니다.
+
+---
+
+## 12-OBSOLETE-PLACEHOLDER. (이 헤더는 다음 단계에서 제거됨)
 
 ### 12.1 Critical 수정 (실험 결과 무효화 위험 해소)
 
