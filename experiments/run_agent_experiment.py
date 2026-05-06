@@ -351,6 +351,21 @@ if __name__ == "__main__":
         "--include-pubmedqa", action="store_true",
         help="PubMedQA 'maybe' 케이스를 rare_disease 버킷에 추가",
     )
+    # audit 6라운드 신규 옵션
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM/Agent SYSTEM_PROMPT (audit #5)",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n 미달 시 RuntimeError로 중단 (audit #19)",
+    )
     args = parser.parse_args()
 
     tracing = os.getenv("LANGCHAIN_TRACING_V2", "false").lower()
@@ -386,6 +401,9 @@ if __name__ == "__main__":
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 distribution_source="medqa",
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
