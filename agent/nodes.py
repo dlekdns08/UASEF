@@ -177,8 +177,13 @@ def reason(state: MedicalAgentState, components: AgentComponents) -> dict:
 
     # 첫 호출: 시스템 프롬프트 + 질문 주입
     if not messages:
+        # audit issue #5: prompt_mode에 따라 SystemPrompt 결정
+        sys_prompt = (
+            SYSTEM_PROMPT_INSTRUCTED if components.prompt_mode == "instructed"
+            else SYSTEM_PROMPT_NEUTRAL
+        )
         messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=sys_prompt),
             HumanMessage(content=state["question"]),
         ]
 
