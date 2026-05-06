@@ -119,6 +119,9 @@ def run_experiment_agent(args, cal_questions, agent_scenarios) -> dict:
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 distribution_source="medqa",
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
@@ -151,6 +154,9 @@ def run_experiment_baseline(args) -> dict:
                 scoring_method=args.scoring_method,
                 alpha=args.alpha,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
@@ -185,6 +191,9 @@ def run_experiment_medabstain(args) -> dict:
                 variants=args.variants,
                 use_weighted_cp=args.weighted_cp,
                 seed=args.seed,
+                prompt_mode=args.prompt_mode,
+                strict=args.strict,
+                decision_rule=args.decision_rule,
             )
             if result:
                 all_results[backend] = result
@@ -211,11 +220,14 @@ def run_experiment_pareto(args) -> tuple[dict, dict]:
 
     for backend in backends:
         try:
+            # pareto_sweep은 logprob/self_consistency만 받음 (auto 미지원)
+            sm = "logprob" if args.scoring_method == "auto" else args.scoring_method
             results = _run_pareto(
                 backend=backend,
                 n_calibration=args.n_cal,
                 n_test=args.n_pareto_test,
-                scoring_method=args.scoring_method,
+                scoring_method=sm,
+                prompt_mode=args.prompt_mode,
             )
             if results:
                 all_results[backend] = results
@@ -280,9 +292,11 @@ def _extract_baseline_summary(baseline_results: dict) -> dict:
                 summary[backend][strategy] = {"error": m["error"]}
                 continue
             summary[backend][strategy] = {
-                "safety_recall":        m.get("safety_recall"),
-                "over_escalation_rate": m.get("over_escalation_rate"),
-                "safety_recall_ok":     m.get("safety_recall_ok"),
+                "safety_recall":         m.get("safety_recall"),
+                "safety_recall_ci":      m.get("safety_recall_ci"),     # audit #11
+                "over_escalation_rate":  m.get("over_escalation_rate"),
+                "over_escalation_ci":    m.get("over_escalation_ci"),   # audit #11
+                "safety_recall_ok":      m.get("safety_recall_ok"),
                 "tp": m.get("tp"), "fn": m.get("fn"),
                 "fp": m.get("fp"), "tn": m.get("tn"),
             }
@@ -355,21 +369,37 @@ def build_summary(
     args: argparse.Namespace,
     total_elapsed: str,
 ) -> dict:
+    # base_config 동봉 — 데이터 기반 캘리브레이션 결과(rtc/ede/entropy)도 같이 기록
+    base_cfg = load_config()
+    rtc_mults, ede_kwargs = load_calibration_config()
+    scenario_mults = load_scenario_multipliers()
     return {
         "meta": {
             "timestamp":      datetime.now().isoformat(),
             "total_elapsed":  total_elapsed,
             "config": {
-                "backend":        args.backend or "all",
-                "n_cal":          args.n_cal,
-                "n_test":         args.n_test,
-                "n_medabstain":   args.n_medabstain,
-                "n_pareto_test":  args.n_pareto_test,
-                "scoring_method": args.scoring_method,
-                "alpha":          args.alpha,
-                "weighted_cp":    args.weighted_cp,
-                "variants":       args.variants,
-                "seed":           args.seed,
+                "backend":          args.backend or "all",
+                "n_cal":            args.n_cal,
+                "n_test":           args.n_test,
+                "n_medabstain":     args.n_medabstain,
+                "n_pareto_test":    args.n_pareto_test,
+                "scoring_method":   args.scoring_method,
+                "alpha":            args.alpha,
+                "weighted_cp":      args.weighted_cp,
+                "variants":         args.variants,
+                "seed":             args.seed,
+                # audit 6라운드 신규
+                "prompt_mode":      args.prompt_mode,
+                "decision_rule":    args.decision_rule or ede_kwargs.get("decision_rule"),
+                "strict":           args.strict,
+                "allow_fallback":   args.allow_fallback,
+            },
+            # 재현성을 위해 캘리브레이션 산출물도 보고서에 동봉
+            "calibration_artifacts": {
+                "rtc_multipliers":     rtc_mults,
+                "scenario_multipliers": scenario_mults,
+                "ede":                 ede_kwargs,
+                "uqm_alpha":           base_cfg.get("uqm", {}).get("alpha"),
             },
         },
         "agent":       _extract_agent_summary(agent_results),
