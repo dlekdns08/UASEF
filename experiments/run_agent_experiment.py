@@ -101,7 +101,7 @@ def run_backend_experiment(
     cal_questions: list[str],
     agent_scenarios: list[dict],
     scoring_method: str = "auto",
-    alpha: float = None,
+    alpha: Optional[float] = None,
     distribution_source: str = "medqa",
 ) -> dict:
     cfg = load_config()
