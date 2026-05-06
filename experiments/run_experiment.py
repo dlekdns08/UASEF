@@ -52,6 +52,7 @@ from data.loader import (
     load_scenarios,
     case_to_experiment_dict,
 )
+from experiments.metrics_utils import compute_binary_metrics, fmt_rate, fmt_ci
 
 
 # ── 실험 데이터셋 — MedQA / MedAbstain ────────────────────────────────────────
