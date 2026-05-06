@@ -131,6 +131,8 @@ def run_backend_experiment(
     print(f"\n[2/3] 에이전트 그래프 준비 완료 (base_threshold={base_threshold:.4f})")
 
     rtc_multipliers, ede_kwargs = load_calibration_config()
+    from experiments.config_utils import load_scenario_multipliers
+    _scenario_multipliers = load_scenario_multipliers()  # audit issue #20
 
     # Step 3: 시나리오별 실행
     print(f"\n[3/3] {len(agent_scenarios)}개 시나리오 실행...")
