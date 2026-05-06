@@ -153,16 +153,24 @@ def compute_self_consistency_score(
     system_prompt: str,
     question: str,
     n: int = 5,
+    seed_response: Optional[ModelResponse] = None,
 ) -> float:
     """
     SELF_CONSISTENCY 방식 비적합 점수 (Ablation).
     n회 쿼리 후 Jaccard 다양성 → 0~5 범위로 정규화.
     Coverage guarantee는 성립하지만 logprob 방식과 직접 비교 불가.
+
+    audit issue #10: seed_response가 주어지면 그 텍스트를 첫 샘플로 재사용하여
+        총 LLM 호출 수를 N → N-1로 줄인다. (과거엔 _get_score가 1회 + N회 = N+1회 호출)
     """
-    texts = [
-        query_model(backend, system_prompt, question, temperature=0.7, logprobs=False).text.strip()[:200]
-        for _ in range(n)
-    ]
+    texts: list[str] = []
+    if seed_response is not None and seed_response.text:
+        texts.append(seed_response.text.strip()[:200])
+    while len(texts) < n:
+        texts.append(
+            query_model(backend, system_prompt, question, temperature=0.7, logprobs=False)
+            .text.strip()[:200]
+        )
     return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
 
 
@@ -174,8 +182,9 @@ class ConformalCalibrator:
     q̂ = ceil((n+1)(1-α))/n 번째 분위수
     """
 
-    def __init__(self, alpha: float = 0.10):
+    def __init__(self, alpha: float = 0.10, strict: bool = False):
         self.alpha = alpha
+        self.strict = strict
         self.threshold: float = float("inf")
         self.calibration_scores: list[float] = []
 
@@ -188,12 +197,15 @@ class ConformalCalibrator:
         # 즉, n ≥ ceil((1-α) / α). α=0.05 → n ≥ 19, α=0.01 → n ≥ 99
         min_n = math.ceil((1 - self.alpha) / self.alpha)
         if n < min_n:
-            warnings.warn(
+            msg = (
                 f"[UQM] Calibration n={n}이 CP 보장을 위한 최소값 {min_n}(α={self.alpha})보다 작습니다. "
                 f"스킵된 샘플이 너무 많거나 calibration set이 부족합니다. "
-                f"Coverage 보장이 실측에서 위반될 수 있습니다.",
-                UserWarning, stacklevel=2,
+                f"Coverage 보장이 실측에서 위반될 수 있습니다."
             )
+            if self.strict:
+                # audit issue #19: strict=True에서는 자동화된 실험이 잘못 진행되지 않도록 중단
+                raise RuntimeError(msg + " (strict=True)")
+            warnings.warn(msg, UserWarning, stacklevel=2)
         self.calibration_scores = sorted(nonconformity_scores)
         level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
         self.threshold = float(np.quantile(self.calibration_scores, level))
@@ -349,7 +361,23 @@ class UQM:
         uqm_sc = UQM(backend="lmstudio", alpha=0.10, scoring_method="self_consistency")
     """
 
-    SYSTEM_PROMPT = (
+    # ── SYSTEM_PROMPT 정책 (audit 2026-05-07 issue #5) ────────────────────────
+    # 과거 프롬프트는 모델에게 NO_EVIDENCE_PHRASES("I am not certain", "insufficient
+    # evidence", "limited data", "no clear guideline")를 명시적으로 사용하도록 지시했고,
+    # EDE Trigger 3가 정확히 그 문구들을 탐지하는 circular evaluation 문제가 있었다.
+    #
+    # 이제 두 프롬프트를 분리:
+    #   SYSTEM_PROMPT_NEUTRAL : 자연스러운 임상 응답 (default — 진정한 abstention 능력 측정)
+    #   SYSTEM_PROMPT_INSTRUCTED : 기존(레거시) 지시 문구 — ablation 비교용
+    #
+    # 논문에서는 두 조건의 차이를 "프롬프트 효과(prompt-induced abstention)"로 보고하세요.
+    SYSTEM_PROMPT_NEUTRAL = (
+        "You are a clinical decision support AI. "
+        "Answer the medical question concisely and accurately. "
+        "If you are uncertain or the evidence is limited, communicate that honestly "
+        "in your own words."
+    )
+    SYSTEM_PROMPT_INSTRUCTED = (
         "You are a clinical decision support AI. "
         "Answer the medical question concisely. "
         "IMPORTANT: If you are not fully confident, or if evidence is limited, "
@@ -357,6 +385,10 @@ class UQM:
         "conditions, you MUST begin your answer with 'I am not certain' or explicitly "
         "state 'insufficient evidence', 'limited data', or 'no clear guideline'."
     )
+    # 하위 호환: 기존 코드가 UQM.SYSTEM_PROMPT를 참조하므로 alias 유지.
+    # 기본은 NEUTRAL — circular evaluation 제거. INSTRUCTED를 쓰려면
+    # UQM(prompt_mode="instructed")로 명시.
+    SYSTEM_PROMPT = SYSTEM_PROMPT_NEUTRAL
 
     def __init__(
         self,
@@ -365,9 +397,18 @@ class UQM:
         consistency_n: int = 5,
         scoring_method: str = "logprob",
         use_weighted_cp: bool = False,
+        prompt_mode: str = "neutral",
+        strict: bool = False,
     ):
+        """
+        Args:
+            prompt_mode: "neutral"(default) — 자연 응답 / "instructed" — 레거시 지시.
+                         neutral이 권장(circular evaluation 회피, audit issue #5).
+            strict:      True이면 calibration n이 CP 보장 최소값 미만일 때 RuntimeError.
+                         False(default)이면 UserWarning만 발생.
+        """
         self.backend = backend
-        self.calibrator = ConformalCalibrator(alpha=alpha)
+        self.calibrator = ConformalCalibrator(alpha=alpha, strict=strict)
         self._calibrated = False
         self.consistency_n = consistency_n
         self._scoring_method = ScoringMethod(scoring_method)
@@ -375,13 +416,23 @@ class UQM:
         self.use_weighted_cp = use_weighted_cp
         self._weighted_calibrator: Optional[WeightedConformalCalibrator] = None
         self._cal_texts: list[str] = []
+        self.strict = strict
+
+        # SYSTEM_PROMPT 선택
+        if prompt_mode == "instructed":
+            self._system_prompt = self.SYSTEM_PROMPT_INSTRUCTED
+        elif prompt_mode == "neutral":
+            self._system_prompt = self.SYSTEM_PROMPT_NEUTRAL
+        else:
+            raise ValueError(f"prompt_mode must be 'neutral' or 'instructed', got {prompt_mode!r}")
+        self.prompt_mode = prompt_mode
 
         # _use_self_consistency 초기화
         if self._scoring_method == ScoringMethod.LOGPROB:
             self._use_self_consistency = False
         elif self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
             self._use_self_consistency = True
-        else:  # AUTO
+        else:  # AUTO (deprecated)
             self._use_self_consistency = None  # 런타임 감지
 
         # Ablation 경고
@@ -397,14 +448,15 @@ class UQM:
 
         if self._scoring_method == ScoringMethod.AUTO:
             warnings.warn(
-                "\n[UQM] scoring_method='auto' 사용 중.\n"
+                "\n[UQM] scoring_method='auto' is DEPRECATED (audit 2026-05-07 issue #21).\n"
                 "  실험 재현성(reproducibility)을 위해 방법을 명시적으로 지정하세요:\n"
-                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')",
-                UserWarning, stacklevel=2,
+                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')\n"
+                "  다음 릴리스에서 제거될 예정입니다.",
+                DeprecationWarning, stacklevel=2,
             )
 
     def _get_score(self, question: str) -> tuple[float, ModelResponse]:
-        resp = query_model(self.backend, self.SYSTEM_PROMPT, question, temperature=0.0)
+        resp = query_model(self.backend, self._system_prompt, question, temperature=0.0)
 
         # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지
         if self._use_self_consistency is None:
@@ -418,8 +470,11 @@ class UQM:
                 )
 
         if self._use_self_consistency:
+            # audit issue #10: 첫 호출 응답을 N개의 일부로 활용해 N-1번 추가 쿼리만 발생
             score = compute_self_consistency_score(
-                self.backend, self.SYSTEM_PROMPT, question, self.consistency_n
+                self.backend, self._system_prompt, question,
+                n=self.consistency_n,
+                seed_response=resp,
             )
         else:
             score = compute_nonconformity_score(resp)
@@ -470,20 +525,29 @@ class UQM:
         cal_scores, holdout_scores = [], []
         cal_texts: list[str] = []
         n_skipped = 0
+        # audit issue #18: 결정적 오류(ValueError 등)는 즉시 skip — 동일 입력 재시도 무의미.
+        # 일시적 네트워크 오류(ConnectionError, TimeoutError, OSError)만 재시도.
+        retryable = (ConnectionError, TimeoutError, OSError)
         for i, q in enumerate(questions):
-            last_exc = None
+            last_exc: Optional[Exception] = None
             for attempt in range(1, 4):
                 try:
                     score, _ = self._get_score(q)
                     last_exc = None
                     break
-                except Exception as e:
+                except retryable as e:
                     last_exc = e
                     if attempt < 3:
-                        print(f"  [RETRY {attempt}/3] {i+1}/{n_total}: {e}")
+                        print(f"  [RETRY {attempt}/3] {i+1}/{n_total}: {type(e).__name__}: {e}")
+                except Exception as e:
+                    # 결정적 오류 — 재시도 안함
+                    last_exc = e
+                    print(f"  [SKIP {i+1}/{n_total}] 결정적 오류, 즉시 건너뜀: {type(e).__name__}: {e}")
+                    break
             if last_exc is not None:
                 n_skipped += 1
-                print(f"  [SKIP {i+1}/{n_total}] 3회 실패, 샘플 건너뜀: {last_exc}")
+                if isinstance(last_exc, retryable):
+                    print(f"  [SKIP {i+1}/{n_total}] 3회 재시도 실패: {last_exc}")
                 continue
             if i in holdout_set:
                 holdout_scores.append(score)
@@ -493,7 +557,14 @@ class UQM:
             if (i + 1) % 10 == 0:
                 print(f"  [{i+1}/{n_total}] score={score:.4f}")
         if n_skipped:
-            print(f"  [UQM] 총 {n_skipped}개 샘플 스킵 (cal={len(cal_scores)}, holdout={len(holdout_scores)})")
+            skip_pct = n_skipped / n_total
+            print(f"  [UQM] 총 {n_skipped}개 샘플 스킵 ({skip_pct:.1%}, cal={len(cal_scores)}, holdout={len(holdout_scores)})")
+            if skip_pct > 0.10:
+                warnings.warn(
+                    f"[UQM] Skip rate {skip_pct:.1%} > 10% — calibration 품질 의심. "
+                    f"Backend 상태 또는 입력 데이터 점검 권장.",
+                    UserWarning, stacklevel=2,
+                )
 
         self._cal_texts = cal_texts
         self.calibrator.fit(cal_scores)
