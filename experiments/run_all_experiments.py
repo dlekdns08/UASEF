@@ -33,6 +33,7 @@ UASEF 전체 실험 통합 실행기
 
 import argparse
 import json
+import os
 import sys
 import traceback
 from datetime import datetime
@@ -43,6 +44,8 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
+
+from experiments.config_utils import load_config, load_calibration_config, load_scenario_multipliers
 
 # ── 실험 모듈 import ──────────────────────────────────────────────────────────
 
@@ -619,6 +622,46 @@ def save_summary(summary: dict, report_md: str) -> None:
 
 # ── 진입점 ───────────────────────────────────────────────────────────────────
 
+def _preflight_check(args) -> None:
+    """
+    실행 전 환경 점검 (audit issue #3, #19, #5):
+      - data/raw 또는 HuggingFace datasets가 사용 가능한지
+      - fallback이 발동할 위험이 있다면 명시적 동의(`--allow-fallback`) 요구
+      - n_calibration이 α의 CP 최소값을 충족하는지
+      - prompt_mode/decision_rule 등 새 옵션 출력
+    """
+    import math
+    cfg = load_config()
+    effective_alpha = args.alpha if args.alpha is not None else cfg.get("uqm", {}).get("alpha", 0.10)
+    min_n = math.ceil((1 - effective_alpha) / effective_alpha)
+
+    if args.n_cal < min_n:
+        msg = (
+            f"[Pre-flight] n_cal={args.n_cal} < CP 최소 {min_n} (α={effective_alpha}). "
+            f"`--n-cal {min_n}` 이상으로 실행하거나 `--alpha`를 늘리세요."
+        )
+        if args.strict:
+            raise RuntimeError(msg)
+        print(f"  ⚠  {msg}")
+
+    # fallback 환경변수 동기화 (--allow-fallback CLI → env)
+    if args.allow_fallback:
+        os.environ["UASEF_ALLOW_FALLBACK"] = "1"
+        print("  ⚠  --allow-fallback ON → 데이터 fallback 허용 (실험 결과는 검증 불가).")
+    else:
+        os.environ.pop("UASEF_ALLOW_FALLBACK", None)
+
+    # OpenAI key 체크 (sanity)
+    if (args.backend in (None, "openai")) and not os.environ.get("OPENAI_API_KEY"):
+        print("  ⚠  OPENAI_API_KEY 미설정 — openai backend 단계는 SKIP 됩니다.")
+
+    print(f"  α effective  : {effective_alpha}  (n_min={min_n})")
+    print(f"  prompt_mode  : {args.prompt_mode}")
+    print(f"  decision_rule: {args.decision_rule or '(base_config.yaml에서 로드)'}")
+    print(f"  strict       : {args.strict}")
+    print(f"  weighted_cp  : {args.weighted_cp}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="UASEF 전체 실험 통합 실행기",
@@ -629,18 +672,21 @@ def main() -> None:
         choices=["lmstudio", "openai"],
         help="단일 백엔드 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
+    # ── 데이터 규모 ────────────────────────────────────────────────────────
     parser.add_argument("--n-cal", type=int, default=500,
                         help="Calibration 질문 수 (논문 품질: 500)")
-    parser.add_argument("--n-test", type=int, default=50,
-                        help="에이전트·베이스라인 시나리오별 테스트 케이스 수 (논문 품질: 50)")
-    parser.add_argument("--n-medabstain", type=int, default=50,
+    parser.add_argument("--n-test", type=int, default=200,
+                        help="에이전트·베이스라인 시나리오별 테스트 케이스 수 "
+                             "(audit #11: 50→200 권장, Wilson 95%% CI ±0.03)")
+    parser.add_argument("--n-medabstain", type=int, default=100,
                         help="MedAbstain 변형별 케이스 수 (논문 품질: 100)")
     parser.add_argument("--n-pareto-test", type=int, default=100,
                         help="Pareto Sweep 시나리오별 테스트 케이스 수 (논문 품질: 100)")
+    # ── 핵심 알고리즘 옵션 ─────────────────────────────────────────────────
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
         choices=["logprob", "self_consistency", "auto"],
-        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
+        help="비적합 점수 방식. auto는 deprecated (audit #21).",
     )
     parser.add_argument("--alpha", type=float, default=None,
                         help="Conformal prediction α (기본: base_config.yaml uqm.alpha)")
@@ -650,9 +696,28 @@ def main() -> None:
         help="MedAbstain 평가 변형",
     )
     parser.add_argument("--weighted-cp", action="store_true",
-                        help="Weighted Conformal Prediction 사용")
+                        help="Weighted Conformal Prediction 사용 (audit #8: 인자 제대로 반영됨)")
     parser.add_argument("--include-pubmedqa", action="store_true",
                         help="에이전트 실험에 PubMedQA 케이스 추가")
+    # ── audit 6라운드 신규 옵션 ────────────────────────────────────────────
+    parser.add_argument(
+        "--prompt-mode", type=str, default="neutral",
+        choices=["neutral", "instructed"],
+        help="UQM/Agent SYSTEM_PROMPT (audit #5). neutral=권장, instructed=ablation/legacy.",
+    )
+    parser.add_argument(
+        "--decision-rule", type=str, default=None,
+        choices=["trigger_count", "confidence"],
+        help="EDE 결정 규칙 (audit #2). 미지정 시 base_config.yaml 사용.",
+    )
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="CP 최소 n / 데이터 검증 실패 시 RuntimeError로 중단 (audit #19)",
+    )
+    parser.add_argument(
+        "--allow-fallback", action="store_true",
+        help="데이터 fallback 허용 (audit #3). 실험 결과 검증 불가 — 단위테스트 외 사용 금지.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--skip", nargs="*",
@@ -674,6 +739,7 @@ def main() -> None:
     print(f"  n_medabstain : {args.n_medabstain}  (변형별)")
     print(f"  n_pareto_test: {args.n_pareto_test}")
     print(f"  Skip         : {args.skip or '없음'}")
+    _preflight_check(args)
 
     # ── 공유 데이터 로드 (에이전트 실험용) ──────────────────────────────────
     cal_questions = []
