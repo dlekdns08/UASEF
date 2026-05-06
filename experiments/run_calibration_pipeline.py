@@ -227,14 +227,20 @@ def run_calibration_pipeline(
         )
         t1_weight = ede_result["best_t1_weight"]
         entropy_boost = ede_result["best_entropy_boost"]
-        print(f"  t1_weight     = {t1_weight}")
-        print(f"  entropy_boost = {entropy_boost}")
-        print(f"  F1-safety     = {ede_result['best_f1_safety']:.4f}")
-        print(f"  Safety Recall = {ede_result['best_safety_recall']:.4f}")
-        print(f"  Over-Esc Rate = {ede_result['best_over_escalation']:.4f}")
+        confidence_threshold = ede_result["best_confidence_threshold"]
+        decision_rule = ede_result["recommended_decision_rule"]   # "confidence"
+        print(f"  decision_rule        = {decision_rule}")
+        print(f"  t1_weight            = {t1_weight}")
+        print(f"  entropy_boost        = {entropy_boost}")
+        print(f"  confidence_threshold = {confidence_threshold}")
+        print(f"  F1-safety            = {ede_result['best_f1_safety']:.4f}")
+        print(f"  Safety Recall        = {ede_result['best_safety_recall']:.4f}")
+        print(f"  Over-Esc Rate        = {ede_result['best_over_escalation']:.4f}")
         report["ede_grid_search"] = {
             "best_t1_weight": t1_weight,
             "best_entropy_boost": entropy_boost,
+            "best_confidence_threshold": confidence_threshold,
+            "recommended_decision_rule": decision_rule,
             "best_f1_safety": ede_result["best_f1_safety"],
             "best_safety_recall": ede_result["best_safety_recall"],
             "best_over_escalation": ede_result["best_over_escalation"],
@@ -242,17 +248,22 @@ def run_calibration_pipeline(
     else:
         t1_weight = 0.4
         entropy_boost = 0.15
+        confidence_threshold = 0.5
+        decision_rule = "trigger_count"  # 보수적 default
         import warnings
         warnings.warn(
             f"[EDE] 레이블 데이터 부족 (n={len(all_labels)} < 5) → "
-            f"하드코딩 fallback 계수 사용 (t1_weight={t1_weight}, entropy_boost={entropy_boost}). "
-            f"논문 품질 결과를 위해 n_labeled를 늘려 grid search가 동작하도록 하세요.",
+            f"하드코딩 fallback 계수 사용 (t1_weight={t1_weight}, entropy_boost={entropy_boost}, "
+            f"decision_rule={decision_rule}). 논문 품질 결과를 위해 n_labeled를 늘려 grid search가 동작하도록 하세요.",
             UserWarning, stacklevel=2,
         )
-        print(f"  [FALLBACK] 데이터 부족 → t1_weight={t1_weight}, entropy_boost={entropy_boost} (UserWarning 발생)")
+        print(f"  [FALLBACK] 데이터 부족 → t1_weight={t1_weight}, entropy_boost={entropy_boost}, "
+              f"decision_rule={decision_rule}")
         report["ede_grid_search"] = {
             "best_t1_weight": t1_weight,
             "best_entropy_boost": entropy_boost,
+            "best_confidence_threshold": confidence_threshold,
+            "recommended_decision_rule": decision_rule,
             "fallback_used": True,
         }
 
@@ -264,9 +275,12 @@ def run_calibration_pipeline(
     base_cfg = _load_base_config()
     base_cfg["rtc"] = rtc_multipliers
     base_cfg["entropy_threshold"] = float(entropy_threshold)
+    # audit issue #2: decision_rule, confidence_threshold도 함께 저장
     base_cfg["ede"] = {
         "t1_weight": float(t1_weight),
         "entropy_boost": float(entropy_boost),
+        "confidence_threshold": float(confidence_threshold),
+        "decision_rule": str(decision_rule),
     }
     _save_base_config(base_cfg)
 
