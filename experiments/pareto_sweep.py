@@ -69,7 +69,105 @@ COLORS = {
 }
 
 
+# ── 점수 캐싱 (audit issue #9) ────────────────────────────────────────────────
+#
+# 과거: α마다 UQM.calibrate를 새로 호출 → 동일 cal_questions에 대해 LLM을 6번 반복 호출.
+# nonconformity score는 α와 무관하므로 score는 한 번만 계산하고 q̂만 α별로 재산출.
+# 마찬가지로 test set의 점수도 (specialty, backend)당 1회만 계산해 모든 α에서 공유.
+
+import math as _math
+import random as _random
+
+
+def _compute_scores(
+    backend: str,
+    questions: list[str],
+    scoring_method: str,
+    label: str = "",
+) -> list[float]:
+    """audit issue #9: 캐싱용 점수 계산 — α/specialty와 무관하게 한 번만 호출."""
+    if scoring_method != "logprob":
+        # self_consistency는 randomized하므로 일관성을 위해 UQM 인스턴스를 사용
+        uqm = UQM(backend=backend, alpha=0.10, scoring_method=scoring_method)
+        scores = []
+        for q in questions:
+            try:
+                s, _ = uqm._get_score(q)
+                scores.append(s)
+            except Exception:
+                continue
+        return scores
+
+    # logprob: query_model로 직접 호출
+    sys_prompt = UQM.SYSTEM_PROMPT
+    scores = []
+    for i, q in enumerate(questions):
+        try:
+            resp = query_model(backend, sys_prompt, q, temperature=0.0)
+            scores.append(compute_nonconformity_score(resp))
+        except Exception as e:
+            print(f"  [{label}] {i+1}/{len(questions)} skip: {e}")
+            continue
+    return scores
+
+
+def _split_cal_holdout(scores: list[float], holdout_fraction: float = 0.2,
+                       seed: int = 42) -> tuple[list[float], list[float]]:
+    n = len(scores)
+    n_holdout = max(1, int(n * holdout_fraction))
+    rng = _random.Random(seed)
+    idx = list(range(n))
+    rng.shuffle(idx)
+    holdout = [scores[i] for i in idx[:n_holdout]]
+    cal = [scores[i] for i in idx[n_holdout:]]
+    return cal, holdout
+
+
 # ── 단일 (α, specialty) Pareto 포인트 측정 ────────────────────────────────────
+
+def measure_pareto_point_from_scores(
+    alpha: float,
+    specialty: str,
+    scenario_type: str,
+    cal_scores: list[float],
+    holdout_scores: list[float],
+    test_scores: list[float],
+    distribution_source: str = "medqa",
+    scoring_method: str = "logprob",
+) -> dict:
+    """
+    audit issue #9: 미리 계산된 score들로 (α, specialty) 포인트를 산출.
+    cal_scores/test_scores는 α와 무관하므로 한 번 계산해 모든 α에서 공유.
+    """
+    calibrator = ConformalCalibrator(alpha=alpha)
+    calibrator.fit(cal_scores)
+    base_threshold = calibrator.threshold
+
+    coverage_report = calibrator.check_coverage(holdout_scores)
+    actual_coverage = coverage_report.get("actual_coverage", 1 - alpha)
+
+    rtc_multipliers, _ = load_calibration_config()
+    rtc = RTC(base_threshold=base_threshold, multipliers=rtc_multipliers)
+    rtc_config = rtc.get_threshold(specialty, scenario_type)
+
+    # 순수 CP Trigger만 (Pareto 분석)
+    escalations = [s > rtc_config.adjusted_threshold for s in test_scores]
+    esc_rate = sum(escalations) / len(escalations) if escalations else 0.0
+
+    return {
+        "alpha": alpha,
+        "specialty": specialty,
+        "scenario_type": scenario_type,
+        "target_coverage": round(1 - alpha, 4),
+        "actual_coverage": actual_coverage,
+        "adjusted_threshold": round(rtc_config.adjusted_threshold, 4),
+        "base_threshold": round(base_threshold, 4),
+        "escalation_rate": round(esc_rate, 4),
+        "n_cal": len(cal_scores),
+        "n_test": len(test_scores),
+        "scoring_method": scoring_method,
+    }
+
 
 def measure_pareto_point(
     backend: str,
@@ -82,49 +180,23 @@ def measure_pareto_point(
     scoring_method: str = "logprob",
 ) -> dict:
     """
-    단일 (α, specialty) 조합에서 conformal coverage와 escalation rate를 측정합니다.
-
-    CP Trigger만 사용 (UNCERTAINTY_EXCEEDED만):
-    keyword/evidence triggers를 제외하여 순수 conformal prediction 효과를 측정.
-    이 값이 Pareto frontier의 x, y 좌표가 됩니다.
+    하위 호환 wrapper. 새 코드에서는 measure_pareto_point_from_scores를 직접 사용하세요.
+    이 함수는 α 한 점만 측정하므로 LLM 호출 절약 효과가 없습니다.
     """
-    uqm = UQM(backend=backend, alpha=alpha, scoring_method=scoring_method)
-    coverage_report = uqm.calibrate(
-        cal_questions,
-        holdout_fraction=0.2,
+    cal_scores = _compute_scores(backend, cal_questions, scoring_method, "cal")
+    cal, holdout = _split_cal_holdout(cal_scores)
+    test_qs = [c.get("question", c) for c in test_cases]
+    test_scores = _compute_scores(backend, test_qs, scoring_method, f"test/{specialty}")
+    return measure_pareto_point_from_scores(
+        alpha=alpha,
+        specialty=specialty,
+        scenario_type=scenario_type,
+        cal_scores=cal,
+        holdout_scores=holdout,
+        test_scores=test_scores,
         distribution_source=distribution_source,
+        scoring_method=scoring_method,
     )
-    actual_coverage = coverage_report.get("actual_coverage", 1 - alpha)
-
-    rtc_multipliers, _ = load_calibration_config()
-    rtc = RTC(base_threshold=uqm.calibrator.threshold, multipliers=rtc_multipliers)
-    rtc_config = rtc.get_threshold(specialty, scenario_type)
-
-    escalations = []
-    for case in test_cases:
-        unc = uqm.evaluate(
-            case.get("question", case),
-            distribution_source=distribution_source,
-        )
-        # 순수 CP Trigger만 사용 (Pareto 분석: keyword/evidence trigger 제외)
-        escalated = unc.nonconformity_score > rtc_config.adjusted_threshold
-        escalations.append(escalated)
-
-    esc_rate = sum(escalations) / len(escalations) if escalations else 0.0
-
-    return {
-        "alpha": alpha,
-        "specialty": specialty,
-        "scenario_type": scenario_type,
-        "target_coverage": round(1 - alpha, 4),
-        "actual_coverage": actual_coverage,
-        "adjusted_threshold": round(rtc_config.adjusted_threshold, 4),
-        "base_threshold": round(uqm.calibrator.threshold, 4),
-        "escalation_rate": round(esc_rate, 4),
-        "n_cal": len(cal_questions),
-        "n_test": len(test_cases),
-        "scoring_method": scoring_method,
-    }
 
 
 # ── 전체 스윕 실행 ─────────────────────────────────────────────────────────────
