@@ -433,13 +433,14 @@ def load_calibration_questions(
         if verbose:
             print(f"[DataLoader] HuggingFace 로드 실패: {e} → 폴백 사용")
 
-    # 3. 폴백: 내장 질문 반복 확장
+    # 3. 폴백: 내장 질문 반복 확장 — audit issue #3로 기본 차단
+    _refuse_fallback("load_calibration_questions")
     rng = random.Random(seed)
     extended = _FALLBACK_CALIBRATION * (n // len(_FALLBACK_CALIBRATION) + 1)
     rng.shuffle(extended)
     result = extended[:n]
     if verbose:
-        print(f"[DataLoader] 내장 폴백 데이터 사용 ({len(result)}개) — "
+        print(f"[DataLoader] [WARNING] 내장 폴백 데이터 사용 ({len(result)}개) — "
               f"정확한 연구를 위해 MedQA 데이터셋 사용 권장")
     return result
 
