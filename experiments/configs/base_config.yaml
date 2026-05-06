@@ -1,11 +1,15 @@
+# UASEF base configuration (audit 2026-05-07)
+# 변경 내역은 CHANGELOG.md 참고.
 uqm:
   alpha: 0.10
   scoring_method: logprob
   consistency_n: 5
   holdout_fraction: 0.2
+  prompt_mode: neutral        # audit issue #5: "neutral" / "instructed" (레거시)
+  strict: false               # audit issue #19: true이면 n<min_n 시 RuntimeError
 data:
   n_calibration: 500
-  n_test_per_scenario: 50
+  n_test_per_scenario: 200    # audit issue #11: 50 → 200 (Wilson 95% CI ±0.03 수준)
   calibration_split: train
   test_split: test
   seed: 42
@@ -21,7 +25,18 @@ rtc:
   HIGH: 0.75
   MODERATE: 1.00
   LOW: 1.30
+# audit issue #20: 시나리오별 추가 배율도 데이터화 (과거엔 코드 하드코딩 0.90)
+scenario_multipliers:
+  emergency:      0.90
+  rare_disease:   0.90
+  multimorbidity: 1.00
+  routine:        1.00
 entropy_threshold: 0.6045
 ede:
   t1_weight: 0.4
   entropy_boost: 0.15
+  # audit issue #2: decision_rule + confidence_threshold 신규.
+  # "trigger_count"(default, back-compat) — len(triggers)>0
+  # "confidence" — confidence > confidence_threshold (grid search와 정합)
+  decision_rule: trigger_count
+  confidence_threshold: 0.5
