@@ -1,7 +1,7 @@
 """
 UASEF — EDE Confidence Coefficient Grid Search
 
-EDE.decide()의 confidence 계산식에서 사용되는 두 계수를
+EDE.decide()의 confidence 계산식에서 사용되는 두 계수 + confidence threshold를
 calibration 데이터로부터 F1-safety 최대화 기준으로 결정합니다.
 
 confidence = min(1.0,
@@ -10,13 +10,27 @@ confidence = min(1.0,
     + entropy_boost * (entropy > threshold)
 )
 
+decision_rule:
+    "confidence" : should_escalate = confidence > confidence_threshold
+                   t1_weight, entropy_boost, confidence_threshold가 결정에 직접 영향.
+    "trigger_count": should_escalate = len(triggers) > 0
+                   계수는 결정에 영향이 없음 → grid search는 confidence rule을 가정.
+
+audit issue #2 (2026-05-07):
+    과거 grid search는 `confidence > 0.5`로 예측을 만들었으나 EDE.decide의 실제 결정은
+    `len(triggers) > 0`이었음 → 산출 계수가 결정에 영향 없음. 이제 (a) confidence rule
+    기준으로 최적화하고 (b) 권장 decision_rule을 결과에 함께 반환한다.
+
 최적화 목표:
     F1-safety = harmonic_mean(Safety Recall, 1 - Over-Escalation Rate)
 
 사용법:
     from models.ede_coefficient_search import grid_search_ede_coefficients
     result = grid_search_ede_coefficients(t1_flags, trigger_counts, entropy_flags, labels)
-    print(result["best_t1_weight"], result["best_entropy_boost"])
+    print(result["best_t1_weight"], result["best_entropy_boost"],
+          result["best_confidence_threshold"])
+    # → EDE(decision_rule="confidence",
+    #       t1_weight=..., entropy_boost=..., confidence_threshold=...)
 """
 
 from __future__ import annotations
@@ -26,6 +40,8 @@ from itertools import product as iproduct
 # 탐색 격자 정의
 T1_WEIGHT_CANDIDATES: list[float] = [0.2, 0.3, 0.4, 0.5]
 ENTROPY_BOOST_CANDIDATES: list[float] = [0.05, 0.10, 0.15, 0.20]
+# audit issue #2: confidence_threshold도 함께 최적화 (과거엔 0.5 고정)
+CONFIDENCE_THRESHOLD_CANDIDATES: list[float] = [0.30, 0.40, 0.50, 0.60]
 
 
 def grid_search_ede_coefficients(
@@ -33,35 +49,43 @@ def grid_search_ede_coefficients(
     trigger_counts: list[int],
     entropy_flags: list[bool],
     labels: list[bool],
+    confidence_thresholds: list[float] | None = None,
 ) -> dict:
     """
     F1-safety = harmonic_mean(Safety Recall, 1 - Over-Escalation Rate) 최대화.
 
     Args:
-        t1_flags:       UNCERTAINTY_EXCEEDED 트리거 발동 여부 (per sample)
-        trigger_counts: 총 트리거 수 0~3 (per sample)
-        entropy_flags:  entropy > threshold 여부 (per sample)
-        labels:         True = should escalate (ground truth)
+        t1_flags:                  UNCERTAINTY_EXCEEDED 트리거 발동 여부 (per sample)
+        trigger_counts:            총 트리거 수 0~3 (per sample)
+        entropy_flags:             entropy > threshold 여부 (per sample)
+        labels:                    True = should escalate (ground truth)
+        confidence_thresholds:     탐색할 τ 값. None이면 CONFIDENCE_THRESHOLD_CANDIDATES.
 
     Returns:
         {
             "best_t1_weight": float,
             "best_entropy_boost": float,
+            "best_confidence_threshold": float,
+            "recommended_decision_rule": "confidence",
             "best_f1_safety": float,
             "best_safety_recall": float,
             "best_over_escalation": float,
             "grid_results": list[dict]   # 전체 grid 결과 (appendix용)
         }
     """
+    tau_grid = confidence_thresholds or CONFIDENCE_THRESHOLD_CANDIDATES
     best: dict = {"best_f1_safety": -1.0}
     grid_results: list[dict] = []
 
-    for w_t1, w_ent in iproduct(T1_WEIGHT_CANDIDATES, ENTROPY_BOOST_CANDIDATES):
+    for w_t1, w_ent, tau in iproduct(
+        T1_WEIGHT_CANDIDATES, ENTROPY_BOOST_CANDIDATES, tau_grid
+    ):
         confidences = [
             min(1.0, cnt / 3.0 + w_t1 * float(t1) + w_ent * float(ent))
             for cnt, t1, ent in zip(trigger_counts, t1_flags, entropy_flags)
         ]
-        preds = [c > 0.5 for c in confidences]
+        # audit issue #2: 가변 τ
+        preds = [c > tau for c in confidences]
 
         tp = sum(p and l for p, l in zip(preds, labels))
         fn = sum(not p and l for p, l in zip(preds, labels))
@@ -77,6 +101,7 @@ def grid_search_ede_coefficients(
         row = {
             "t1_weight": w_t1,
             "entropy_boost": w_ent,
+            "confidence_threshold": tau,
             "safety_recall": round(recall, 4),
             "over_escalation": round(over_esc, 4),
             "f1_safety": round(f1, 4),
@@ -87,10 +112,12 @@ def grid_search_ede_coefficients(
             best = {
                 "best_t1_weight": w_t1,
                 "best_entropy_boost": w_ent,
+                "best_confidence_threshold": tau,
                 "best_f1_safety": round(f1, 4),
                 "best_safety_recall": round(recall, 4),
                 "best_over_escalation": round(over_esc, 4),
             }
 
+    best["recommended_decision_rule"] = "confidence"
     best["grid_results"] = grid_results
     return best
