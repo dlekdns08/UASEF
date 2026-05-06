@@ -35,7 +35,8 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
-from models.uqm import UQM
+from models.uqm import UQM, ConformalCalibrator, compute_nonconformity_score, compute_self_consistency_score
+from models.model_interface import query_model
 from models.rtc_ede import RTC, EDE
 from data.loader import load_calibration_questions, load_scenarios
 from experiments.config_utils import load_calibration_config
