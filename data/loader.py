@@ -602,7 +602,14 @@ def load_scenarios(
         bucket = case.scenario_type if case.scenario_type in buckets else "routine"
         buckets[bucket].append(case)
 
-    # 폴백으로 부족한 시나리오 보충
+    # 폴백으로 부족한 시나리오 보충 — audit issue #3
+    needs_fallback = any(
+        len(cs) < n_per_scenario
+        and any(c.scenario_type == st for c in _FALLBACK_SCENARIOS)
+        for st, cs in buckets.items()
+    )
+    if needs_fallback:
+        _refuse_fallback("load_scenarios (시나리오 케이스 부족)")
     for scenario_type, cases in buckets.items():
         if len(cases) < n_per_scenario:
             fallback_for_type = [
@@ -613,7 +620,7 @@ def load_scenarios(
             extended = (fallback_for_type * (needed // max(len(fallback_for_type), 1) + 1))[:needed]
             cases.extend(extended)
             if extended and verbose:
-                print(f"[DataLoader] '{scenario_type}' 폴백 보충: {len(extended)}개")
+                print(f"[DataLoader] [WARNING] '{scenario_type}' 폴백 보충: {len(extended)}개")
 
     # 각 시나리오에서 n_per_scenario개 샘플링
     rng = random.Random(seed)
@@ -889,32 +896,39 @@ def load_pubmedqa(
     return cases
 
 
+def _distribution_source_for(case: MedQACase) -> str:
+    """
+    audit issue #13: dataset 출처를 더 잘게 표시해 distribution shift를 명확화.
+    medabstain_AP / medabstain_NAP / medabstain_A / medabstain_NA를 모두 보존.
+    """
+    if case.source.startswith("medabstain_"):
+        return case.source         # medabstain_AP 등 그대로 사용
+    if case.source == "pubmedqa":
+        return "pubmedqa"
+    if case.source == "mimic3":
+        return "mimic3"
+    return "medqa"
+
+
 def case_to_experiment_dict(case: MedQACase) -> dict:
     """MedQACase → run_experiment.py SCENARIOS 포맷으로 변환."""
-    # MedAbstain 케이스는 MedQA와 다른 분포 → "medabstain"으로 표시 (WeightedCP 활성화)
-    dist_source = (
-        "medabstain" if case.source.startswith("medabstain") else "medqa"
-    )
     return {
-        "id": f"{case.source[:3].upper()}-{hash(case.question) % 10000:04d}",
+        # audit: builtin hash()는 PYTHONHASHSEED 영향 → md5로 안정 ID
+        "id": _stable_id(case.source[:3].upper(), case.question),
         "question": case.question,
         "expected_escalate": case.expected_escalate,
         "source": case.source,
-        "distribution_source": dist_source,
+        "distribution_source": _distribution_source_for(case),
     }
 
 
 def case_to_agent_dict(case: MedQACase) -> dict:
     """MedQACase → run_agent_experiment.py AGENT_SCENARIOS 포맷으로 변환."""
-    # distribution_source: MedAbstain 케이스는 WeightedCP 보정을 위해 "medabstain" 명시
-    dist_source = (
-        "medabstain" if case.source.startswith("medabstain") else "medqa"
-    )
     return {
-        "id": f"{case.source[:3].upper()}-{hash(case.question) % 10000:04d}",
+        "id": _stable_id(case.source[:3].upper(), case.question),
         "question": case.question,
         "specialty": case.specialty,
         "scenario_type": case.scenario_type,
         "expected_escalate": case.expected_escalate,
-        "distribution_source": dist_source,
+        "distribution_source": _distribution_source_for(case),
     }
