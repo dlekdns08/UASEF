@@ -21,11 +21,52 @@ PubMedQA:     pubmed_qa / pqa_labeled        (HuggingFace)
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import random
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+# audit issue #3 (2026-05-07): fallback 데이터로 캘리브레이션할 때 CP coverage 보장이
+# 무효화되는 문제를 명시적으로 차단한다. 환경변수 `UASEF_ALLOW_FALLBACK=1`이 없으면
+# fallback 사용 시 RuntimeError. 단위테스트 등에서만 명시적으로 허용해야 한다.
+ALLOW_FALLBACK_ENV = "UASEF_ALLOW_FALLBACK"
+
+
+def _fallback_allowed() -> bool:
+    return os.environ.get(ALLOW_FALLBACK_ENV, "0").lower() in ("1", "true", "yes")
+
+
+def _refuse_fallback(context: str) -> None:
+    """fallback 데이터 사용 시 명시적 차단."""
+    if _fallback_allowed():
+        warnings.warn(
+            f"[DataLoader] fallback 데이터 사용 ({context}) — "
+            f"{ALLOW_FALLBACK_ENV}=1로 활성화됨. "
+            f"CP coverage 보장이 무효화되므로 논문 결과로 보고하지 마세요.",
+            UserWarning, stacklevel=2,
+        )
+        return
+    raise RuntimeError(
+        f"[DataLoader] fallback 데이터 사용 차단 ({context}).\n"
+        f"  실제 MedQA/MedAbstain 데이터를 data/raw/에 위치시키거나,\n"
+        f"  단위 테스트 목적이면 환경변수 {ALLOW_FALLBACK_ENV}=1로 명시 허용하세요.\n"
+        f"  fallback은 30개 질문을 반복 사용하므로 holdout coverage가 항상 ~1.0으로\n"
+        f"  나타나지만 CP exchangeability/i.i.d. 가정이 위반되어 의미 없습니다."
+    )
+
+
+def _stable_id(prefix: str, text: str) -> str:
+    """
+    재현 가능한 안정적 ID. Python의 builtin hash()는 PYTHONHASHSEED에 영향을 받아
+    프로세스마다 달라지므로 hashlib을 사용한다.
+    """
+    digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()[:8].upper()
+    return f"{prefix}-{digest}"
 
 # ── 내부 경로 ─────────────────────────────────────────────────────────────────
 
