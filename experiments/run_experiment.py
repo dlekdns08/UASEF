@@ -424,7 +424,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--scoring-method", type=str, default=None,
-        choices=["logprob", "self_consistency", "auto"],
+        choices=["logprob", "self_consistency", "hybrid", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     args = parser.parse_args()
