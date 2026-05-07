@@ -78,3 +78,20 @@ def load_scenario_multipliers(config_path: Path = _BASE_CONFIG_PATH) -> dict[str
     except FileNotFoundError:
         return None
     return cfg.get("scenario_multipliers") or None
+
+
+def load_hybrid_weights(config_path: Path = _BASE_CONFIG_PATH) -> tuple[float, float]:
+    """
+    audit 6.10: hybrid scoring의 (diversity_weight, entropy_weight)를 로드.
+    base_config.yaml의 `hybrid` 섹션 또는 fallback 0.5/0.5.
+    """
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return (0.5, 0.5)
+    h = cfg.get("hybrid") or {}
+    return (
+        float(h.get("diversity_weight", 0.5)),
+        float(h.get("entropy_weight", 0.5)),
+    )
