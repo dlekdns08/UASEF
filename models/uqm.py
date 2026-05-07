@@ -39,12 +39,17 @@ Distribution Shift 처리
 import math
 import random
 import warnings
+from collections import Counter
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-from models.model_interface import query_model, ModelResponse
+from models.model_interface import (
+    query_model, ModelResponse,
+    backend_supports_logprobs,
+    LOGPROB_INCOMPATIBLE_BACKENDS, LOGPROB_INCOMPATIBLE_MODEL_PATTERNS,
+)
 
 
 # ── Scoring Method 열거형 ──────────────────────────────────────────────────────
@@ -52,7 +57,8 @@ from models.model_interface import query_model, ModelResponse
 class ScoringMethod(str, Enum):
     LOGPROB          = "logprob"           # Primary: logprob-based CP (논문 주요 기여)
     SELF_CONSISTENCY = "self_consistency"  # Ablation: SC-based CP (다른 비적합 함수)
-    AUTO             = "auto"              # 런타임 감지 (하위 호환, 비권장)
+    HYBRID           = "hybrid"            # audit 6.9: SC diversity + answer-mode entropy
+    AUTO             = "auto"              # 런타임 감지 (deprecated, audit #21)
 
 
 # ── 데이터 클래스 ──────────────────────────────────────────────────────────────
@@ -163,6 +169,18 @@ def compute_self_consistency_score(
     audit issue #10: seed_response가 주어지면 그 텍스트를 첫 샘플로 재사용하여
         총 LLM 호출 수를 N → N-1로 줄인다. (과거엔 _get_score가 1회 + N회 = N+1회 호출)
     """
+    texts = _collect_sc_samples(backend, system_prompt, question, n, seed_response)
+    return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
+
+
+def _collect_sc_samples(
+    backend: str,
+    system_prompt: str,
+    question: str,
+    n: int,
+    seed_response: Optional[ModelResponse] = None,
+) -> list[str]:
+    """N개의 응답 텍스트를 수집. seed_response가 있으면 N-1번 추가 호출."""
     texts: list[str] = []
     if seed_response is not None and seed_response.text:
         texts.append(seed_response.text.strip()[:200])
@@ -171,7 +189,71 @@ def compute_self_consistency_score(
             query_model(backend, system_prompt, question, temperature=0.7, logprobs=False)
             .text.strip()[:200]
         )
-    return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
+    return texts
+
+
+def _answer_mode_entropy(texts: list[str]) -> float:
+    """
+    응답 분포 엔트로피 — N개의 응답을 정규화한 뒤 그 분포의 Shannon entropy를 [0,1]로 정규화.
+
+    audit 6.9 hybrid 신호:
+      - Jaccard diversity는 토큰 단위 변동만 봄 → 동일 의미·약간 다른 표현이면 높게 나옴.
+      - mode entropy는 N개가 몇 개의 distinct answer로 클러스터링됐는지 봄
+        → 예: 3/5 'A', 2/5 'B' (bimodal) → H = -(0.6log0.6+0.4log0.4)/log(N) ≈ 0.97
+        → 5/5 동일      → H = 0
+        → 5/5 모두 다름 → H = 1
+      - 두 신호는 독립적이므로 함께 쓰면 더 안정적.
+
+    응답을 정규화: lowercase, 양 끝 공백 제거, 첫 100자만 사용.
+    """
+    if len(texts) < 2:
+        return 0.0
+    norm = [t.strip().lower()[:100] for t in texts]
+    counts = Counter(norm)
+    n = len(texts)
+    probs = [c / n for c in counts.values()]
+    H = -sum(p * math.log(p) for p in probs if p > 0)
+    H_max = math.log(n) if n > 1 else 1.0
+    return min(1.0, max(0.0, H / H_max))
+
+
+def compute_hybrid_score(
+    backend: str,
+    system_prompt: str,
+    question: str,
+    n: int = 5,
+    seed_response: Optional[ModelResponse] = None,
+    diversity_weight: float = 0.5,
+    entropy_weight: float = 0.5,
+) -> float:
+    """
+    HYBRID 방식 비적합 점수 (audit 6.9 신규).
+
+    Self-consistency Jaccard diversity + answer-mode entropy의 가중 합을 0~SC_SCALE
+    범위로 반환. 두 신호는 서로 다른 변동을 포착하므로 결합 시 logprob-free 환경에서
+    self_consistency 단독보다 통상 더 높은 AUROC를 보인다 (특히 N=3~5 소표본에서).
+
+    score = (w_d · diversity + w_e · mode_entropy) · SC_NORMALIZATION_SCALE
+
+    LLM 호출 수: N (audit #10과 동일하게 seed_response 재사용).
+
+    Coverage guarantee:
+        Conformal Prediction은 비적합 함수의 형태에 무관하게 성립하므로 hybrid score도
+        유효. 단, 새 함수이므로 논문에서는 self_consistency와 동일하게 ablation으로 보고.
+    """
+    if not (0.0 <= diversity_weight <= 1.0 and 0.0 <= entropy_weight <= 1.0):
+        raise ValueError("weights must be in [0,1]")
+    if abs(diversity_weight + entropy_weight - 1.0) > 1e-6:
+        warnings.warn(
+            f"[UQM hybrid] diversity_weight + entropy_weight = "
+            f"{diversity_weight + entropy_weight:.3f} (≠ 1.0). 결과 스케일이 SC와 다를 수 있음.",
+            UserWarning, stacklevel=2,
+        )
+
+    texts = _collect_sc_samples(backend, system_prompt, question, n, seed_response)
+    diversity = _answer_diversity(texts)        # [0, 1]
+    mode_H = _answer_mode_entropy(texts)        # [0, 1]
+    return (diversity_weight * diversity + entropy_weight * mode_H) * SC_NORMALIZATION_SCALE
 
 
 # ── Conformal Prediction 임계값 보정 ───────────────────────────────────────────
