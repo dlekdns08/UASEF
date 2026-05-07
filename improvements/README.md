@@ -680,8 +680,59 @@ audit 결과 명시 권장:
 | `models/`     | `uqm.py`, `rtc_ede.py`, `entropy_calibration.py`, `ede_coefficient_search.py`                                                |
 | `agent/`      | `nodes.py`                                                                                                                   |
 | `data/`       | `loader.py`                                                                                                                  |
-| `experiments/`| `metrics_utils.py` (신규), `config_utils.py`, `eval_medabstain.py`, `pareto_sweep.py`, `run_experiment.py`, `run_baseline_comparison.py`, `run_agent_experiment.py`, `run_calibration_pipeline.py` |
+| `experiments/`| `metrics_utils.py` (신규), `config_utils.py`, `eval_medabstain.py`, `pareto_sweep.py`, `run_experiment.py`, `run_baseline_comparison.py`, `run_agent_experiment.py`, `run_calibration_pipeline.py`, `run_all_experiments.py` |
 | `configs/`    | `base_config.yaml`                                                                                                           |
 
-스냅샷은 `improvements/improved/` 하위에 저장된다.
+스냅샷은 `improvements/improved/round6/` 하위에 저장된다.
+
+---
+
+### 6.8 후속 작업 — `run_all_experiments.py` 강화 + README §9 재작성
+
+audit 6라운드의 신규 옵션을 모든 진입점에 일관되게 노출하기 위해 **`run_all_experiments.py`를 표준 진입점으로 강화**하고, 동시에 모든 sub-runner의 시그니처와 CLI를 통일했다.
+
+#### 6.8.1 `run_all_experiments.py` 변경
+
+| 항목                     | 변경 내용                                                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **신규 CLI 4개**         | `--prompt-mode {neutral,instructed}`, `--decision-rule {trigger_count,confidence}`, `--strict`, `--allow-fallback`                       |
+| **default n_test**       | `50 → 200` (audit #11 기본값과 정합)                                                                                                     |
+| **default n_medabstain** | `50 → 100` (논문 권장값)                                                                                                                  |
+| `_preflight_check()` 신설| 실행 직전 (a) `n_cal` vs CP 최소값(α 기반) 검증, (b) `--allow-fallback` → `UASEF_ALLOW_FALLBACK` env 동기화, (c) OpenAI key 점검         |
+| dispatcher 4개           | `prompt_mode`, `strict`, `decision_rule`을 모든 sub-runner에 전달. Pareto는 `auto`를 받지 못하므로 `auto → logprob`로 변환.              |
+| `build_summary` meta     | `prompt_mode`, `decision_rule`, `strict`, `allow_fallback`, **`calibration_artifacts`**(rtc_multipliers / scenario_multipliers / ede)를 통째로 동봉 → 외부에서 한 JSON으로 전체 재현 가능 |
+| `build_markdown_report`  | 표지에 prompt_mode / decision_rule / weighted_cp / strict / RTC mults / EDE config / Scenario mults 줄 추가, 베이스라인 표에 **Wilson 95% CI** 컬럼 2개 신규 (audit #11) |
+
+#### 6.8.2 sub-runner 시그니처·CLI 통일
+
+`run_baseline_comparison.run_baseline_comparison`, `run_agent_experiment.run_backend_experiment`, `eval_medabstain.run_medabstain_eval`, `pareto_sweep.run_pareto_sweep`에 다음 인자가 모두 추가되어 동일한 의미로 작동:
+
+- `prompt_mode: str = "neutral"` — UQM 생성자에 전달, agent의 경우 `AgentComponents.prompt_mode`에도 전달
+- `strict: bool = False` — `UQM(strict=...)`로 전달
+- `decision_rule: Optional[str] = None` — None이면 `base_config.yaml`의 값 유지, 명시 시 `ede_kwargs["decision_rule"]` 덮어씀
+- `pareto_sweep`은 `decision_rule` 미사용 (Pareto는 트리거 무관 순수 CP만 측정), `prompt_mode`만 사용
+
+각 스크립트의 `__main__` CLI 파서에도 동일한 4개 옵션이 추가되어, 단독 호출도 동일한 API.
+
+#### 6.8.3 smoke test (자동 검증)
+
+수정 직후 다음을 명시적으로 확인:
+
+- 16개 모듈 임포트 OK
+- `run_all_experiments.py --help` 출력에 `--prompt-mode`, `--decision-rule`, `--strict`, `--allow-fallback` 모두 포함
+- `build_summary(args=Namespace(prompt_mode='neutral', ...))` → `meta.config.prompt_mode == 'neutral'`, `meta.calibration_artifacts` 존재
+- `build_markdown_report(summary)` 결과에 `prompt_mode`, `RTC multipliers`, `95% CI` 컬럼 모두 출력
+
+#### 6.8.4 README §9 (실험 실행) 전면 재작성
+
+루트 `README.md`의 §9를 다음 구조로 정리:
+
+- **§9.0 진입점 한눈에** — 8개 스크립트의 역할 표
+- **§9.1 사전 준비** — `.env` / 데이터셋 / 캘리브레이션
+- **§9.2 ⭐ 표준 진입점 `run_all_experiments.py`** — 4가지 자주 쓰는 호출 + 전체 옵션 매트릭스 + 권장 ablation 시나리오 + 산출 파일 목록
+- **§9.3 개별 실험 스크립트**
+- **§9.4 단위/스모크 테스트**
+- **§9.5 자주 만나는 상황 트러블슈팅** (7개 항목 — fallback, strict, deprecation, MedAbstain 부재, OpenAI key, LMStudio latency, N/A 표기)
+
+audit 신규 옵션 4개는 §9.2.2 매트릭스에서 **굵게** 표시되어 한 눈에 식별 가능.
 
