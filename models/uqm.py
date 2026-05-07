@@ -509,13 +509,56 @@ class UQM:
             raise ValueError(f"prompt_mode must be 'neutral' or 'instructed', got {prompt_mode!r}")
         self.prompt_mode = prompt_mode
 
-        # _use_self_consistency 초기화
+        # _scoring_mode 초기화: "logprob" | "self_consistency" | "hybrid" | None(auto 미결정)
         if self._scoring_method == ScoringMethod.LOGPROB:
-            self._use_self_consistency = False
+            self._scoring_mode = "logprob"
         elif self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
-            self._use_self_consistency = True
+            self._scoring_mode = "self_consistency"
+        elif self._scoring_method == ScoringMethod.HYBRID:
+            self._scoring_mode = "hybrid"
         else:  # AUTO (deprecated)
-            self._use_self_consistency = None  # 런타임 감지
+            self._scoring_mode = None  # 런타임 감지
+
+        # 하위 호환 alias (외부 코드가 _use_self_consistency를 참조할 수 있음)
+        self._use_self_consistency = (self._scoring_mode == "self_consistency")
+
+        # ── audit 6.9: 모델 사전 점검 (logprob 미지원 백엔드/모델 자동 감지) ────
+        # backend / OPENAI_MODEL이 logprobs를 지원하지 않는데 logprob 모드를 요청하면
+        # strict=True: RuntimeError (자동화 실험 잘못된 결과 방지)
+        # strict=False: UserWarning + scoring_method를 self_consistency로 자동 전환
+        if self._scoring_mode == "logprob":
+            if not backend_supports_logprobs(backend):
+                msg = (
+                    f"[UQM] backend='{backend}'는 logprobs를 반환하지 않습니다 "
+                    f"(LOGPROB_INCOMPATIBLE_BACKENDS={sorted(LOGPROB_INCOMPATIBLE_BACKENDS)}).\n"
+                    f"  대안: scoring_method='self_consistency' 또는 'hybrid'를 사용하세요.\n"
+                    f"  예: UQM(backend='{backend}', scoring_method='hybrid', consistency_n=5)"
+                )
+                if self.strict:
+                    raise RuntimeError(msg + " (strict=True)")
+                warnings.warn(msg + "\n  → scoring_method를 'self_consistency'로 자동 전환합니다.",
+                              UserWarning, stacklevel=2)
+                self._scoring_method = ScoringMethod.SELF_CONSISTENCY
+                self._scoring_mode = "self_consistency"
+                self._use_self_consistency = True
+            elif backend == "openai":
+                # OpenAI지만 reasoning 모델(o1/o3/o4/gpt-5*)이면 미지원
+                import os as _os
+                model = _os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+                if not backend_supports_logprobs("openai", model):
+                    msg = (
+                        f"[UQM] OPENAI_MODEL='{model}'은 logprobs 미지원 패턴입니다 "
+                        f"(reasoning 모델 — {LOGPROB_INCOMPATIBLE_MODEL_PATTERNS}).\n"
+                        f"  대안: (a) gpt-4o-mini/gpt-4o 등 logprobs 지원 모델로 OPENAI_MODEL 변경\n"
+                        f"        (b) scoring_method='hybrid' 또는 'self_consistency' 사용"
+                    )
+                    if self.strict:
+                        raise RuntimeError(msg + " (strict=True)")
+                    warnings.warn(msg + "\n  → scoring_method를 'hybrid'로 자동 전환합니다.",
+                                  UserWarning, stacklevel=2)
+                    self._scoring_method = ScoringMethod.HYBRID
+                    self._scoring_mode = "hybrid"
+                    self._use_self_consistency = False  # hybrid는 separate path
 
         # Ablation 경고
         if self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
@@ -528,11 +571,20 @@ class UQM:
                 UserWarning, stacklevel=2,
             )
 
+        if self._scoring_method == ScoringMethod.HYBRID:
+            warnings.warn(
+                "\n[UQM] scoring_method='hybrid' 선택됨 (audit 6.9).\n"
+                "  Self-consistency diversity + answer-mode entropy의 가중 합.\n"
+                "  Anthropic/Gemini/OpenAI reasoning 모델 등 logprob-free 환경에서 권장.\n"
+                "  논문에서는 self_consistency와 함께 별도 ablation으로 보고하세요.",
+                UserWarning, stacklevel=2,
+            )
+
         if self._scoring_method == ScoringMethod.AUTO:
             warnings.warn(
                 "\n[UQM] scoring_method='auto' is DEPRECATED (audit 2026-05-07 issue #21).\n"
                 "  실험 재현성(reproducibility)을 위해 방법을 명시적으로 지정하세요:\n"
-                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')\n"
+                "  UQM(scoring_method='logprob' | 'self_consistency' | 'hybrid')\n"
                 "  다음 릴리스에서 제거될 예정입니다.",
                 DeprecationWarning, stacklevel=2,
             )
@@ -540,25 +592,33 @@ class UQM:
     def _get_score(self, question: str) -> tuple[float, ModelResponse]:
         resp = query_model(self.backend, self._system_prompt, question, temperature=0.0)
 
-        # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지
-        if self._use_self_consistency is None:
-            self._use_self_consistency = resp.logprobs is None
-            if self._use_self_consistency:
+        # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지 (deprecated)
+        if self._scoring_mode is None:
+            if resp.logprobs is None:
+                self._scoring_mode = "self_consistency"
+                self._use_self_consistency = True
                 warnings.warn(
                     "\n[UQM] AUTO: logprobs 미지원 감지 → self-consistency 모드로 전환.\n"
-                    "  scoring_method='self_consistency'를 명시적으로 설정하고\n"
+                    "  scoring_method='self_consistency' 또는 'hybrid'를 명시적으로 설정하고\n"
                     "  논문에서 ablation으로 보고하세요.",
                     UserWarning, stacklevel=3,
                 )
+            else:
+                self._scoring_mode = "logprob"
+                self._use_self_consistency = False
 
-        if self._use_self_consistency:
-            # audit issue #10: 첫 호출 응답을 N개의 일부로 활용해 N-1번 추가 쿼리만 발생
+        # 모드별 score 계산 (audit 6.9)
+        if self._scoring_mode == "self_consistency":
             score = compute_self_consistency_score(
                 self.backend, self._system_prompt, question,
-                n=self.consistency_n,
-                seed_response=resp,
+                n=self.consistency_n, seed_response=resp,
             )
-        else:
+        elif self._scoring_mode == "hybrid":
+            score = compute_hybrid_score(
+                self.backend, self._system_prompt, question,
+                n=self.consistency_n, seed_response=resp,
+            )
+        else:  # logprob
             score = compute_nonconformity_score(resp)
 
         return score, resp
@@ -567,9 +627,9 @@ class UQM:
     def active_scoring_method(self) -> str:
         """실제 사용 중인 scoring method 문자열 반환 (재현성 추적용)."""
         if self._scoring_method == ScoringMethod.AUTO:
-            if self._use_self_consistency is None:
+            if self._scoring_mode is None:
                 return "auto(undecided)"
-            return "self_consistency" if self._use_self_consistency else "logprob"
+            return self._scoring_mode
         return self._scoring_method.value
 
     def calibrate(
