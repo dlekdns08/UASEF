@@ -13,3 +13,5 @@
 | HIGH | 1.173 | 716.0 | -0.451 | 105.0 | 0.0 | 0.6522 |
 | MODERATE | 1.08 | 64.0 | 0.449 | 84.0 | 0.1053 | 0.3536 |
 | LOW | 0.924 | 35.0 | 1.076 | 31.0 | 0.2 | 0.1538 |
+
+✅ saved: /Users/idaun/PoC/UASEF/results/round7/table3_cost.{json,md}

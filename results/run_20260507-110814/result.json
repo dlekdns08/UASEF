@@ -1,0 +1,178 @@
+{
+  "meta": {
+    "timestamp": "20260507-110814",
+    "elapsed": "0m 0s",
+    "config": {
+      "n_cal": 200,
+      "n_test": 100,
+      "n_medabstain": 50,
+      "n_pareto": 50,
+      "n_trials": 500,
+      "n_per_stratum": 200,
+      "alpha": 0.1,
+      "seed": 42,
+      "skip_llm": true,
+      "skip_tests": true,
+      "skip_v1": true,
+      "skip_v2_syn": false,
+      "skip_v2_llm": true,
+      "backends": [
+        "openai"
+      ]
+    }
+  },
+  "pytest_summary": "",
+  "synthetic": {
+    "table2": {
+      "timestamp": "2026-05-07T11:08:14.547609",
+      "config": {
+        "n_trials": 500,
+        "n_cal": 200,
+        "alpha": 0.05,
+        "seed": 42
+      },
+      "rows": [
+        {
+          "method": "v1: len(triggers) > 0 (naive OR)",
+          "dependence": "independent",
+          "empirical_fwer": 0.104,
+          "target": 0.05,
+          "ok": false
+        },
+        {
+          "method": "v2: bonferroni",
+          "dependence": "independent",
+          "empirical_fwer": 0.046,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: harmonic",
+          "dependence": "independent",
+          "empirical_fwer": 0.022,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: e_value",
+          "dependence": "independent",
+          "empirical_fwer": 0.05,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v1: len(triggers) > 0 (naive OR)",
+          "dependence": "correlated",
+          "empirical_fwer": 0.132,
+          "target": 0.05,
+          "ok": false
+        },
+        {
+          "method": "v2: bonferroni",
+          "dependence": "correlated",
+          "empirical_fwer": 0.072,
+          "target": 0.05,
+          "ok": false
+        },
+        {
+          "method": "v2: harmonic",
+          "dependence": "correlated",
+          "empirical_fwer": 0.042,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: e_value",
+          "dependence": "correlated",
+          "empirical_fwer": 0.08,
+          "target": 0.05,
+          "ok": false
+        }
+      ]
+    },
+    "table3": {
+      "timestamp": "2026-05-07T11:08:14.590121",
+      "n_per_stratum": 200,
+      "cost_matrix": {
+        "CRITICAL": {
+          "miss": 1000.0,
+          "over_esc": 1.0
+        },
+        "HIGH": {
+          "miss": 100.0,
+          "over_esc": 1.0
+        },
+        "MODERATE": {
+          "miss": 10.0,
+          "over_esc": 1.0
+        },
+        "LOW": {
+          "miss": 1.0,
+          "over_esc": 1.0
+        }
+      },
+      "round6_total_cost": 10845.0,
+      "round7_total_cost": 348.0,
+      "cost_reduction_ratio": 31.16,
+      "round6_per_stratum": [
+        {
+          "stratum": "CRITICAL",
+          "threshold": 0.829,
+          "cost": 10030.0
+        },
+        {
+          "stratum": "HIGH",
+          "threshold": 1.173,
+          "cost": 716.0
+        },
+        {
+          "stratum": "MODERATE",
+          "threshold": 1.08,
+          "cost": 64.0
+        },
+        {
+          "stratum": "LOW",
+          "threshold": 0.924,
+          "cost": 35.0
+        }
+      ],
+      "round7_per_stratum": [
+        {
+          "stratum": "CRITICAL",
+          "threshold": -1.488,
+          "cost": 128.0,
+          "miss_rate": 0.0,
+          "over_esc_rate": 0.9481
+        },
+        {
+          "stratum": "HIGH",
+          "threshold": -0.451,
+          "cost": 105.0,
+          "miss_rate": 0.0,
+          "over_esc_rate": 0.6522
+        },
+        {
+          "stratum": "MODERATE",
+          "threshold": 0.449,
+          "cost": 84.0,
+          "miss_rate": 0.1053,
+          "over_esc_rate": 0.3536
+        },
+        {
+          "stratum": "LOW",
+          "threshold": 1.076,
+          "cost": 31.0,
+          "miss_rate": 0.2,
+          "over_esc_rate": 0.1538
+        }
+      ]
+    }
+  },
+  "per_backend": {
+    "openai": {
+      "v1_summary": null,
+      "v2_table1": null,
+      "v2_table4": null
+    }
+  }
+}
