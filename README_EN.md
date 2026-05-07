@@ -279,7 +279,7 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 
 | scoring_method | Requires logprobs | Applicable LLMs | Paper Position |
 | -------------- | ----------------- | --------------- | -------------- |
-| `logprob` (Primary + Ablation) | Required | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | Main contribution |
+| `logprob` (Primary + Ablation) | Required | GPT-4o, GPT-4.1, LMStudio (llama.cpp), MLX | Main contribution |
 | `self_consistency` (Ablation) | Not required | **Any** LLM (Claude, Gemini, OpenAI o-series, etc.) | Ablation / black-box LLMs |
 | `hybrid` (audit 6.9) | Not required | Same as self_consistency, with richer signal | Recommended for logprob-free environments |
 
@@ -292,7 +292,7 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 >
 > | backend | Models | logprobs | Auto fallback |
 > | --- | --- | --- | --- |
-> | `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+> | `openai` | `gpt-4o`, `gpt-4o`, `gpt-4.1*` | ✓ | — |
 > | `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
 > | `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
 > | `mlx` | mlx-lm 0.19+ | ✓ | — |
@@ -609,7 +609,7 @@ The **base pipeline** that runs UQM → RTC → EDE sequentially without a LangG
 
 | Role | Backend | Scoring Method | Paper Section |
 | ---- | ------- | -------------- | ------------- |
-| **[Primary]** | OpenAI (GPT-4o-mini) | `logprob` — token-level logprobs CP | Main results |
+| **[Primary]** | OpenAI (GPT-4o) | `logprob` — token-level logprobs CP | Main results |
 | **[Ablation]** | LMStudio (local, meta-llama-3.1-8b-instruct) | `logprob` — LM Studio OpenAI-compatible API | "Local GGUF model applicability" validation |
 
 > The two methods' numbers are not directly compared — they use different nonconformity functions, so CP coverage is verified independently for each.
@@ -892,7 +892,7 @@ LANGCHAIN_PROJECT=UASEF-agent
 OPENAI_API_KEY=sk-...
 
 # Optional: change models
-OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* reasoning models
+OPENAI_MODEL=gpt-4o            # default. ⚠ o1/o3/o4/gpt-5* reasoning models
                                     #          do NOT return logprobs → audit 6.9
                                     #          auto-switches to scoring_method='hybrid'
 LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
@@ -916,7 +916,7 @@ LANGCHAIN_PROJECT=UASEF-agent
 
 | backend | Models | logprob | Auto fallback |
 | --- | --- | --- | --- |
-| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+| `openai` | `gpt-4o`, `gpt-4o`, `gpt-4.1*` | ✓ | — |
 | `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
 | `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
 | `mlx` | mlx-lm 0.19+ | ✓ | — |
@@ -1191,7 +1191,7 @@ print('OK')
 | LMStudio agent latency too high | Fixed in audit #17 — older versions need code refresh | `git pull`; verify `agent/nodes.py:_make_llm` |
 | Many `N/A` in result tables | audit #16 — expected for emergency=positives only / routine=negatives only | Report as-is. If CI columns are also empty, denominator was zero. |
 | `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API never returns logprobs | Set `--scoring-method hybrid` or `self_consistency` explicitly. Without `--strict`, UASEF auto-switches. |
-| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning models do not return logprobs | Switch to `gpt-4o-mini`, or use hybrid mode |
+| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning models do not return logprobs | Switch to `gpt-4o`, or use hybrid mode |
 | `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK not installed | `pip install 'anthropic>=0.40.0'` or `pip install 'uasef[claude]'` |
 | `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio key missing | Get key at <https://aistudio.google.com/apikey> and add to `.env` |
 
@@ -1266,7 +1266,7 @@ ede:
 
 ### Paper Writing Notes
 
-- Both Primary and Ablation use the same `logprob` nonconformity function, so their numbers can be compared in the same table. However, since the models differ (GPT-4o-mini vs. local GGUF), absolute scale differences in nonconformity scores may exist.
+- Both Primary and Ablation use the same `logprob` nonconformity function, so their numbers can be compared in the same table. However, since the models differ (GPT-4o vs. local GGUF), absolute scale differences in nonconformity scores may exist.
 - In the Ablation section, explicitly state: *"We apply the same logprob-based nonconformity scoring to both OpenAI and local GGUF models via LM Studio's OpenAI-compatible API, demonstrating that the CP coverage guarantee holds across both deployment environments."*
 - Primary results form the evidential basis for the paper's main claims. Ablation serves as supplementary evidence showing that "the same logprob CP approach is applicable to local GGUF models".
 
