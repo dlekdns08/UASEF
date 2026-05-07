@@ -10,6 +10,8 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
 
 ## 목차
 
+0. [Quick Start](#0-quick-start-5줄)
+0.5. [v2 Framework — Round 7](#05-v2-framework--round-7-이론적-기여-강화) (Stratified CRC + Multi-Trigger Combination + Cost-Aware)
 1. [연구 배경 및 동기](#1-연구-배경-및-동기)
 2. [핵심 설계 철학](#2-핵심-설계-철학)
 3. [프로젝트 구조](#3-프로젝트-구조)
@@ -18,6 +20,7 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
    - 4.2 [RTC — Risk-Threshold Calibrator](#42-rtc--risk-threshold-calibrator)
    - 4.3 [EDE — Escalation Decision Engine](#43-ede--escalation-decision-engine)
    - 4.4 [LangGraph 에이전트](#44-langgraph-에이전트)
+   - 4.5 [Round 7 — Stratified CRC + MTC + Cost-Aware (계획)](#45-round-7--stratified-crc--multi-trigger-combination--cost-aware-계획)
 5. [데이터셋](#5-데이터셋)
 6. [실험 설계](#6-실험-설계)
    - 6.0 [캘리브레이션 파이프라인](#60-캘리브레이션-파이프라인-run_calibration_pipelinepy)
@@ -556,6 +559,87 @@ LangGraph State에 비직렬화 객체(UQM, RTC, EDE)를 넣지 않고, `functoo
 | `clinical_guideline_search` | 임상 가이드라인 검색 | UpToDate / PubMed E-utilities |
 | `lab_reference_lookup` | 검사 참고치 조회 | LOINC / 기관 내 LIS |
 | `differential_diagnosis` | 감별 진단 | Isabel DDx / 기관 내 CDR |
+
+---
+
+### 4.5 Round 7 — Stratified CRC + Multi-Trigger Combination + Cost-Aware (계획)
+
+> **상태**: 설계 완료, 구현 전. 자세한 인터페이스는 [improvements/round7_PLAN.md](improvements/round7_PLAN.md).
+
+#### 4.5.1 `models/stratified_crc.py` (Pivot A)
+
+```python
+class StratifiedConformalRiskControl:
+    """Per-stratum CRC. λ_stratum이 E[loss | stratum] ≤ α_stratum 만족."""
+    def __init__(self, alphas: dict[str, float], loss_fn: Callable | None = None): ...
+    def fit(self, scores, labels, strata) -> None: ...
+    def threshold_for(self, stratum: str) -> float: ...
+    def coverage_check(self, holdout_scores, holdout_labels, holdout_strata) -> dict: ...
+```
+
+- 각 risk_level (CRITICAL/HIGH/MODERATE/LOW)에 별도 calibration set과 λ 유지
+- Conformal Risk Control 알고리즘 (Angelopoulos & Bates ICLR 2024): 가장 큰 λ 중 `R̂(λ) + (1-α)/n ≤ α` 만족하는 값 선택
+- RTC가 이 calibrator를 wrap하여 `multiplier_value` 대신 stratum별 λ를 직접 반환
+
+#### 4.5.2 `models/conformal_combination.py` (Pivot B)
+
+```python
+def conformal_pvalue(score, calibration_scores) -> float: ...
+def combine_p_harmonic(p_values) -> float: ...     # Wilson 2019
+def combine_p_bonferroni(p_values) -> float: ...   # 보수적 baseline
+def combine_e_value(p_values) -> float: ...        # Vovk & Wang 2019
+
+class MultiTriggerConformal:
+    """T1/T2/T3 별도 calibrator, p-value 결합 후 단일 conformal threshold."""
+    def per_trigger_pvalues(self, scores) -> list[float]: ...
+    def combined_pvalue(self, scores) -> float: ...
+    def should_escalate(self, scores, alpha) -> tuple[bool, dict]: ...
+```
+
+- T2 (HIGH_RISK_ACTION): nonconformity = `(critical_hits + procedural_hits × modifier) / 5`
+- T3 (NO_EVIDENCE): nonconformity = `(strong_hits + weak_hits × modifier) / 5`
+- EDE의 새 `decision_rule="conformal_combined"`가 이 클래스 사용
+
+#### 4.5.3 `models/cost_aware_calibration.py` (Pivot C)
+
+```python
+def cost_weighted_loss(scores, labels, threshold, c_miss, c_over) -> float: ...
+def find_cost_optimal_threshold(scores, labels, c_miss, c_over, risk_constraint=None) -> dict: ...
+def sweep_cost_aware_per_stratum(scores_by_stratum, labels_by_stratum, cost_matrix, alpha_constraints) -> dict: ...
+```
+
+- `Cost(λ, stratum) = c_FN(stratum) × FN + c_FP × FP` 최소화
+- CRC constraint 보존 (충족 후보 없으면 가장 보수적 fallback)
+- 기존 `models/rtc_calibration.py:sweep_all_risk_levels`는 deprecated → 이 함수가 대체
+
+#### 4.5.4 새 `base_config.yaml` 섹션
+
+```yaml
+stratified_alphas:    # CRC 보장 수준 (CRITICAL이 가장 엄격)
+  CRITICAL: 0.001
+  HIGH:     0.010
+  MODERATE: 0.050
+  LOW:      0.100
+
+costs:                # 비대칭 cost matrix (임상 부담 추정)
+  CRITICAL: {miss: 1000, over_esc: 1}
+  HIGH:     {miss: 100,  over_esc: 1}
+  MODERATE: {miss: 10,   over_esc: 1}
+  LOW:      {miss: 1,    over_esc: 1}
+
+multi_trigger:        # 결합 방법 (harmonic / e_value / bonferroni)
+  enabled: true
+  combination: harmonic
+  combined_alpha: 0.05
+
+ede:
+  decision_rule: conformal_combined    # NEW (Round 7) — 기존 trigger_count/confidence와 공존
+```
+
+#### 4.5.5 v1 → v2 전환
+
+- v2 미구현 단계 (현재): `decision_rule: trigger_count` 또는 `confidence`로 v1 동작
+- v2 구현 후: `decision_rule: conformal_combined`로 전환 — v1과 v2 모두 호출 가능 (CLI 또는 config로 선택)
 
 ---
 
@@ -1494,3 +1578,42 @@ n = 500, α = 0.15 → 이론 coverage ≥ 0.85, LMStudio에서 실측 0.81 → 
 
 - **ReAct (추론+행동 에이전트)**
   Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan, K., & Cao, Y. (2023). ReAct: Synergizing reasoning and acting in language models. *ICLR 2023. arXiv:2210.03629*
+
+### Round 7 (v2 framework) — 직접 인용
+
+- **Conformal Risk Control (Pivot A 핵심)**
+  Angelopoulos, A. N., Bates, S., Fisch, A., Lei, L., & Schuster, T. (2024). Conformal Risk Control. *ICLR 2024 Spotlight. arXiv:2208.02814*
+
+- **Class-conditional / Stratified CP (Pivot A 보조)**
+  Romano, Y., Sesia, M., & Candès, E. J. (2020). Classification with Valid and Adaptive Coverage. *NeurIPS 2020. arXiv:2006.02544*
+
+- **Harmonic Mean p-value Combination (Pivot B)**
+  Wilson, D. J. (2019). The harmonic mean p-value for combining dependent tests. *PNAS, 116*(4), 1195-1200.
+
+- **E-value 결합 / Conformal p-values (Pivot B)**
+  Vovk, V., & Wang, R. (2019). Combining p-values via averaging. *Biometrika, 108*(2), 397-412.
+  Wang, R., & Ramdas, A. (2022). False discovery rate control with e-values. *JRSS Series B, 84*(3), 822-852.
+  Bates, S., Candès, E., Lei, L., Romano, Y., & Sesia, M. (2023). Testing for outliers with conformal p-values. *Annals of Statistics, 51*(1), 149-178.
+
+- **Cost-Sensitive Selective Prediction (Pivot C 보조)**
+  El-Yaniv, R., & Wiener, Y. (2010). On the Foundations of Noise-free Selective Classification. *JMLR, 11*, 1605-1641.
+
+### Round 7에서 직접 비교할 baseline
+
+- **TECP — Token-Entropy Conformal Prediction**
+  Xu, B., & Lu, Y. (2025). TECP: Token-Entropy Conformal Prediction for LLMs. *arXiv:2509.00461*
+
+- **Conformal Language Modeling**
+  Quach, V., Fisch, A., Schuster, T., Yala, A., Sohn, J. H., Jaakkola, T. S., & Barzilay, R. (2024). Conformal Language Modeling. *ICLR 2024.*
+
+- **Semantic Entropy (Hallucination Detection)**
+  Farquhar, S., Kossen, J., Kuhn, L., & Gal, Y. (2024). Detecting hallucinations in large language models using semantic entropy. *Nature, 630*(8017), 625-630.
+
+- **MedAbstain (자체 CP 평가 포함)**
+  Machcha, S., Yerra, S., et al. (2026). Knowing When to Abstain: Medical LLMs Under Clinical Uncertainty. *EACL 2026. arXiv:2601.12471*
+
+- **Abstention Survey**
+  Wen, B., Lin, J., et al. (2025). Know Your Limits: A Survey of Abstention in Large Language Models. *TACL 2025.*
+
+- **API-Only CP for LLMs**
+  Su, J., Luo, J., Wang, H., & Cheng, L. (2024). API Is Enough: Conformal Prediction for Large Language Models Without Logit-Access. *arXiv:2403.01216*
