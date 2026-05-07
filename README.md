@@ -67,17 +67,49 @@ open results/all_experiments_report.md
 
 **여러 ablation 비교?** `--run-tag` 옵션으로 분리 후 `python experiments/compare_runs.py base instructed confidence`로 통합 표 생성 (audit 6.10).
 
-**Round 7 + 모든 baseline 한 번에 실행 + 통합 보고서?** (audit 7)
+**v1(`run_all_experiments`) + v2(Round 7) + 모든 backend 한 번에 + 통합 보고서?**
 
 ```bash
-# 합성 검증만 (LLM 키 불필요, ~30초)
+# 합성 검증 + pytest만 (LLM 키 불필요, ~30초)
 SKIP_LLM=1 bash run_full_evaluation.sh
 
-# 전체 (LLM 호출 포함, OpenAI 키 필요)
-BACKEND=openai N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
+# OpenAI만 전체 실행 (LLM 호출 포함)
+BACKENDS="openai" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
+
+# OpenAI + LMStudio 모두 (논문 quality)
+BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 ```
 
-생성: `results/run_<timestamp>/result.md` (통합 보고서) + `result.json` (구조화) + `table{1,2,3,4}.{md,json}` + `pytest_summary.txt`. pytest 137 tests + Table 1 (per-stratum coverage) + Table 2 (FWER, v1 vs v2) + Table 3 (cost 31× 감소) + Table 4 (TECP/Quach/SE/R6/R7 head-to-head) 모두 자동 실행.
+**한 번 실행으로 4단계 자동:**
+
+1. **pytest 137 tests** (회귀 안전망)
+2. **v1**: `run_all_experiments.py × {각 backend}` — 각 호출이 agent + baseline + medabstain + pareto 4개 sub 자동 포함
+3. **v2 Round 7 합성** (backend 무관): Table 2 FWER + Table 3 Cost
+4. **v2 Round 7 LLM** (backend별): Table 1 per-stratum coverage + Table 4 head-to-head (TECP / Quach / Semantic Entropy / UASEF Round 6 / UASEF Round 7)
+
+**산출물 구조** (`results/run_<timestamp>/`):
+
+```text
+result.md                         ← 통합 보고서 (사람용)
+result.json                       ← 구조화 결과
+pytest_summary.txt
+synthetic/
+├── table2_fwer.{json,md}         ← v2 합성 (backend 무관)
+└── table3_cost.{json,md}
+openai/
+├── all_experiments_report.md     ← v1 통합
+├── all_experiments_summary.json
+├── agent_results.json + comparison_table.csv
+├── baseline_comparison.{json,csv}
+├── medabstain_eval.{json,csv}
+├── pareto_sweep_results.json + alpha_recommendations.json + pareto_frontier.png
+├── table1_coverage.{json,md}     ← v2 Round 7 Pivot A
+└── table4_baseline.{json,md}     ← v2 Round 7 head-to-head
+lmstudio/
+└── (동일 구조)
+```
+
+**제어 환경변수**: `BACKENDS` / `N_CAL` / `N_TEST` / `N_MEDABSTAIN` / `N_PARETO` / `N_TRIALS` / `N_PER_STRATUM` / `ALPHA` / `SEED` / `SKIP_LLM` / `SKIP_TESTS` / `SKIP_V1` / `SKIP_V2_SYN` / `SKIP_V2_LLM`. 자세한 사용은 `bash run_full_evaluation.sh` 헤더 주석.
 
 ---
 
