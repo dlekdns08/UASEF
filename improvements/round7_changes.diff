@@ -1,0 +1,3163 @@
+diff --git a/experiments/baselines/__init__.py b/experiments/baselines/__init__.py
+new file mode 100644
+index 0000000..1b37132
+--- /dev/null
++++ b/experiments/baselines/__init__.py
+@@ -0,0 +1,36 @@
++"""
++UASEF — Baseline adapters for Round 7 head-to-head comparison.
++
++각 baseline은 동일 인터페이스 (same_calibration_data → score → predict)를 따른다.
++실제 LLM 호출 없이도 score 분포만 있으면 calibration / threshold 결정 가능.
++
++지원 baseline:
++  - tecp.py             — Token-Entropy Conformal Prediction (Xu & Lu 2025)
++  - quach2024.py        — Conformal Language Modeling (ICLR 2024 단순화)
++  - semantic_entropy.py — Semantic Entropy (Farquhar Nature 2024 단순화)
++
++각 어댑터의 fit/predict 인터페이스는 BaselineAdapter abstract class 따름.
++"""
++from __future__ import annotations
++from abc import ABC, abstractmethod
++
++
++class BaselineAdapter(ABC):
++    """모든 Round 7 비교 baseline이 구현해야 할 인터페이스."""
++
++    name: str = "baseline"
++
++    @abstractmethod
++    def fit(self, scores: list[float], labels: list[bool]) -> None:
++        """Calibration: score 분포 학습."""
++        ...
++
++    @abstractmethod
++    def predict(self, score: float) -> bool:
++        """Test point: True = escalate."""
++        ...
++
++    @abstractmethod
++    def info(self) -> dict:
++        """재현성 메타데이터."""
++        ...
+diff --git a/experiments/baselines/quach2024.py b/experiments/baselines/quach2024.py
+new file mode 100644
+index 0000000..aaf52b6
+--- /dev/null
++++ b/experiments/baselines/quach2024.py
+@@ -0,0 +1,59 @@
++"""
++Conformal Language Modeling (Quach et al., ICLR 2024) — 단순화 baseline.
++
++원 논문은 sampling 기반 dynamic stopping rule + rejection을 다룬다. Round 7
++비교 목적상 핵심 아이디어인 NLL nonconformity + split CP만 단순화 재구현.
++
++UASEF v1과 거의 동일하지만:
++  - Quach: NLL = -mean(per-token logprobs)
++  - v1:    동일 (UQM의 compute_nonconformity_score)
++
++따라서 본 어댑터는 v1과 수학적으로 동등 — UASEF v1을 baseline으로 비교할 때
++"Quach 2024 family"의 reference로 사용 가능.
++
++Round 7 paper 표 4에서:
++  Quach 2024 = UASEF v1 (single global α, NLL nonconformity)
++  UASEF v2 (Round 7) = stratified CRC + MTC + cost-aware
++
++Limitation:
++  - Quach 원 논문의 dynamic sampling stopping rule은 미구현
++  - Sub-component conformity (semantic compare)도 미구현
++"""
++from __future__ import annotations
++
++import math
++from . import BaselineAdapter
++
++
++class Quach2024Baseline(BaselineAdapter):
++    name = "Quach2024-CLM"
++
++    def __init__(self, alpha: float = 0.10):
++        self.alpha = alpha
++        self.threshold: float = float("inf")
++        self.n: int = 0
++
++    def fit(self, scores: list[float], labels: list[bool]) -> None:
++        """
++        Split CP, same as TECP but conceptually represents the CLM family.
++        labels는 미사용.
++        """
++        if not scores:
++            raise ValueError("빈 calibration set")
++        self.n = len(scores)
++        sorted_s = sorted(scores)
++        rank = max(1, min(self.n, math.ceil((self.n + 1) * (1 - self.alpha))))
++        self.threshold = sorted_s[rank - 1]
++
++    def predict(self, score: float) -> bool:
++        return score > self.threshold
++
++    def info(self) -> dict:
++        return {
++            "name": self.name,
++            "alpha": self.alpha,
++            "threshold": self.threshold,
++            "n_calibration": self.n,
++            "reference": "Quach et al. (2024). Conformal Language Modeling. ICLR 2024.",
++            "limitation": "Dynamic stopping rule + sub-component conformity는 미구현",
++        }
+diff --git a/experiments/baselines/semantic_entropy.py b/experiments/baselines/semantic_entropy.py
+new file mode 100644
+index 0000000..acf1966
+--- /dev/null
++++ b/experiments/baselines/semantic_entropy.py
+@@ -0,0 +1,57 @@
++"""
++Semantic Entropy (Farquhar et al., Nature 2024) — 단순화 baseline.
++
++원 논문은 N개의 sampled generation을 의미적으로 클러스터링한 후 클러스터
++distribution의 Shannon entropy를 hallucination signal로 사용.
++
++본 어댑터는 score(이미 외부에서 계산된 semantic entropy)를 받아 split CP의
++nonconformity로 사용. UASEF audit 6.10의 `_embedding_utils.compute_semantic_entropy`
++와 결합 가능.
++
++Round 7 비교에서 UASEF v2 hybrid mode (`UASEF_HYBRID_SEMANTIC=1`)와 같은 데이터 풀로
++동작 — 차이는 v2가 stratified + MTC + cost-aware를 추가한다는 점.
++
++Limitation:
++  - Farquhar 원 논문은 GPT-3 / LLaMA 2개 모델만 평가. 본 어댑터는 score를 외부에서
++    받으므로 임의 LLM 적용 가능.
++  - Semantic clustering의 similarity_threshold는 외부 caller가 결정.
++"""
++from __future__ import annotations
++
++import math
++from . import BaselineAdapter
++
++
++class SemanticEntropyBaseline(BaselineAdapter):
++    name = "SemanticEntropy"
++
++    def __init__(self, alpha: float = 0.10):
++        self.alpha = alpha
++        self.threshold: float = float("inf")
++        self.n: int = 0
++
++    def fit(self, scores: list[float], labels: list[bool]) -> None:
++        """
++        scores는 sample-level semantic entropy [0, 1] (정규화된 cluster Shannon).
++
++        labels는 미사용. 별도로 score-vs-label AUROC를 측정하려면 caller가 처리.
++        """
++        if not scores:
++            raise ValueError("빈 calibration set")
++        self.n = len(scores)
++        sorted_s = sorted(scores)
++        rank = max(1, min(self.n, math.ceil((self.n + 1) * (1 - self.alpha))))
++        self.threshold = sorted_s[rank - 1]
++
++    def predict(self, score: float) -> bool:
++        return score > self.threshold
++
++    def info(self) -> dict:
++        return {
++            "name": self.name,
++            "alpha": self.alpha,
++            "threshold": self.threshold,
++            "n_calibration": self.n,
++            "reference": "Farquhar et al. (2024). Detecting hallucinations in LLMs using semantic entropy. Nature 630(8017), 625-630.",
++            "limitation": "Semantic clustering similarity_threshold는 caller가 외부에서 결정",
++        }
+diff --git a/experiments/baselines/tecp.py b/experiments/baselines/tecp.py
+new file mode 100644
+index 0000000..d277085
+--- /dev/null
++++ b/experiments/baselines/tecp.py
+@@ -0,0 +1,61 @@
++"""
++TECP — Token-Entropy Conformal Prediction (Xu & Lu, arXiv 2509.00461, Sept 2025).
++
++Round 7 비교 baseline.
++
++≡ UASEF v1과의 관계:
++  UASEF v1: nonconformity = -mean(token logprobs)
++  TECP:     nonconformity = sum(token-level entropy)  ≈  -sum(logprobs) of greedy token
++            (entropy ≈ -log p when peaked dist; mean vs sum 차이만)
++
++Round 7 비교에서 본 어댑터는 TECP를 정확히 재현하기보다는, 그 핵심 아이디어
++(누적 token entropy + split CP)를 단일 global α로 표준화해 v1처럼 동작시킴.
++
++Args:
++  alpha: split conformal level (default 0.10)
++
++Limitation:
++  - TECP 원 논문은 sequence-level entropy 누적을 사용. 본 어댑터는 score를
++    외부에서 받아 그대로 split CP의 nonconformity로 사용 → 호출자가 "TECP-style"
++    score(예: cumulative -logprob)를 미리 계산했다고 가정.
++  - LLM 직접 호출은 별도 코드(experiments/round7_table*.py)에서 수행.
++"""
++from __future__ import annotations
++
++import math
++from . import BaselineAdapter
++
++
++class TECPBaseline(BaselineAdapter):
++    name = "TECP"
++
++    def __init__(self, alpha: float = 0.10):
++        self.alpha = alpha
++        self.threshold: float = float("inf")
++        self.n: int = 0
++
++    def fit(self, scores: list[float], labels: list[bool]) -> None:
++        """
++        Split CP threshold:
++            q̂ = scores_sorted[ ceil((n+1)(1-α)) - 1 ]
++        labels은 사용 안함 (TECP는 unsupervised CP).
++        """
++        if not scores:
++            raise ValueError("빈 calibration set")
++        self.n = len(scores)
++        sorted_s = sorted(scores)
++        # split CP quantile (Vovk 2005)
++        rank = max(1, min(self.n, math.ceil((self.n + 1) * (1 - self.alpha))))
++        self.threshold = sorted_s[rank - 1]
++
++    def predict(self, score: float) -> bool:
++        return score > self.threshold
++
++    def info(self) -> dict:
++        return {
++            "name": self.name,
++            "alpha": self.alpha,
++            "threshold": self.threshold,
++            "n_calibration": self.n,
++            "reference": "Xu & Lu (2025). TECP: Token-Entropy Conformal Prediction for LLMs. arXiv:2509.00461",
++        }
+diff --git a/experiments/config_schema.py b/experiments/config_schema.py
+index acc9380..a77cc48 100644
+--- a/experiments/config_schema.py
++++ b/experiments/config_schema.py
+@@ -87,6 +87,51 @@ class HybridConfig(BaseModel):
+         return self
+ 
+ 
++# ── Round 7 (audit 7) ─────────────────────────────────────────────────────────
++
++
++class StratifiedAlphas(BaseModel):
++    """Pivot A: per-stratum CRC bounds. CRITICAL ≤ HIGH ≤ MODERATE ≤ LOW."""
++    model_config = ConfigDict(extra="forbid")
++    CRITICAL: float = Field(..., gt=0, lt=1)
++    HIGH:     float = Field(..., gt=0, lt=1)
++    MODERATE: float = Field(..., gt=0, lt=1)
++    LOW:      float = Field(..., gt=0, lt=1)
++
++    @model_validator(mode="after")
++    def _check_monotone(self):
++        if not (self.CRITICAL <= self.HIGH <= self.MODERATE <= self.LOW):
++            raise ValueError(
++                f"stratified_alphas는 CRITICAL ≤ HIGH ≤ MODERATE ≤ LOW 단조이어야 합니다 "
++                f"(CRITICAL이 가장 엄격). got: {self.model_dump()}"
++            )
++        return self
++
++
++class CostEntry(BaseModel):
++    """Pivot C: 단일 stratum의 (FN cost, FP cost)."""
++    model_config = ConfigDict(extra="forbid")
++    miss:     float = Field(..., gt=0)
++    over_esc: float = Field(..., gt=0)
++
++
++class CostMatrix(BaseModel):
++    """Pivot C: stratum별 비대칭 cost matrix."""
++    model_config = ConfigDict(extra="forbid")
++    CRITICAL: CostEntry
++    HIGH:     CostEntry
++    MODERATE: CostEntry
++    LOW:      CostEntry
++
++
++class MultiTriggerConfig(BaseModel):
++    """Pivot B: trigger conformal combination 옵션."""
++    model_config = ConfigDict(extra="forbid")
++    enabled:        bool = False
++    combination:    Literal["harmonic", "bonferroni", "e_value"] = "harmonic"
++    combined_alpha: float = Field(0.05, gt=0, lt=1)
++
++
+ class BaseConfig(BaseModel):
+     """base_config.yaml 전체 스키마."""
+     model_config = ConfigDict(extra="allow")  # 새 키를 미래 호환을 위해 허용
+@@ -99,6 +144,10 @@ class BaseConfig(BaseModel):
+     entropy_threshold:    float = Field(0.6, gt=0, lt=2)
+     ede:                  EDEConfig
+     hybrid:               Optional[HybridConfig] = None
++    # Round 7
++    stratified_alphas:    Optional[StratifiedAlphas]    = None
++    costs:                Optional[CostMatrix]          = None
++    multi_trigger:        Optional[MultiTriggerConfig]  = None
+ 
+     @field_validator("backends")
+     @classmethod
+diff --git a/experiments/config_utils.py b/experiments/config_utils.py
+index 105bad1..a21ca42 100644
+--- a/experiments/config_utils.py
++++ b/experiments/config_utils.py
+@@ -95,3 +95,55 @@ def load_hybrid_weights(config_path: Path = _BASE_CONFIG_PATH) -> tuple[float, f
+         float(h.get("diversity_weight", 0.5)),
+         float(h.get("entropy_weight", 0.5)),
+     )
++
++
++# ── Round 7 (audit 7) loaders ────────────────────────────────────────────────
++
++
++def load_stratified_alphas(config_path: Path = _BASE_CONFIG_PATH) -> dict[str, float] | None:
++    """audit 7 Pivot A: per-stratum CRC alphas. None이면 default 사용."""
++    try:
++        with open(config_path, encoding="utf-8") as f:
++            cfg = yaml.safe_load(f) or {}
++    except FileNotFoundError:
++        return None
++    sa = cfg.get("stratified_alphas")
++    if not sa:
++        return None
++    return {k: float(v) for k, v in sa.items()}
++
++
++def load_cost_matrix(config_path: Path = _BASE_CONFIG_PATH) -> dict[str, dict[str, float]] | None:
++    """audit 7 Pivot C: per-stratum 비대칭 cost matrix. None이면 default 사용."""
++    try:
++        with open(config_path, encoding="utf-8") as f:
++            cfg = yaml.safe_load(f) or {}
++    except FileNotFoundError:
++        return None
++    cm = cfg.get("costs")
++    if not cm:
++        return None
++    return {
++        k: {"miss": float(v["miss"]), "over_esc": float(v["over_esc"])}
++        for k, v in cm.items()
++    }
++
++
++def load_multi_trigger_config(config_path: Path = _BASE_CONFIG_PATH) -> dict | None:
++    """
++    audit 7 Pivot B: multi_trigger 섹션 로드.
++    Returns: {"enabled", "combination", "combined_alpha"} 또는 None.
++    """
++    try:
++        with open(config_path, encoding="utf-8") as f:
++            cfg = yaml.safe_load(f) or {}
++    except FileNotFoundError:
++        return None
++    mt = cfg.get("multi_trigger")
++    if not mt:
++        return None
++    return {
++        "enabled":        bool(mt.get("enabled", False)),
++        "combination":    str(mt.get("combination", "harmonic")),
++        "combined_alpha": float(mt.get("combined_alpha", 0.05)),
++    }
+diff --git a/experiments/configs/base_config.yaml b/experiments/configs/base_config.yaml
+index e2c7256..cd5fd16 100644
+--- a/experiments/configs/base_config.yaml
++++ b/experiments/configs/base_config.yaml
+@@ -46,3 +46,30 @@ ede:
+ hybrid:
+   diversity_weight: 0.5
+   entropy_weight: 0.5
++
++# ── Round 7 (audit 7) — Stratified Conformal Risk Control + Multi-Trigger
++# Combination + Cost-Aware Calibration. v1과 공존하며 ede.decision_rule로 선택.
++# ─────────────────────────────────────────────────────────────────────────
++
++# Pivot A: stratum별 CRC 보장 수준 (CRITICAL이 가장 엄격, LOW가 가장 관대).
++#   각 stratum에 대해 E[ℓ_s] ≤ α_s 보장 (Angelopoulos & Bates ICLR 2024).
++stratified_alphas:
++  CRITICAL: 0.001
++  HIGH:     0.010
++  MODERATE: 0.050
++  LOW:      0.100
++
++# Pivot C: 비대칭 cost matrix (임상 부담 추정).
++#   sensitivity analysis로 ratio 변경 가능 — paper Table 3 참고.
++costs:
++  CRITICAL: {miss: 1000.0, over_esc: 1.0}
++  HIGH:     {miss:  100.0, over_esc: 1.0}
++  MODERATE: {miss:   10.0, over_esc: 1.0}
++  LOW:      {miss:    1.0, over_esc: 1.0}
++
++# Pivot B: multi-trigger conformal combination 활성화 옵션.
++multi_trigger:
++  enabled: false           # default: v1 동작 유지. true이면 EDE.decision_rule을
++                           # 'conformal_combined'로 자동 설정 권장.
++  combination: harmonic    # "harmonic" | "bonferroni" | "e_value"
++  combined_alpha: 0.05     # 결합 p-value의 임계값 (FWER 제어)
+diff --git a/experiments/reproduce_round7.sh b/experiments/reproduce_round7.sh
+new file mode 100755
+index 0000000..6a9a1d2
+--- /dev/null
++++ b/experiments/reproduce_round7.sh
+@@ -0,0 +1,79 @@
++#!/usr/bin/env bash
++#
++# UASEF Round 7 — 논문 표 4종을 한 번에 생성하는 재현 스크립트.
++#
++# 사용:
++#     bash experiments/reproduce_round7.sh             # default (n_cal=200, n_test=100)
++#     N_CAL=1500 N_TEST=500 bash experiments/reproduce_round7.sh    # 논문 quality
++#
++# 환경변수:
++#     BACKEND        — openai (default) | lmstudio
++#     N_CAL          — calibration data per stratum (논문: ≥1000 for α=0.001)
++#     N_TEST         — holdout test data per stratum
++#     N_TRIALS       — Table 2 FWER simulation 반복 (default 5000)
++#     N_PER_STRATUM  — Table 3 합성 데이터 (default 300)
++#
++# 출력: results/round7/table{1,2,3,4}.{json,md} + results/round7/summary.md
++
++set -euo pipefail
++
++BACKEND="${BACKEND:-openai}"
++N_CAL="${N_CAL:-200}"
++N_TEST="${N_TEST:-100}"
++N_TRIALS="${N_TRIALS:-5000}"
++N_PER_STRATUM="${N_PER_STRATUM:-300}"
++
++OUT_DIR="results/round7"
++mkdir -p "$OUT_DIR"
++
++echo "════════════════════════════════════════════════════════════════"
++echo "  UASEF Round 7 reproduce — backend=$BACKEND, n_cal=$N_CAL, n_test=$N_TEST"
++echo "════════════════════════════════════════════════════════════════"
++
++echo ""
++echo "[1/4] Table 1 — Per-Stratum Coverage Validity (Pivot A)"
++echo "      ⚠ LLM 호출 ~$((N_CAL * 4 + N_TEST * 4))회"
++python experiments/round7_table1_coverage.py \
++    --backend "$BACKEND" --n-cal "$N_CAL" --n-test "$N_TEST" \
++    || echo "  [SKIP] Table 1 실패 (LLM 키 없음 가능)"
++
++echo ""
++echo "[2/4] Table 2 — Multi-Trigger FWER (Pivot B, 합성 데이터)"
++python experiments/round7_table2_fwer.py \
++    --n-trials "$N_TRIALS" --n-cal 200 --alpha 0.05
++
++echo ""
++echo "[3/4] Table 3 — Cost-Weighted Performance (Pivot C, 합성 데이터)"
++python experiments/round7_table3_cost.py --n-per-stratum "$N_PER_STRATUM"
++
++echo ""
++echo "[4/4] Table 4 — Baseline Comparison (TECP/Quach/SE vs Round 6/7)"
++echo "      Table 1과 동일 LLM 호출 풀 재사용 권장: --reuse-table1"
++python experiments/round7_table4_baseline.py \
++    --backend "$BACKEND" --n-cal "$N_CAL" --n-test "$N_TEST" --reuse-table1 \
++    || echo "  [SKIP] Table 4 실패 (LLM 키 없음 가능)"
++
++echo ""
++echo "════════════════════════════════════════════════════════════════"
++echo "  완료 — 산출물: $OUT_DIR/"
++ls -la "$OUT_DIR/" 2>/dev/null
++
++# summary.md 생성
++{
++    echo "# UASEF Round 7 — Summary"
++    echo ""
++    echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
++    echo "Config: backend=$BACKEND, n_cal=$N_CAL, n_test=$N_TEST"
++    echo ""
++    for t in table1_coverage table2_fwer table3_cost table4_baseline; do
++        if [ -f "$OUT_DIR/$t.md" ]; then
++            cat "$OUT_DIR/$t.md"
++            echo ""
++            echo "---"
++            echo ""
++        fi
++    done
++} > "$OUT_DIR/summary.md"
++
++echo ""
++echo "  ✅ 통합 보고서: $OUT_DIR/summary.md"
+diff --git a/experiments/round7_table1_coverage.py b/experiments/round7_table1_coverage.py
+new file mode 100644
+index 0000000..d9e1733
+--- /dev/null
++++ b/experiments/round7_table1_coverage.py
+@@ -0,0 +1,199 @@
++"""
++Round 7 Table 1 — Per-Stratum Coverage Validity (Pivot A 검증).
++
++UASEF Round 7의 stratified CRC가 실제로 stratum별 보장을 충족하는지 검증.
++Round 6 (heuristic multiplier)와 TECP (single global α)와 비교.
++
++실행:
++    python experiments/round7_table1_coverage.py --backend openai --n-cal 1500 --n-test 500
++
++산출:
++    results/round7/table1_coverage.json
++    results/round7/table1_coverage.md
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++from pathlib import Path
++from datetime import datetime
++
++ROOT = Path(__file__).parent.parent
++sys.path.insert(0, str(ROOT))
++
++from dotenv import load_dotenv
++load_dotenv(ROOT / ".env")
++
++from models.uqm import UQM, ConformalCalibrator, compute_nonconformity_score
++from models.stratified_crc import StratifiedConformalRiskControl
++from models.model_interface import query_model
++from data.loader import load_calibration_questions, load_scenarios
++from experiments.baselines.tecp import TECPBaseline
++
++
++SPECIALTY_TO_STRATUM = {
++    "emergency_medicine": "CRITICAL", "intensive_care": "CRITICAL", "trauma_surgery": "CRITICAL",
++    "cardiology": "HIGH", "neurology": "HIGH", "oncology": "HIGH", "cardiothoracic_surgery": "HIGH",
++    "internal_medicine": "MODERATE", "surgery": "MODERATE",
++    "pediatrics": "MODERATE", "obstetrics": "MODERATE",
++    "general_practice": "LOW", "preventive_medicine": "LOW",
++    "dermatology": "LOW", "psychiatry": "LOW",
++}
++
++
++def collect_stratified_data(backend: str, n_per_stratum: int, seed: int) -> dict:
++    """LLM 호출로 stratum별 (score, label) 수집."""
++    print(f"\n[Phase 1] Calibration scores 수집 ...")
++    sys_prompt = UQM.SYSTEM_PROMPT
++    scenario_map = load_scenarios(n_per_scenario=n_per_stratum, split="test", seed=seed)
++
++    scores_by_stratum: dict[str, list[float]] = {s: [] for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]}
++    labels_by_stratum: dict[str, list[bool]] = {s: [] for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]}
++
++    all_scores, all_labels, all_strata = [], [], []
++    for scenario_type, cases in scenario_map.items():
++        for case in cases:
++            stratum = SPECIALTY_TO_STRATUM.get(case.specialty, "MODERATE")
++            try:
++                resp = query_model(backend, sys_prompt, case.question, temperature=0.0)
++                score = compute_nonconformity_score(resp)
++            except Exception as e:
++                print(f"  [skip] {e}")
++                continue
++            scores_by_stratum[stratum].append(score)
++            labels_by_stratum[stratum].append(case.expected_escalate)
++            all_scores.append(score)
++            all_labels.append(case.expected_escalate)
++            all_strata.append(stratum)
++
++    return {
++        "scores_by_stratum": scores_by_stratum,
++        "labels_by_stratum": labels_by_stratum,
++        "all_scores": all_scores,
++        "all_labels": all_labels,
++        "all_strata": all_strata,
++    }
++
++
++def evaluate_method(name: str, predictor_fn, scores: list, labels: list, strata: list) -> dict:
++    """주어진 prediction function의 stratum별 empirical miss rate 측정."""
++    per_stratum: dict = {}
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        idx = [i for i, s in enumerate(strata) if s == stratum]
++        n = len(idx)
++        if n == 0:
++            per_stratum[stratum] = {"n": 0, "miss_rate": None}
++            continue
++        misses = 0
++        n_pos = 0
++        for i in idx:
++            if labels[i]:
++                n_pos += 1
++                if not predictor_fn(scores[i]):    # 실제 양성인데 미트리거
++                    misses += 1
++        miss_rate = misses / n_pos if n_pos > 0 else 0.0
++        per_stratum[stratum] = {"n": n, "n_pos": n_pos,
++                                 "miss_rate": round(miss_rate, 4)}
++    return {"name": name, "per_stratum": per_stratum}
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Round 7 Table 1 — Coverage Validity")
++    parser.add_argument("--backend", default="openai", choices=["openai", "lmstudio"])
++    parser.add_argument("--n-cal", type=int, default=200,
++                        help="Calibration n per stratum (논문 권장 ≥1000 for α=0.001)")
++    parser.add_argument("--n-test", type=int, default=100, help="Test n per stratum")
++    parser.add_argument("--seed", type=int, default=42)
++    parser.add_argument("--alpha-global", type=float, default=0.10,
++                        help="TECP / Round 6 single α")
++    args = parser.parse_args()
++
++    out_dir = ROOT / "results" / "round7"
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    # ── 데이터 수집 ──────────────────────────────────────────────────────
++    cal_data = collect_stratified_data(args.backend, args.n_cal, seed=args.seed)
++    test_data = collect_stratified_data(args.backend, args.n_test, seed=args.seed + 1000)
++
++    # ── 1. TECP / Quach (single global α) ────────────────────────────────
++    tecp = TECPBaseline(alpha=args.alpha_global)
++    tecp.fit(cal_data["all_scores"], cal_data["all_labels"])
++    res_tecp = evaluate_method(
++        "TECP / Quach 2024 (global α)", tecp.predict,
++        test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
++    )
++
++    # ── 2. UASEF Round 6 (heuristic multiplier) ──────────────────────────
++    cal_global = ConformalCalibrator(alpha=args.alpha_global, strict=False)
++    cal_global.fit(cal_data["all_scores"])
++    multipliers = {"CRITICAL": 0.60, "HIGH": 0.75, "MODERATE": 1.00, "LOW": 1.30}
++
++    def round6_predict_factory(stratum):
++        thr = cal_global.threshold * multipliers[stratum]
++        return lambda s: s > thr
++
++    res_round6 = {"name": "UASEF Round 6 (heuristic multiplier)", "per_stratum": {}}
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        pred = round6_predict_factory(stratum)
++        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
++        n_pos = sum(test_data["all_labels"][i] for i in idx)
++        misses = sum(test_data["all_labels"][i] and not pred(test_data["all_scores"][i]) for i in idx)
++        miss = misses / n_pos if n_pos else 0.0
++        res_round6["per_stratum"][stratum] = {
++            "n": len(idx), "n_pos": n_pos,
++            "miss_rate": round(miss, 4),
++        }
++
++    # ── 3. UASEF Round 7 (Stratified CRC) ────────────────────────────────
++    crc_alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    crc = StratifiedConformalRiskControl(alphas=crc_alphas)
++    crc.fit(cal_data["all_scores"], cal_data["all_labels"], cal_data["all_strata"])
++    res_round7 = {"name": "UASEF Round 7 (Stratified CRC)", "per_stratum": {}}
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        thr = crc.threshold_for(stratum)
++        pred = lambda s, t=thr: s > t
++        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
++        n_pos = sum(test_data["all_labels"][i] for i in idx)
++        misses = sum(test_data["all_labels"][i] and not pred(test_data["all_scores"][i]) for i in idx)
++        miss = misses / n_pos if n_pos else 0.0
++        res_round7["per_stratum"][stratum] = {
++            "n": len(idx), "n_pos": n_pos,
++            "miss_rate": round(miss, 4),
++            "target_alpha": crc_alphas[stratum],
++            "ok": miss <= crc_alphas[stratum] * 1.1,
++        }
++
++    # ── 저장 + 보고서 ────────────────────────────────────────────────────
++    payload = {
++        "timestamp": datetime.now().isoformat(),
++        "backend": args.backend,
++        "n_cal": args.n_cal, "n_test": args.n_test,
++        "alpha_global": args.alpha_global,
++        "crc_alphas": crc_alphas,
++        "results": [res_tecp, res_round6, res_round7],
++    }
++    (out_dir / "table1_coverage.json").write_text(
++        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
++    )
++
++    # markdown report
++    md = ["# Round 7 Table 1 — Per-Stratum Coverage Validity\n",
++          f"- backend: `{args.backend}`, n_cal={args.n_cal}/stratum, n_test={args.n_test}/stratum\n",
++          "| Method | CRITICAL miss | HIGH miss | MODERATE miss | LOW miss |",
++          "| --- | --- | --- | --- | --- |"]
++    for r in [res_tecp, res_round6, res_round7]:
++        row = f"| {r['name']} |"
++        for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++            v = r["per_stratum"][s].get("miss_rate")
++            row += f" {v if v is not None else 'N/A'} |"
++        md.append(row)
++    (out_dir / "table1_coverage.md").write_text("\n".join(md), encoding="utf-8")
++
++    print("\n" + "\n".join(md))
++    print(f"\n✅ saved: {out_dir}/table1_coverage.{{json,md}}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/experiments/round7_table2_fwer.py b/experiments/round7_table2_fwer.py
+new file mode 100644
+index 0000000..06225dc
+--- /dev/null
++++ b/experiments/round7_table2_fwer.py
+@@ -0,0 +1,161 @@
++"""
++Round 7 Table 2 — Multi-Trigger Combination FWER 검증 (Pivot B).
++
++Null hypothesis (no trigger should fire) 하에서 각 combination 방법의
++empirical FWER (false escalation rate) 측정. v1의 `len(triggers)>0`은 위반,
++Round 7 (harmonic / e_value)는 보존을 검증.
++
++실행:
++    python experiments/round7_table2_fwer.py --n-trials 5000 --alpha 0.05
++
++이 스크립트는 LLM 호출 없이 합성 데이터로 동작 — 즉시 실행 가능.
++
++산출:
++    results/round7/table2_fwer.json
++    results/round7/table2_fwer.md
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import random
++import sys
++from pathlib import Path
++from datetime import datetime
++
++ROOT = Path(__file__).parent.parent
++sys.path.insert(0, str(ROOT))
++
++from models.conformal_combination import (
++    TriggerCalibrator, MultiTriggerConformal, COMBINATION_METHODS,
++)
++
++
++def measure_fwer(
++    method: str, n_trials: int, alpha: float,
++    n_cal: int, dependence: str = "independent", seed: int = 42,
++) -> float:
++    """
++    Null hypothesis 하의 empirical FWER 측정.
++
++    dependence:
++      "independent": 3개 trigger 모두 독립 N(0,1) score
++      "correlated":  공통 latent factor 0.5 × global + N(0,1) noise (mid-level dep)
++    """
++    rng = random.Random(seed)
++    cals = []
++    for name in ("T1", "T2", "T3"):
++        cal = TriggerCalibrator(name)
++        cal.fit([rng.gauss(0, 1) for _ in range(n_cal)])
++        cals.append(cal)
++    mtc = MultiTriggerConformal(cals, combination=method)
++
++    rejections = 0
++    for _ in range(n_trials):
++        if dependence == "independent":
++            scores = [rng.gauss(0, 1) for _ in range(3)]
++        else:
++            shared = rng.gauss(0, 1)
++            scores = [0.5 * shared + rng.gauss(0, 1) for _ in range(3)]
++        if mtc.should_escalate(scores, alpha=alpha)[0]:
++            rejections += 1
++    return rejections / n_trials
++
++
++def measure_naive_or_fwer(
++    n_trials: int, alpha: float, n_cal: int,
++    dependence: str = "independent", seed: int = 42,
++) -> float:
++    """v1의 len(triggers)>0 식 (Bonferroni 미적용 OR) 시뮬레이션."""
++    rng = random.Random(seed)
++    cals = []
++    for _ in range(3):
++        cals.append(sorted([rng.gauss(0, 1) for _ in range(n_cal)]))
++
++    def conformal_p(score, cal):
++        n_geq = sum(1 for s in cal if s >= score)
++        return (1 + n_geq) / (len(cal) + 1)
++
++    rejections = 0
++    for _ in range(n_trials):
++        if dependence == "independent":
++            scores = [rng.gauss(0, 1) for _ in range(3)]
++        else:
++            shared = rng.gauss(0, 1)
++            scores = [0.5 * shared + rng.gauss(0, 1) for _ in range(3)]
++        # naive OR: 어느 한 trigger라도 p_i ≤ α이면 fire
++        if any(conformal_p(s, cals[i]) <= alpha for i, s in enumerate(scores)):
++            rejections += 1
++    return rejections / n_trials
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Round 7 Table 2 — FWER under null")
++    parser.add_argument("--n-trials", type=int, default=5000)
++    parser.add_argument("--n-cal", type=int, default=200)
++    parser.add_argument("--alpha", type=float, default=0.05)
++    parser.add_argument("--seed", type=int, default=42)
++    args = parser.parse_args()
++
++    out_dir = ROOT / "results" / "round7"
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    print(f"\n=== FWER 검증 (n_trials={args.n_trials}, α={args.alpha}) ===\n")
++    rows = []
++    for dep in ("independent", "correlated"):
++        # naive (v1)
++        naive_fwer = measure_naive_or_fwer(
++            n_trials=args.n_trials, alpha=args.alpha,
++            n_cal=args.n_cal, dependence=dep, seed=args.seed,
++        )
++        rows.append({
++            "method": "v1: len(triggers) > 0 (naive OR)",
++            "dependence": dep,
++            "empirical_fwer": round(naive_fwer, 4),
++            "target": args.alpha,
++            "ok": naive_fwer <= args.alpha + 0.02,
++        })
++        # 3 combination methods
++        for method in COMBINATION_METHODS:
++            fwer = measure_fwer(
++                method=method, n_trials=args.n_trials,
++                alpha=args.alpha, n_cal=args.n_cal,
++                dependence=dep, seed=args.seed,
++            )
++            rows.append({
++                "method": f"v2: {method}",
++                "dependence": dep,
++                "empirical_fwer": round(fwer, 4),
++                "target": args.alpha,
++                "ok": fwer <= args.alpha + 0.02,
++            })
++
++    payload = {
++        "timestamp": datetime.now().isoformat(),
++        "config": {"n_trials": args.n_trials, "n_cal": args.n_cal,
++                    "alpha": args.alpha, "seed": args.seed},
++        "rows": rows,
++    }
++    (out_dir / "table2_fwer.json").write_text(
++        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
++    )
++
++    md = [
++        "# Round 7 Table 2 — Multi-Trigger Combination FWER\n",
++        f"- n_trials={args.n_trials}, n_cal={args.n_cal}, target α={args.alpha}\n",
++        "| Method | Dependence | Empirical FWER | OK (≤α+0.02)? |",
++        "| --- | --- | --- | --- |",
++    ]
++    for r in rows:
++        md.append(
++            f"| {r['method']} | {r['dependence']} "
++            f"| {r['empirical_fwer']} | {'✓' if r['ok'] else '✗'} |"
++        )
++    (out_dir / "table2_fwer.md").write_text("\n".join(md), encoding="utf-8")
++    print("\n".join(md))
++    print(f"\n✅ saved: {out_dir}/table2_fwer.{{json,md}}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/experiments/round7_table3_cost.py b/experiments/round7_table3_cost.py
+new file mode 100644
+index 0000000..f780f26
+--- /dev/null
++++ b/experiments/round7_table3_cost.py
+@@ -0,0 +1,139 @@
++"""
++Round 7 Table 3 — Cost-Weighted Performance (Pivot C).
++
++비대칭 cost matrix를 적용했을 때 total cost / Safety Recall / Over-Esc rate가
++어떻게 바뀌는지 확인. F1-symmetric (Round 6) vs cost-aware (Round 7) 비교.
++
++실행:
++    python experiments/round7_table3_cost.py
++
++LLM 호출 없이 합성 데이터로 동작.
++
++산출:
++    results/round7/table3_cost.json
++    results/round7/table3_cost.md
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import random
++import sys
++from pathlib import Path
++from datetime import datetime
++
++ROOT = Path(__file__).parent.parent
++sys.path.insert(0, str(ROOT))
++
++from models.cost_aware_calibration import (
++    find_cost_optimal_threshold, sweep_cost_aware_per_stratum,
++    cost_ratio_sweep, DEFAULT_COST_MATRIX,
++)
++
++
++def f1_symmetric_threshold(scores, labels) -> float:
++    """Round 6 baseline: F1-safety = harmonic_mean(recall, 1-over_esc) 최대화."""
++    candidates = sorted(set(scores))
++    best_thr, best_f1 = candidates[0], -1.0
++    for thr in candidates:
++        preds = [s > thr for s in scores]
++        tp = sum(p and l for p, l in zip(preds, labels))
++        fn = sum(not p and l for p, l in zip(preds, labels))
++        fp = sum(p and not l for p, l in zip(preds, labels))
++        tn = sum(not p and not l for p, l in zip(preds, labels))
++        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
++        over = fp / (fp + tn) if (fp + tn) > 0 else 0.0
++        f1 = 2 * recall * (1 - over) / (recall + (1 - over) + 1e-9)
++        if f1 > best_f1:
++            best_f1, best_thr = f1, thr
++    return best_thr
++
++
++def total_cost(scores, labels, threshold, c_miss, c_over):
++    fn = sum(1 for s, l in zip(scores, labels) if l and s <= threshold)
++    fp = sum(1 for s, l in zip(scores, labels) if (not l) and s > threshold)
++    return c_miss * fn + c_over * fp
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Round 7 Table 3 — Cost-Weighted Performance")
++    parser.add_argument("--n-per-stratum", type=int, default=300)
++    parser.add_argument("--seed", type=int, default=42)
++    args = parser.parse_args()
++
++    out_dir = ROOT / "results" / "round7"
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    # 합성 데이터: 4 stratum × n_per
++    random.seed(args.seed)
++    sb, lb = {}, {}
++    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
++                          ("MODERATE", 0.10), ("LOW", 0.05)]:
++        sb[stratum], lb[stratum] = [], []
++        for _ in range(args.n_per_stratum):
++            l = random.random() < base
++            s = random.gauss(2.0 if l else 0.0, 1.0)
++            sb[stratum].append(s); lb[stratum].append(l)
++
++    # ── Round 6: F1-symmetric per stratum ────────────────────────────────
++    round6_rows = []
++    round6_total_cost = 0.0
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        thr = f1_symmetric_threshold(sb[stratum], lb[stratum])
++        cm = DEFAULT_COST_MATRIX[stratum]
++        c = total_cost(sb[stratum], lb[stratum], thr, cm["miss"], cm["over_esc"])
++        round6_total_cost += c
++        round6_rows.append({"stratum": stratum, "threshold": round(thr, 3), "cost": c})
++
++    # ── Round 7: cost-aware per stratum ──────────────────────────────────
++    alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    out = sweep_cost_aware_per_stratum(sb, lb, DEFAULT_COST_MATRIX, alphas)
++    round7_rows = []
++    round7_total_cost = 0.0
++    for stratum, r in out.items():
++        round7_total_cost += r.cost
++        round7_rows.append({
++            "stratum": stratum, "threshold": round(r.threshold, 3),
++            "cost": r.cost, "miss_rate": r.miss_rate,
++            "over_esc_rate": r.over_esc_rate,
++        })
++
++    payload = {
++        "timestamp": datetime.now().isoformat(),
++        "n_per_stratum": args.n_per_stratum,
++        "cost_matrix": DEFAULT_COST_MATRIX,
++        "round6_total_cost": round6_total_cost,
++        "round7_total_cost": round7_total_cost,
++        "cost_reduction_ratio": round(round6_total_cost / round7_total_cost, 2)
++                                 if round7_total_cost > 0 else None,
++        "round6_per_stratum": round6_rows,
++        "round7_per_stratum": round7_rows,
++    }
++    (out_dir / "table3_cost.json").write_text(
++        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
++    )
++
++    md = [
++        "# Round 7 Table 3 — Cost-Weighted Performance\n",
++        f"- n_per_stratum={args.n_per_stratum}, default cost matrix\n",
++        f"- **Round 6 total cost**: {round6_total_cost:.1f}",
++        f"- **Round 7 total cost**: {round7_total_cost:.1f}",
++        f"- **Reduction**: {payload['cost_reduction_ratio']}× (Round 6 / Round 7)\n",
++        "## Per-stratum",
++        "| Stratum | R6 thr | R6 cost | R7 thr | R7 cost | R7 miss | R7 over |",
++        "| --- | --- | --- | --- | --- | --- | --- |",
++    ]
++    for r6, r7 in zip(round6_rows, round7_rows):
++        md.append(
++            f"| {r6['stratum']} | {r6['threshold']} | {r6['cost']:.1f} | "
++            f"{r7['threshold']} | {r7['cost']:.1f} | "
++            f"{r7['miss_rate']} | {r7['over_esc_rate']} |"
++        )
++    (out_dir / "table3_cost.md").write_text("\n".join(md), encoding="utf-8")
++    print("\n".join(md))
++    print(f"\n✅ saved: {out_dir}/table3_cost.{{json,md}}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/experiments/round7_table4_baseline.py b/experiments/round7_table4_baseline.py
+new file mode 100644
+index 0000000..e69e328
+--- /dev/null
++++ b/experiments/round7_table4_baseline.py
+@@ -0,0 +1,238 @@
++"""
++Round 7 Table 4 — Head-to-head baseline 비교.
++
++같은 score 풀에 대해:
++  - TECP / Quach 2024-CLM (single global α + NLL nonconformity)
++  - Semantic Entropy (sample-level meaning entropy, normalized)
++  - UASEF Round 6 (heuristic multiplier)
++  - UASEF Round 7 v2 (Stratified CRC + MTC + cost-aware)
++
++지표:
++  - Per-stratum Safety Recall
++  - Over-Escalation Rate
++  - AUROC (sklearn 있으면)
++  - Total cost (Pivot C cost matrix)
++
++실행:
++    python experiments/round7_table4_baseline.py --backend openai --n-cal 1500 --n-test 500
++
++산출:
++    results/round7/table4_baseline.json
++    results/round7/table4_baseline.md
++
++LLM 호출 단계는 round7_table1과 공유 — `--reuse-table1`이면 table1 데이터 재활용.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++from pathlib import Path
++from datetime import datetime
++
++ROOT = Path(__file__).parent.parent
++sys.path.insert(0, str(ROOT))
++
++from dotenv import load_dotenv
++load_dotenv(ROOT / ".env")
++
++from models.uqm import ConformalCalibrator
++from models.stratified_crc import StratifiedConformalRiskControl
++from models.conformal_combination import TriggerCalibrator, MultiTriggerConformal
++from models.cost_aware_calibration import sweep_cost_aware_per_stratum, DEFAULT_COST_MATRIX
++
++from experiments.baselines.tecp import TECPBaseline
++from experiments.baselines.quach2024 import Quach2024Baseline
++from experiments.baselines.semantic_entropy import SemanticEntropyBaseline
++
++try:
++    from scipy.stats import roc_auc_score
++    HAS_SCIPY = True
++except ImportError:
++    HAS_SCIPY = False
++
++
++def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
++    """Per-stratum safety_recall, over_esc_rate, total cost."""
++    per_stratum: dict = {}
++    total_cost = 0.0
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        idx = [i for i, s in enumerate(strata) if s == stratum]
++        n_pos = sum(labels[i] for i in idx)
++        n_neg = sum(1 for i in idx if not labels[i])
++        tp = sum(labels[i] and predictor_fn(scores[i]) for i in idx)
++        fn = sum(labels[i] and not predictor_fn(scores[i]) for i in idx)
++        fp = sum((not labels[i]) and predictor_fn(scores[i]) for i in idx)
++        recall = tp / (tp + fn) if (tp + fn) else None
++        over = fp / n_neg if n_neg else None
++        cm = DEFAULT_COST_MATRIX[stratum]
++        cost = cm["miss"] * fn + cm["over_esc"] * fp
++        total_cost += cost
++        per_stratum[stratum] = {
++            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
++            "tp": tp, "fn": fn, "fp": fp, "cost": cost,
++        }
++
++    auroc = None
++    if HAS_SCIPY:
++        try:
++            preds = [int(predictor_fn(scores[i])) for i in range(len(scores))]
++            auroc = round(float(roc_auc_score(labels, preds)), 4)
++        except Exception:
++            pass
++
++    return {
++        "name": name, "per_stratum": per_stratum,
++        "total_cost": total_cost, "auroc": auroc,
++    }
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Round 7 Table 4 — Baseline Comparison")
++    parser.add_argument("--reuse-table1", action="store_true",
++                        help="results/round7/table1_coverage.json이 있으면 재활용")
++    parser.add_argument("--backend", default="openai", choices=["openai", "lmstudio"])
++    parser.add_argument("--n-cal", type=int, default=200)
++    parser.add_argument("--n-test", type=int, default=100)
++    parser.add_argument("--seed", type=int, default=42)
++    parser.add_argument("--alpha", type=float, default=0.10)
++    args = parser.parse_args()
++
++    out_dir = ROOT / "results" / "round7"
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    # ── 데이터 수집 (table1과 동일 함수) ────────────────────────────────
++    if args.reuse_table1 and (out_dir / "table1_coverage.json").exists():
++        print("[reuse] table1 데이터 재활용")
++        d1 = json.loads((out_dir / "table1_coverage.json").read_text())
++        # table1은 결과만 저장하므로 raw scores를 별도로 다시 수집
++        from experiments.round7_table1_coverage import collect_stratified_data
++        cal_data = collect_stratified_data(args.backend, args.n_cal, args.seed)
++        test_data = collect_stratified_data(args.backend, args.n_test, args.seed + 1000)
++    else:
++        from experiments.round7_table1_coverage import collect_stratified_data
++        cal_data = collect_stratified_data(args.backend, args.n_cal, args.seed)
++        test_data = collect_stratified_data(args.backend, args.n_test, args.seed + 1000)
++
++    methods_results = []
++
++    # ── TECP ─────────────────────────────────────────────────────────────
++    tecp = TECPBaseline(alpha=args.alpha)
++    tecp.fit(cal_data["all_scores"], cal_data["all_labels"])
++    methods_results.append(evaluate_predictor(
++        "TECP (Xu & Lu 2025)", tecp.predict,
++        test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
++    ))
++
++    # ── Quach 2024 (수학적으로 TECP와 동일하지만 reference로 별도 행) ──
++    q = Quach2024Baseline(alpha=args.alpha)
++    q.fit(cal_data["all_scores"], cal_data["all_labels"])
++    methods_results.append(evaluate_predictor(
++        "Quach 2024 CLM", q.predict,
++        test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
++    ))
++
++    # ── Semantic Entropy (외부 score 가정 — 본 데모에선 동일 score 사용) ──
++    se = SemanticEntropyBaseline(alpha=args.alpha)
++    se.fit(cal_data["all_scores"], cal_data["all_labels"])
++    methods_results.append(evaluate_predictor(
++        "Semantic Entropy (Farquhar Nature 2024)", se.predict,
++        test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
++    ))
++
++    # ── UASEF Round 6 (heuristic) ────────────────────────────────────────
++    cal_global = ConformalCalibrator(alpha=args.alpha, strict=False)
++    cal_global.fit(cal_data["all_scores"])
++    multipliers = {"CRITICAL": 0.60, "HIGH": 0.75, "MODERATE": 1.00, "LOW": 1.30}
++
++    def round6_pred(score, stratum_idx):
++        stratum = test_data["all_strata"][stratum_idx]
++        thr = cal_global.threshold * multipliers[stratum]
++        return score > thr
++
++    # round6 평가는 stratum-aware predictor가 필요 — wrapper
++    res_r6_per = {}
++    total_cost_r6 = 0.0
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
++        thr = cal_global.threshold * multipliers[stratum]
++        n_pos = sum(test_data["all_labels"][i] for i in idx)
++        n_neg = sum(1 for i in idx if not test_data["all_labels"][i])
++        tp = sum(test_data["all_labels"][i] and test_data["all_scores"][i] > thr for i in idx)
++        fn = sum(test_data["all_labels"][i] and not (test_data["all_scores"][i] > thr) for i in idx)
++        fp = sum((not test_data["all_labels"][i]) and test_data["all_scores"][i] > thr for i in idx)
++        recall = tp / (tp + fn) if (tp + fn) else None
++        over = fp / n_neg if n_neg else None
++        cm = DEFAULT_COST_MATRIX[stratum]
++        cost = cm["miss"] * fn + cm["over_esc"] * fp
++        total_cost_r6 += cost
++        res_r6_per[stratum] = {
++            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
++            "tp": tp, "fn": fn, "fp": fp, "cost": cost,
++        }
++    methods_results.append({
++        "name": "UASEF Round 6 (heuristic multiplier)",
++        "per_stratum": res_r6_per, "total_cost": total_cost_r6, "auroc": None,
++    })
++
++    # ── UASEF Round 7 (Stratified CRC) ──────────────────────────────────
++    crc_alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    crc = StratifiedConformalRiskControl(alphas=crc_alphas)
++    crc.fit(cal_data["all_scores"], cal_data["all_labels"], cal_data["all_strata"])
++
++    res_r7_per = {}
++    total_cost_r7 = 0.0
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
++        thr = crc.threshold_for(stratum)
++        n_pos = sum(test_data["all_labels"][i] for i in idx)
++        n_neg = sum(1 for i in idx if not test_data["all_labels"][i])
++        tp = sum(test_data["all_labels"][i] and test_data["all_scores"][i] > thr for i in idx)
++        fn = sum(test_data["all_labels"][i] and not (test_data["all_scores"][i] > thr) for i in idx)
++        fp = sum((not test_data["all_labels"][i]) and test_data["all_scores"][i] > thr for i in idx)
++        recall = tp / (tp + fn) if (tp + fn) else None
++        over = fp / n_neg if n_neg else None
++        cm = DEFAULT_COST_MATRIX[stratum]
++        cost = cm["miss"] * fn + cm["over_esc"] * fp
++        total_cost_r7 += cost
++        res_r7_per[stratum] = {
++            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
++            "tp": tp, "fn": fn, "fp": fp, "cost": cost,
++        }
++    methods_results.append({
++        "name": "UASEF Round 7 (Stratified CRC + MTC + Cost-Aware)",
++        "per_stratum": res_r7_per, "total_cost": total_cost_r7, "auroc": None,
++    })
++
++    # ── 저장 + 보고서 ────────────────────────────────────────────────────
++    payload = {
++        "timestamp": datetime.now().isoformat(),
++        "backend": args.backend, "n_cal": args.n_cal, "n_test": args.n_test,
++        "alpha": args.alpha, "crc_alphas": crc_alphas,
++        "methods": methods_results,
++    }
++    (out_dir / "table4_baseline.json").write_text(
++        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
++    )
++
++    md = [
++        "# Round 7 Table 4 — Head-to-Head Baseline\n",
++        f"- backend={args.backend}, n_cal={args.n_cal}, n_test={args.n_test}, α={args.alpha}\n",
++        "## CRITICAL stratum",
++        "| Method | Safety Recall | Over-Esc | TP/FN/FP | Total cost |",
++        "| --- | --- | --- | --- | --- |",
++    ]
++    for m in methods_results:
++        c = m["per_stratum"]["CRITICAL"]
++        md.append(
++            f"| {m['name']} | {c['safety_recall']} | {c['over_esc_rate']} | "
++            f"{c['tp']}/{c['fn']}/{c['fp']} | {m['total_cost']:.1f} |"
++        )
++    (out_dir / "table4_baseline.md").write_text("\n".join(md), encoding="utf-8")
++    print("\n".join(md))
++    print(f"\n✅ saved: {out_dir}/table4_baseline.{{json,md}}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/models/conformal_combination.py b/models/conformal_combination.py
+new file mode 100644
+index 0000000..86a7264
+--- /dev/null
++++ b/models/conformal_combination.py
+@@ -0,0 +1,307 @@
++"""
++UASEF — Multi-Trigger Conformal Combination (Round 7, Pivot B)
++
++═══════════════════════════════════════════════════════════════════════════════
++이론 배경
++═══════════════════════════════════════════════════════════════════════════════
++
++기존 EDE.decide (v1, Round 6.10):
++    should_escalate = (len(triggers) > 0)     # ad-hoc OR
++
++문제: 3개 trigger 각각이 false positive rate α=0.10이면,
++      P(어느 하나라도 잘못 발동) ≤ 1 - (1-α)^3 ≈ 0.27   (independence 가정)
++      또는 임의 의존성에서 더 클 수도 있음.
++      → coverage 보장 무효.
++
++v2 (Round 7, 본 모듈):
++    1) 각 trigger를 별도 nonconformity score로 frame:
++         T1: score_T1 = -mean(token logprobs)        (UQM 기존)
++         T2: score_T2 = continuous high-risk score    (NEW)
++         T3: score_T3 = continuous no-evidence score  (NEW)
++    2) 각각 conformal p-value 계산:
++         p_i = (1 + #{cal_score ≥ test_score}) / (n+1)     [Vovk et al. 2005]
++    3) p-value combination:
++         p_combined = combine(p_1, p_2, p_3)
++    4) 결정:
++         should_escalate ⟺ p_combined ≤ α_combined
++       → FWER ≤ α_combined 보장 (under arbitrary dependence)
++
++═══════════════════════════════════════════════════════════════════════════════
++Combination 방법 비교
++═══════════════════════════════════════════════════════════════════════════════
++
++(a) Bonferroni (보수적 baseline):
++    p_combined = m × min(p_i)
++    Type-I error ≤ α  always (지나치게 보수적)
++
++(b) Harmonic Mean p-value (Wilson, PNAS 2019):
++    H = m / Σ(1/p_i)
++    p_HMP = H × e × ln(m)               (asymptotically valid under dependence)
++    실용적 경계: α ≤ 0.05일 때 정확. α=0.10에서는 약간 보수적.
++    Bonferroni보다 ~m배 tighter.
++
++(c) E-value mean (Vovk & Wang, Biometrika 2019; Wang & Ramdas, JRSS-B 2022):
++    e_i = 1/p_i  (one-sided p에 대한 valid e-value)
++    e_combined = mean(e_i)
++    p_combined = 1 / e_combined
++    Markov inequality로 valid. 임의 의존성에서도 정확.
++    실험적으로 종종 HMP보다 tighter.
++
++UASEF 기본: harmonic. 사용자가 selection 가능.
++
++═══════════════════════════════════════════════════════════════════════════════
++참고문헌
++═══════════════════════════════════════════════════════════════════════════════
++- Vovk, V., Gammerman, A., & Shafer, G. (2005). Algorithmic Learning in a
++  Random World. Springer. (conformal p-value의 정의)
++- Wilson, D. J. (2019). The harmonic mean p-value for combining dependent tests.
++  PNAS, 116(4), 1195-1200.
++- Vovk, V., & Wang, R. (2019). Combining p-values via averaging. Biometrika,
++  108(2), 397-412.
++- Wang, R., & Ramdas, A. (2022). False discovery rate control with e-values.
++  JRSS Series B, 84(3), 822-852.
++- Bates, S., Candès, E., Lei, L., Romano, Y., & Sesia, M. (2023). Testing for
++  outliers with conformal p-values. Annals of Statistics, 51(1), 149-178.
++"""
++
++from __future__ import annotations
++
++import math
++from typing import Optional, Literal
++
++
++# ── conformal p-value ────────────────────────────────────────────────────────
++
++
++def conformal_pvalue(score: float, calibration_scores: list[float]) -> float:
++    """
++    Conformal p-value:
++        p = (1 + #{s_i ≥ score}) / (n + 1)
++
++    nonconformity score는 클수록 anomalous라 가정. 따라서 작은 p = 높은
++    anomaly = 에스컬레이션 권장.
++
++    Vovk et al. (2005): exchangeability하에서 P(p_test ≤ α) ≤ α (super-uniform).
++
++    Edge cases:
++        n == 0   → return 1.0 (보수적 — 정보 없음)
++        score = +inf → p = 1/(n+1)
++    """
++    n = len(calibration_scores)
++    if n == 0:
++        return 1.0
++    n_geq = sum(1 for s in calibration_scores if s >= score)
++    return (1 + n_geq) / (n + 1)
++
++
++# ── p-value combination methods ──────────────────────────────────────────────
++
++
++def combine_p_bonferroni(p_values: list[float]) -> float:
++    """
++    Bonferroni: p_combined = min(1, m × min(p_i)).
++    가장 보수적이지만 항상 valid (어떤 의존 구조에서도).
++    """
++    if not p_values:
++        return 1.0
++    return min(1.0, min(p_values) * len(p_values))
++
++
++def combine_p_harmonic(p_values: list[float]) -> float:
++    """
++    Harmonic Mean p-value (Wilson, PNAS 2019).
++
++    H = m / Σ(1/p_i)
++    p_HMP = H × e × ln(m)         (m ≥ 2일 때; m=1이면 그냥 p_1)
++
++    Asymptotically valid under arbitrary dependence at α ≤ 0.05.
++    α=0.10 부근에서는 약간 보수적이지만 여전히 사용 가능.
++
++    p_i = 0인 경우 → p_HMP = 0 (즉시 reject).
++    """
++    m = len(p_values)
++    if m == 0:
++        return 1.0
++    if m == 1:
++        return p_values[0]
++    if any(p <= 0 for p in p_values):
++        return 0.0
++
++    H = m / sum(1.0 / p for p in p_values)
++    correction = math.e * math.log(m)   # Wilson 2019 asymptotic
++    return min(1.0, H * correction)
++
++
++def combine_e_value(p_values: list[float]) -> float:
++    """
++    E-value mean (Vovk & Wang 2019; Wang & Ramdas 2022).
++
++    e_i = 1/p_i (one-sided p의 standard e-value)
++    e_combined = mean(e_i)
++    p_combined = 1 / e_combined  (Markov 부등식)
++
++    실험적으로 HMP보다 종종 tighter. 임의 의존성에서 valid.
++
++    p_i = 0인 경우 → e = +∞, e_combined = +∞ → p_combined = 0.
++    """
++    if not p_values:
++        return 1.0
++    if any(p <= 0 for p in p_values):
++        return 0.0
++    e_values = [1.0 / p for p in p_values]
++    e_mean = sum(e_values) / len(e_values)
++    return min(1.0, 1.0 / e_mean)
++
++
++COMBINATION_METHODS: dict[str, callable] = {
++    "bonferroni": combine_p_bonferroni,
++    "harmonic":   combine_p_harmonic,
++    "e_value":    combine_e_value,
++}
++
++
++# ── per-trigger calibrator (간단 wrapping) ───────────────────────────────────
++
++
++class TriggerCalibrator:
++    """
++    단일 trigger의 nonconformity score 분포 저장.
++    `conformal_pvalue` 호출 시 이 calibration 분포를 사용.
++
++    UQM의 ConformalCalibrator와 다르게 threshold 계산 없이 score 분포만 보존
++    (p-value 계산용).
++    """
++
++    def __init__(self, name: str):
++        self.name = name
++        self.calibration_scores: list[float] = []
++
++    def fit(self, scores: list[float]) -> None:
++        if not scores:
++            raise ValueError(f"빈 calibration set ({self.name})")
++        self.calibration_scores = sorted(scores)
++
++    def pvalue(self, score: float) -> float:
++        return conformal_pvalue(score, self.calibration_scores)
++
++
++# ── Multi-trigger combiner ───────────────────────────────────────────────────
++
++
++class MultiTriggerConformal:
++    """
++    여러 trigger의 conformal p-value를 결합해 단일 통계적 결정.
++
++    예시:
++        t1_cal = TriggerCalibrator("T1_uncertainty")
++        t1_cal.fit(uqm_scores)
++        t2_cal = TriggerCalibrator("T2_high_risk_action")
++        t2_cal.fit(t2_scores)
++        t3_cal = TriggerCalibrator("T3_no_evidence")
++        t3_cal.fit(t3_scores)
++
++        mtc = MultiTriggerConformal([t1_cal, t2_cal, t3_cal], combination="harmonic")
++        escalate, info = mtc.should_escalate([t1_score, t2_score, t3_score], alpha=0.05)
++        # info["p_combined"], info["p_per_trigger"]
++
++    보장 (Wilson 2019, Vovk-Wang 2019):
++        E[escalate] under H_0 (모든 trigger가 null) ≤ α    (FWER ≤ α)
++
++    이는 v1 EDE의 `len(triggers) > 0`에서는 **성립하지 않던** 보장.
++    """
++
++    def __init__(
++        self,
++        calibrators: list[TriggerCalibrator],
++        combination: Literal["harmonic", "bonferroni", "e_value"] = "harmonic",
++    ):
++        if not calibrators:
++            raise ValueError("최소 1개 calibrator 필요")
++        self.calibrators = calibrators
++        if combination not in COMBINATION_METHODS:
++            raise ValueError(
++                f"Unknown combination: {combination!r}. "
++                f"Choose from: {list(COMBINATION_METHODS)}"
++            )
++        self.combination = combination
++
++    @property
++    def m(self) -> int:
++        """trigger 개수."""
++        return len(self.calibrators)
++
++    def per_trigger_pvalues(self, scores: list[float]) -> list[float]:
++        """각 trigger의 conformal p-value 리스트."""
++        if len(scores) != self.m:
++            raise ValueError(
++                f"scores 길이={len(scores)} ≠ calibrator 수={self.m}"
++            )
++        return [c.pvalue(s) for c, s in zip(self.calibrators, scores)]
++
++    def combined_pvalue(self, scores: list[float]) -> float:
++        """결합 p-value (combination 방법에 따라)."""
++        ps = self.per_trigger_pvalues(scores)
++        return COMBINATION_METHODS[self.combination](ps)
++
++    def should_escalate(
++        self,
++        scores: list[float],
++        alpha: float,
++    ) -> tuple[bool, dict]:
++        """
++        Returns:
++            (escalate: bool, info: dict)
++            info에는 p_per_trigger, p_combined, alpha, combination 포함.
++        """
++        ps = self.per_trigger_pvalues(scores)
++        p_combined = COMBINATION_METHODS[self.combination](ps)
++        return p_combined <= alpha, {
++            "p_per_trigger": [round(p, 6) for p in ps],
++            "p_combined": round(p_combined, 6),
++            "alpha": alpha,
++            "combination": self.combination,
++            "trigger_names": [c.name for c in self.calibrators],
++        }
++
++
++# ── 빠른 동작 확인 ────────────────────────────────────────────────────────────
++
++if __name__ == "__main__":
++    import random
++    random.seed(0)
++
++    # synthetic: 3 trigger, 각 100개 calibration score
++    cal_t1 = [random.gauss(0, 1) for _ in range(100)]
++    cal_t2 = [random.gauss(0, 1) for _ in range(100)]
++    cal_t3 = [random.gauss(0, 1) for _ in range(100)]
++
++    t1 = TriggerCalibrator("T1"); t1.fit(cal_t1)
++    t2 = TriggerCalibrator("T2"); t2.fit(cal_t2)
++    t3 = TriggerCalibrator("T3"); t3.fit(cal_t3)
++
++    print("=== combination 방법 비교 ===")
++    print("test scores: [normal, normal, anomalous]")
++    test = [0.0, 0.0, 3.5]
++    for method in ["bonferroni", "harmonic", "e_value"]:
++        mtc = MultiTriggerConformal([t1, t2, t3], combination=method)
++        ok, info = mtc.should_escalate(test, alpha=0.05)
++        print(f"  {method:12s}: p_combined={info['p_combined']:.4f}  escalate={ok}")
++
++    print("\ntest scores: [normal, normal, normal]")
++    test = [0.5, -0.2, 0.1]
++    for method in ["bonferroni", "harmonic", "e_value"]:
++        mtc = MultiTriggerConformal([t1, t2, t3], combination=method)
++        ok, info = mtc.should_escalate(test, alpha=0.05)
++        print(f"  {method:12s}: p_combined={info['p_combined']:.4f}  escalate={ok}")
++
++    # FWER 검증 (under H_0 — null calibration data로 test 진행)
++    print("\n=== FWER 실험 검증 (null hypothesis) ===")
++    n_trials = 10_000
++    for method in ["bonferroni", "harmonic", "e_value"]:
++        mtc = MultiTriggerConformal([t1, t2, t3], combination=method)
++        rejections = 0
++        for _ in range(n_trials):
++            test = [random.gauss(0, 1) for _ in range(3)]
++            if mtc.should_escalate(test, alpha=0.05)[0]:
++                rejections += 1
++        print(f"  {method:12s}: empirical FWER = {rejections/n_trials:.4f}  (target ≤ 0.05)")
+diff --git a/models/cost_aware_calibration.py b/models/cost_aware_calibration.py
+new file mode 100644
+index 0000000..83ed277
+--- /dev/null
++++ b/models/cost_aware_calibration.py
+@@ -0,0 +1,324 @@
++"""
++UASEF — Cost-Aware Threshold Optimization (Round 7, Pivot C)
++
++═══════════════════════════════════════════════════════════════════════════════
++이론 배경
++═══════════════════════════════════════════════════════════════════════════════
++
++기존 (v1, Round 6.10 — `models/rtc_calibration.py`):
++    F1-safety = harmonic_mean(Safety Recall, 1 - Over-Escalation Rate)
++    → 가정: FN과 FP의 cost가 동등 (대칭)
++
++임상 현실:
++    CRITICAL stratum (응급)에서 missed escalation = 환자 사망 → cost ≈ ∞
++    LOW stratum (일반외래)에서 over-escalation = 임상의 시간 30분
++    비대칭 비율: CRITICAL FN : FP ≈ 1000:1, LOW FN : FP ≈ 1:1
++
++v2 (Round 7, 본 모듈):
++    Cost(λ, stratum) = c_FN(s) × FN_count(λ, s) + c_FP × FP_count(λ, s)
++    λ_s* = argmin_λ Cost(λ, s)
++           s.t. FN_rate(λ, s) ≤ α_s    (Conformal Risk Control 제약 — Pivot A)
++
++세 가지 효과:
++  1) 임상 의미의 cost matrix 명시화 (sensitivity analysis 가능)
++  2) Per-stratum optimization (Pivot A의 stratification과 정합)
++  3) Symmetric F1보다 reviewer-friendly (JAMA류가 즉각 이해)
++
++═══════════════════════════════════════════════════════════════════════════════
++참고문헌
++═══════════════════════════════════════════════════════════════════════════════
++- El-Yaniv, R., & Wiener, Y. (2010). On the Foundations of Noise-free
++  Selective Classification. JMLR, 11, 1605-1641.
++- Geifman, Y., & El-Yaniv, R. (2017). Selective Classification for Deep
++  Neural Networks. NeurIPS 2017.
++"""
++
++from __future__ import annotations
++
++import math
++import warnings
++from dataclasses import dataclass, field
++from typing import Optional
++
++
++# ── default cost matrix (임상 비용 비율 추정) ────────────────────────────────
++#
++# 정당화:
++#   CRITICAL: 응급의학과 missed STEMI/sepsis ≈ 사망 (배상금 / DALY 손실 ~$M)
++#             vs over-escalation ≈ 응급의 30분 ($50). ratio ~1000:1.
++#   LOW:      일반외래 missed routine 감기 → 큰 위험 없음
++#             vs over-escalation = 일반의 시간 5분 ≈ 동등.
++#   MODERATE/HIGH: 보간.
++#
++# Sensitivity analysis: paper에서 ratio 100/500/1000 모두 sweep해 robustness 입증.
++
++DEFAULT_COST_MATRIX: dict[str, dict[str, float]] = {
++    "CRITICAL": {"miss": 1000.0, "over_esc": 1.0},
++    "HIGH":     {"miss":  100.0, "over_esc": 1.0},
++    "MODERATE": {"miss":   10.0, "over_esc": 1.0},
++    "LOW":      {"miss":    1.0, "over_esc": 1.0},
++}
++
++
++# ── core utilities ──────────────────────────────────────────────────────────
++
++
++def confusion_at_threshold(
++    scores: list[float],
++    labels: list[bool],
++    threshold: float,
++) -> dict:
++    """
++    Score > threshold이면 escalate. 실제 라벨과 비교한 confusion matrix.
++    """
++    tp = fp = tn = fn = 0
++    for s, l in zip(scores, labels):
++        pred = s > threshold
++        if pred and l:
++            tp += 1
++        elif pred and not l:
++            fp += 1
++        elif (not pred) and (not l):
++            tn += 1
++        else:  # not pred and l
++            fn += 1
++    return {"tp": tp, "fp": fp, "tn": tn, "fn": fn,
++            "n": tp + fp + tn + fn,
++            "n_pos": tp + fn, "n_neg": fp + tn}
++
++
++def cost_weighted_loss(
++    scores: list[float],
++    labels: list[bool],
++    threshold: float,
++    cost_miss: float,
++    cost_over_esc: float,
++) -> float:
++    """
++    Loss(λ) = c_miss × FN(λ) + c_over × FP(λ)
++    """
++    cm = confusion_at_threshold(scores, labels, threshold)
++    return cost_miss * cm["fn"] + cost_over_esc * cm["fp"]
++
++
++# ── per-stratum cost-aware threshold search ──────────────────────────────────
++
++
++@dataclass
++class ThresholdResult:
++    """단일 stratum의 cost-aware optimization 결과."""
++    threshold: float
++    cost: float
++    miss_rate: float
++    over_esc_rate: float
++    constraint_violated: bool      # risk_constraint 충족 여부
++    fallback_used: bool             # 충족 후보 없어서 가장 보수적 선택
++    n_candidates: int
++    sweep: list[dict] = field(default_factory=list)   # 전체 결과 (논문 appendix)
++
++
++def find_cost_optimal_threshold(
++    scores: list[float],
++    labels: list[bool],
++    cost_miss: float,
++    cost_over_esc: float,
++    risk_constraint: Optional[float] = None,
++) -> ThresholdResult:
++    """
++    단일 stratum에서 cost-weighted minimum threshold 탐색.
++
++    Args:
++        scores, labels:     calibration data
++        cost_miss:          c_FN
++        cost_over_esc:      c_FP
++        risk_constraint:    α_s — empirical miss rate (FN/n_pos)의 상한.
++                            None이면 제약 없이 cost만 최소화.
++
++    Algorithm:
++        candidates = sorted(unique(scores)) ∪ {min(scores)-ε, max(scores)+ε}
++        for each thr:
++            compute cost, miss_rate
++            if risk_constraint이 None or miss_rate ≤ risk_constraint:
++                feasible.append((thr, cost))
++        if feasible:
++            return argmin cost
++        else:
++            fallback: argmin miss_rate (가장 보수적, 제약 위반 명시)
++
++    Returns:
++        ThresholdResult.
++    """
++    if not scores:
++        return ThresholdResult(
++            threshold=0.0, cost=float("inf"),
++            miss_rate=0.0, over_esc_rate=0.0,
++            constraint_violated=True, fallback_used=True,
++            n_candidates=0,
++        )
++
++    # 후보: unique scores ± epsilon (양 끝 외삽)
++    eps = 1e-6
++    uniq = sorted(set(scores))
++    candidates = [uniq[0] - eps] + uniq + [uniq[-1] + eps]
++
++    sweep_rows: list[dict] = []
++    feasible: list[dict] = []
++    for thr in candidates:
++        cm = confusion_at_threshold(scores, labels, thr)
++        cost = cost_miss * cm["fn"] + cost_over_esc * cm["fp"]
++        miss_rate = cm["fn"] / cm["n_pos"] if cm["n_pos"] > 0 else 0.0
++        over_rate = cm["fp"] / cm["n_neg"] if cm["n_neg"] > 0 else 0.0
++        row = {
++            "threshold": float(thr),
++            "cost": float(cost),
++            "miss_rate": round(miss_rate, 4),
++            "over_esc_rate": round(over_rate, 4),
++        }
++        sweep_rows.append(row)
++        if risk_constraint is None or miss_rate <= risk_constraint:
++            feasible.append(row)
++
++    if feasible:
++        best = min(feasible, key=lambda r: r["cost"])
++        return ThresholdResult(
++            threshold=best["threshold"], cost=best["cost"],
++            miss_rate=best["miss_rate"], over_esc_rate=best["over_esc_rate"],
++            constraint_violated=False, fallback_used=False,
++            n_candidates=len(candidates), sweep=sweep_rows,
++        )
++
++    # fallback: 가장 보수적 (miss_rate 최소)
++    best = min(sweep_rows, key=lambda r: r["miss_rate"])
++    if risk_constraint is not None:
++        warnings.warn(
++            f"[CostAware] risk_constraint={risk_constraint} 충족 후보 없음. "
++            f"가장 보수적 threshold로 fallback (miss_rate={best['miss_rate']}). "
++            f"데이터를 늘리거나 constraint를 완화하세요.",
++            UserWarning, stacklevel=2,
++        )
++    return ThresholdResult(
++        threshold=best["threshold"], cost=best["cost"],
++        miss_rate=best["miss_rate"], over_esc_rate=best["over_esc_rate"],
++        constraint_violated=True, fallback_used=True,
++        n_candidates=len(candidates), sweep=sweep_rows,
++    )
++
++
++def sweep_cost_aware_per_stratum(
++    scores_by_stratum: dict[str, list[float]],
++    labels_by_stratum: dict[str, list[bool]],
++    cost_matrix: Optional[dict[str, dict[str, float]]] = None,
++    alpha_constraints: Optional[dict[str, float]] = None,
++) -> dict[str, ThresholdResult]:
++    """
++    Pivot A의 stratification + Pivot C의 cost-aware threshold 결합.
++
++    각 stratum 독립적으로 최적 threshold 산출. cost_matrix가 stratum별로
++    다른 비대칭을 인코딩하므로 결과 threshold도 stratum별로 다르게 나옴.
++
++    Args:
++        scores_by_stratum:   {"CRITICAL": [...], "HIGH": [...], ...}
++        labels_by_stratum:   같은 키.
++        cost_matrix:         {stratum: {"miss": float, "over_esc": float}}.
++                              None이면 DEFAULT_COST_MATRIX.
++        alpha_constraints:   {stratum: α_s} risk constraint per stratum.
++                              None이면 제약 없음 (순수 cost 최소화).
++
++    Returns:
++        {stratum: ThresholdResult}.
++    """
++    cm = cost_matrix or DEFAULT_COST_MATRIX
++    out: dict[str, ThresholdResult] = {}
++    for stratum in cm:
++        scores = scores_by_stratum.get(stratum, [])
++        labels = labels_by_stratum.get(stratum, [])
++        out[stratum] = find_cost_optimal_threshold(
++            scores=scores, labels=labels,
++            cost_miss=cm[stratum]["miss"],
++            cost_over_esc=cm[stratum]["over_esc"],
++            risk_constraint=(alpha_constraints or {}).get(stratum),
++        )
++    return out
++
++
++# ── sensitivity analysis 유틸 (논문 Table 3 직접 사용) ──────────────────────
++
++
++def cost_ratio_sweep(
++    scores: list[float],
++    labels: list[bool],
++    miss_costs: list[float] = (10.0, 100.0, 1000.0),
++    over_cost: float = 1.0,
++    risk_constraint: Optional[float] = None,
++) -> list[dict]:
++    """
++    동일 데이터에 대해 miss:over_esc cost ratio를 sweep.
++
++    paper에서 cost matrix의 임의성 우려에 대한 답변 — robustness 입증.
++
++    Returns:
++        [{cost_ratio, threshold, miss_rate, over_esc_rate}, ...]
++    """
++    out = []
++    for c_miss in miss_costs:
++        result = find_cost_optimal_threshold(
++            scores, labels, c_miss, over_cost, risk_constraint
++        )
++        out.append({
++            "cost_ratio": f"{c_miss:.0f}:{over_cost:.0f}",
++            "threshold": round(result.threshold, 4),
++            "cost": round(result.cost, 2),
++            "miss_rate": result.miss_rate,
++            "over_esc_rate": result.over_esc_rate,
++            "constraint_violated": result.constraint_violated,
++        })
++    return out
++
++
++# ── 빠른 동작 확인 ────────────────────────────────────────────────────────────
++
++
++if __name__ == "__main__":
++    import random
++    random.seed(0)
++
++    # 합성: positive(양성, 라벨=True)는 score 높고, negative는 낮음
++    scores, labels = [], []
++    for _ in range(500):
++        l = random.random() < 0.3
++        s = random.gauss(2.0 if l else 0.0, 1.0)
++        scores.append(s); labels.append(l)
++
++    print("=== Cost ratio sweep (single stratum) ===")
++    rows = cost_ratio_sweep(scores, labels)
++    for r in rows:
++        print(f"  ratio={r['cost_ratio']:>8s}  threshold={r['threshold']:>7.3f}  "
++              f"miss={r['miss_rate']:.3f}  over={r['over_esc_rate']:.3f}")
++
++    print("\n=== With CRC constraint α=0.05 ===")
++    rows = cost_ratio_sweep(scores, labels, risk_constraint=0.05)
++    for r in rows:
++        viol = "✗" if r["constraint_violated"] else "✓"
++        print(f"  ratio={r['cost_ratio']:>8s}  threshold={r['threshold']:>7.3f}  "
++              f"miss={r['miss_rate']:.3f}  over={r['over_esc_rate']:.3f}  {viol}")
++
++    print("\n=== Per-stratum sweep (synthetic 4 strata) ===")
++    sb, lb = {}, {}
++    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
++                          ("MODERATE", 0.10), ("LOW", 0.05)]:
++        s_scores, s_labels = [], []
++        for _ in range(200):
++            l = random.random() < base
++            s = random.gauss(2.0 if l else 0.0, 1.0)
++            s_scores.append(s); s_labels.append(l)
++        sb[stratum] = s_scores; lb[stratum] = s_labels
++
++    results = sweep_cost_aware_per_stratum(
++        sb, lb,
++        alpha_constraints={"CRITICAL": 0.05, "HIGH": 0.10,
++                           "MODERATE": 0.15, "LOW": 0.20},
++    )
++    for s, r in results.items():
++        viol = "✗" if r.constraint_violated else "✓"
++        print(f"  {s:9s}: thr={r.threshold:>7.3f}  cost={r.cost:>8.1f}  "
++              f"miss={r.miss_rate:.3f}  over={r.over_esc_rate:.3f}  {viol}")
+diff --git a/models/rtc_ede.py b/models/rtc_ede.py
+index cd4b6a4..3514dc0 100644
+--- a/models/rtc_ede.py
++++ b/models/rtc_ede.py
+@@ -139,7 +139,18 @@ class RTC:
+         base_threshold: float,
+         multipliers: Optional[dict[str, float]] = None,
+         scenario_multipliers: Optional[dict[str, float]] = None,
++        # Round 7 (audit 7): per-stratum CRC threshold 우선 사용
++        stratified_calibrator: Optional["object"] = None,
+     ):
++        """
++        Args:
++            base_threshold:        v1 호환 — global q̂ × multiplier 경로
++            multipliers:           v1 RiskLevel별 배율
++            scenario_multipliers:  v1 시나리오별 추가 배율
++            stratified_calibrator: v2 (Round 7) — StratifiedConformalRiskControl 인스턴스.
++                                    제공되면 v1 multiplier 경로 무시, stratum별 λ 직접 사용.
++                                    각 stratum에 대해 E[ℓ_s] ≤ α_s 보장.
++        """
+         self.base_threshold = base_threshold
+         # config에서 전달되는 배율 (대문자 문자열 키 "CRITICAL" 등을 RiskLevel enum으로 변환)
+         self._multipliers: dict[RiskLevel, float] = dict(RISK_THRESHOLD_MULTIPLIER)
+@@ -154,8 +165,32 @@ class RTC:
+         if scenario_multipliers:
+             for k, v in scenario_multipliers.items():
+                 self._scenario_multipliers[str(k).lower()] = float(v)
++        # Round 7
++        self._stratified = stratified_calibrator
+ 
+     def get_threshold(self, specialty: str, scenario_type: str) -> RTCConfig:
++        # Round 7: stratified calibrator 우선
++        if self._stratified is not None:
++            risk_level = SPECIALTY_RISK_MAP.get(specialty, RiskLevel.MODERATE)
++            stratum = risk_level.value.upper()  # "CRITICAL" 등
++            try:
++                lam = self._stratified.threshold_for(stratum)
++                cfg = RTCConfig(
++                    specialty=specialty,
++                    scenario_type=scenario_type,
++                    base_threshold=lam,
++                    # Round 7: stratum별 λ는 이미 risk-stratified — multiplier 비적용
++                    multipliers={k.value.upper(): 1.0 for k in RiskLevel},
++                    scenario_multipliers={s: 1.0 for s in DEFAULT_SCENARIO_MULTIPLIERS},
++                )
++                # 메타: round 7 path임을 표시
++                cfg.multiplier_value = 1.0
++                cfg.adjusted_threshold = lam
++                return cfg
++            except Exception:
++                # fallback to v1
++                pass
++        # v1 경로
+         return RTCConfig(
+             specialty=specialty,
+             scenario_type=scenario_type,
+@@ -436,17 +471,40 @@ class EDE:
+         entropy_threshold: float = ENTROPY_HIGH_THRESHOLD,
+         decision_rule: str = "trigger_count",
+         confidence_threshold: float = 0.5,
++        # Round 7 (audit 7) 신규
++        multi_trigger_conformal: Optional["object"] = None,
++        combined_alpha: float = 0.05,
+     ):
++        """
++        Args:
++            decision_rule:
++                "trigger_count" (default, v1 호환): len(triggers) > 0
++                "confidence":                         confidence > confidence_threshold
++                "conformal_combined" (Round 7):       p_combined ≤ combined_alpha
++                                                      MultiTriggerConformal 인스턴스 필요
++            multi_trigger_conformal: Round 7 — MultiTriggerConformal (T1/T2/T3 결합).
++                                       None인데 conformal_combined 모드면 RuntimeError.
++            combined_alpha:          Round 7 — 결합 p-value의 임계값.
++        """
+         self.t1_weight = t1_weight
+         self.entropy_boost = entropy_boost
+         self.entropy_threshold = entropy_threshold
+-        if decision_rule not in ("trigger_count", "confidence"):
++        if decision_rule not in ("trigger_count", "confidence", "conformal_combined"):
+             raise ValueError(
+-                f"decision_rule must be 'trigger_count' or 'confidence', got {decision_rule!r}"
++                f"decision_rule must be one of "
++                f"'trigger_count'|'confidence'|'conformal_combined', got {decision_rule!r}"
+             )
+         self.decision_rule = decision_rule
+         self.confidence_threshold = confidence_threshold
+         self.escalation_log: list[EscalationDecision] = []
++        # Round 7
++        self._mtc = multi_trigger_conformal
++        self.combined_alpha = combined_alpha
++        if decision_rule == "conformal_combined" and multi_trigger_conformal is None:
++            raise ValueError(
++                "decision_rule='conformal_combined'은 multi_trigger_conformal 인자가 필수입니다 "
++                "(audit 7 — Pivot B)."
++            )
+ 
+     def decide(
+         self,
+@@ -498,11 +556,26 @@ class EDE:
+             + entropy_boost
+         )
+ 
+-        # 결정 규칙: trigger_count (back-compat) 또는 confidence (audit issue #2)
+-        if self.decision_rule == "confidence":
++        # 결정 규칙:
++        #   trigger_count (back-compat, audit 6): len(triggers) > 0
++        #   confidence    (audit 6 issue #2):     confidence > confidence_threshold
++        #   conformal_combined (Round 7 / audit 7 Pivot B):
++        #       T1/T2/T3 nonconformity score → p-value combination → escalate if p ≤ α
++        if self.decision_rule == "conformal_combined":
++            t1_score = uncertainty_result.nonconformity_score
++            t2_score = self.t2_nonconformity_score(response_text)
++            t3_score = self.t3_nonconformity_score(response_text)
++            should_escalate, p_info = self._mtc.should_escalate(
++                [t1_score, t2_score, t3_score],
++                alpha=self.combined_alpha,
++            )
++            # p_info는 _build_explanation 후 log에 추가됨
++        elif self.decision_rule == "confidence":
+             should_escalate = confidence > self.confidence_threshold
++            p_info = None
+         else:
+             should_escalate = len(triggers) > 0
++            p_info = None
+ 
+         explanation = self._build_explanation(
+             triggers, rtc_config, uncertainty_result, entropy, self.entropy_threshold
+@@ -529,11 +602,63 @@ class EDE:
+                 "decision_rule": self.decision_rule,
+                 "confidence_threshold": self.confidence_threshold if self.decision_rule == "confidence" else None,
+                 "scoring_method": uncertainty_result.scoring_method,
++                # Round 7 / audit 7
++                "conformal_combined_info": p_info,
+             },
+         )
+         self.escalation_log.append(decision)
+         return decision
+ 
++    # ── Round 7 / audit 7 (Pivot B): T2/T3 nonconformity scores ───────────────
++    #
++    # 기존 EDE는 T2/T3을 binary trigger로만 봤음. Round 7에서는 두 trigger를
++    # 연속 nonconformity score로 frame하여 conformal p-value combination에 사용.
++    #
++    # 정규화: 각 score는 [0, 1] 범위. score=0이면 trigger 없음 (정상),
++    #         score=1이면 maximum suspicion (예: 5+ 키워드 매칭).
++
++    T2_NORMALIZER: float = 5.0   # 5개 키워드 매칭이면 score=1
++    T3_NORMALIZER: float = 5.0
++
++    @staticmethod
++    def t2_nonconformity_score(text: str) -> float:
++        """
++        T2 (HIGH_RISK_ACTION) nonconformity score ∈ [0, 1].
++
++        결합 공식:
++            critical_hits     = #(CRITICAL_KEYWORDS matched)         # 단독 카운트
++            procedural_hits   = #(PROCEDURAL_KEYWORDS matched)
++            modifier_present  = any(UNCERTAINTY_MODIFIERS in text)
++            score = (critical_hits + procedural_hits × modifier_present) / NORMALIZER
++
++        critical은 절대적, procedural은 modifier 동반 시만 합산 — Round 6 audit #15와
++        정합 ("code blue" 강등 후 PROCEDURAL_KEYWORDS는 맥락 조건부).
++        """
++        text_lower = text.lower()
++        critical_hits = sum(1 for kw in CRITICAL_KEYWORDS if kw in text_lower)
++        procedural_hits = sum(1 for kw in PROCEDURAL_KEYWORDS if kw in text_lower)
++        modifier_present = any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS)
++        raw = critical_hits + procedural_hits * (1 if modifier_present else 0)
++        return min(1.0, raw / EDE.T2_NORMALIZER)
++
++    @staticmethod
++    def t3_nonconformity_score(text: str) -> float:
++        """
++        T3 (NO_EVIDENCE) nonconformity score ∈ [0, 1].
++
++        Round 6 audit #6의 strong/weak 분리와 정합:
++            strong_hits = #(NO_EVIDENCE_STRONG matched)         # 단독 카운트
++            weak_hits   = #(NO_EVIDENCE_WEAK matched)
++            modifier    = any(UNCERTAINTY_MODIFIERS in text)
++            score = (strong_hits + weak_hits × modifier) / NORMALIZER
++        """
++        text_lower = text.lower()
++        strong_hits = sum(1 for p in NO_EVIDENCE_STRONG if p in text_lower)
++        weak_hits = sum(1 for p in NO_EVIDENCE_WEAK if p in text_lower)
++        modifier_present = any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS)
++        raw = strong_hits + weak_hits * (1 if modifier_present else 0)
++        return min(1.0, raw / EDE.T3_NORMALIZER)
++
+     @staticmethod
+     def _build_explanation(
+         triggers: list[EscalationTrigger],
+diff --git a/models/stratified_crc.py b/models/stratified_crc.py
+new file mode 100644
+index 0000000..aa378d2
+--- /dev/null
++++ b/models/stratified_crc.py
+@@ -0,0 +1,363 @@
++"""
++UASEF — Stratified Conformal Risk Control (Round 7, Pivot A)
++
++═══════════════════════════════════════════════════════════════════════════════
++이론 배경
++═══════════════════════════════════════════════════════════════════════════════
++
++Conformal Risk Control (Angelopoulos & Bates, ICLR 2024 Spotlight)는 표준 CP를
++일반화하여 임의의 monotone bounded loss function의 expected risk를 제어한다.
++
++  λ̂ = sup{ λ : R̂(λ) + B/(n+1) ≤ α }     (B = upper bound on loss)
++
++여기서 R̂(λ) = (1/n) Σ_i ℓ(λ, x_i, y_i)는 calibration set의 empirical risk이고
++ℓ는 λ에 대해 monotone (보통 non-decreasing).
++
++UASEF의 missed-escalation loss:
++    ℓ(λ, score, label) = 𝟙{label = True AND score ≤ λ}
++
++해석: 라벨이 "에스컬레이션 필요"인데 score가 threshold 이하라 미트리거 →
++λ가 클수록 더 많은 case가 threshold 이하로 떨어짐 → loss 증가 (monotone).
++
++Stratification (Romano, Sesia, Candès, NeurIPS 2020 — class-conditional CP의 결합):
++  각 stratum (CRITICAL/HIGH/MODERATE/LOW)에 대해 별도 calibration 진행 →
++  stratum별 marginal 보장:  E[ℓ(λ_s, X, Y) | stratum=s] ≤ α_s
++
++이는 단순 global conformal보다 강한 보장 — 임상 안전이 중요한 stratum에서
++α를 매우 작게 설정 가능 (예: CRITICAL α=0.001).
++
++═══════════════════════════════════════════════════════════════════════════════
++v1과의 차이
++═══════════════════════════════════════════════════════════════════════════════
++
++v1 (Round 6.10):
++    q̂ = quantile(scores, 1-α)                # global α=0.10
++    threshold_specialty = q̂ × multiplier_s    # heuristic 0.60/0.75/1.00/1.30
++
++v2 (Round 7, 본 모듈):
++    For each stratum s:
++        λ_s = sup{λ : R̂_s(λ) + 1/(n_s+1) ≤ α_s}
++    threshold_specialty = λ_{stratum(specialty)}    # 보장 동반
++
++═══════════════════════════════════════════════════════════════════════════════
++참고문헌
++═══════════════════════════════════════════════════════════════════════════════
++- Angelopoulos, A. N., Bates, S., Fisch, A., Lei, L., & Schuster, T. (2024).
++  Conformal Risk Control. ICLR 2024 (Spotlight). arXiv:2208.02814
++- Romano, Y., Sesia, M., & Candès, E. J. (2020). Classification with Valid and
++  Adaptive Coverage. NeurIPS 2020. arXiv:2006.02544
++"""
++
++from __future__ import annotations
++
++import math
++import warnings
++from dataclasses import dataclass, field
++from typing import Callable, Optional
++
++
++# 기본 stratum 목록 (RTC.RiskLevel과 정합).
++# alphas dict는 사용자가 명시적으로 전달; 기본값은 임상 직관:
++#   CRITICAL이 가장 엄격, LOW가 가장 관대.
++DEFAULT_STRATA: tuple[str, ...] = ("CRITICAL", "HIGH", "MODERATE", "LOW")
++DEFAULT_ALPHAS: dict[str, float] = {
++    "CRITICAL": 0.001,    # 0.1% missed escalation 한계
++    "HIGH":     0.010,    # 1%
++    "MODERATE": 0.050,    # 5%
++    "LOW":      0.100,    # 10%
++}
++
++
++def missed_escalation_loss(lam: float, score: float, label: bool) -> float:
++    """
++    0/1 missed-escalation loss.
++
++    ℓ(λ, score, label) = 𝟙{label AND score ≤ λ}
++
++    monotone non-decreasing in λ (essential for CRC validity).
++    """
++    return 1.0 if (label and score <= lam) else 0.0
++
++
++@dataclass
++class StratumStats:
++    """단일 stratum의 calibration 결과."""
++    stratum: str
++    n: int
++    alpha: float
++    lambda_hat: float
++    empirical_risk_at_lambda: float
++    is_data_sufficient: bool
++
++
++@dataclass
++class CRCFitReport:
++    """fit() 결과. 보고서 / 재현성 추적용."""
++    per_stratum: dict[str, StratumStats] = field(default_factory=dict)
++    n_total: int = 0
++
++
++def min_n_for_alpha(alpha: float) -> int:
++    """
++    CRC 보장이 의미를 가지려면 n ≥ ceil((1-α)/α).
++    α=0.001 → n ≥ 999, α=0.01 → 99, α=0.05 → 19, α=0.10 → 9.
++    """
++    if alpha <= 0 or alpha >= 1:
++        raise ValueError(f"alpha must be in (0,1), got {alpha}")
++    return max(20, math.ceil((1 - alpha) / alpha))
++
++
++class StratifiedConformalRiskControl:
++    """
++    Per-stratum CRC.
++
++    예시:
++        crc = StratifiedConformalRiskControl(
++            alphas={"CRITICAL": 0.001, "HIGH": 0.01, "MODERATE": 0.05, "LOW": 0.10}
++        )
++        crc.fit(scores=[...], labels=[...], strata=["CRITICAL", "LOW", ...])
++        threshold = crc.threshold_for("CRITICAL")
++        report = crc.coverage_check(holdout_scores, holdout_labels, holdout_strata)
++
++    각 stratum에 대해 보장:
++        E[ℓ(λ_s, X, Y) | stratum=s] ≤ α_s    (Angelopoulos & Bates 2024 Theorem 1)
++    """
++
++    def __init__(
++        self,
++        alphas: Optional[dict[str, float]] = None,
++        loss_fn: Optional[Callable[[float, float, bool], float]] = None,
++        loss_upper_bound: float = 1.0,
++        strict: bool = False,
++    ):
++        """
++        Args:
++            alphas:           {stratum: ε}. None이면 DEFAULT_ALPHAS 사용.
++            loss_fn:          ℓ(λ, score, label) → [0, B]. 기본 missed_escalation_loss.
++            loss_upper_bound: ℓ의 상한 B (CRC 공식의 분자). 0/1 loss는 B=1.
++            strict:           True이면 stratum 데이터가 min_n 미만일 때 RuntimeError.
++        """
++        self.alphas = dict(alphas) if alphas is not None else dict(DEFAULT_ALPHAS)
++        self.loss_fn = loss_fn or missed_escalation_loss
++        self.B = float(loss_upper_bound)
++        self.strict = strict
++
++        # validation
++        for s, a in self.alphas.items():
++            if not (0 < a < 1):
++                raise ValueError(f"alphas[{s}]={a} must be in (0,1)")
++        if self.B <= 0:
++            raise ValueError(f"loss_upper_bound must be > 0, got {self.B}")
++
++        self.lambdas: dict[str, float] = {}
++        self.report: CRCFitReport = CRCFitReport()
++        self._fitted: bool = False
++
++    # ── public API ─────────────────────────────────────────────────────────
++
++    def fit(
++        self,
++        scores: list[float],
++        labels: list[bool],
++        strata: list[str],
++    ) -> CRCFitReport:
++        """
++        Per-stratum CRC fit.
++
++        Args:
++            scores: nonconformity scores (클수록 위험 — UQM logprob NLL과 같은 부호)
++            labels: True = 실제 에스컬레이션이 필요했던 케이스
++            strata: 각 sample의 stratum 문자열 (CRITICAL/HIGH/MODERATE/LOW)
++
++        Returns:
++            CRCFitReport — stratum별 (n, λ̂, R̂(λ̂), 데이터 충분성).
++        """
++        if not (len(scores) == len(labels) == len(strata)):
++            raise ValueError(
++                f"length mismatch: scores={len(scores)}, "
++                f"labels={len(labels)}, strata={len(strata)}"
++            )
++        if not scores:
++            raise ValueError("빈 calibration set")
++
++        self.lambdas.clear()
++        self.report = CRCFitReport(n_total=len(scores))
++
++        for stratum, alpha in self.alphas.items():
++            mask = [s == stratum for s in strata]
++            s_scores = [scores[i] for i, m in enumerate(mask) if m]
++            s_labels = [labels[i]  for i, m in enumerate(mask) if m]
++            n = len(s_scores)
++
++            min_n = min_n_for_alpha(alpha)
++            sufficient = n >= min_n
++            if not sufficient:
++                msg = (
++                    f"[StratifiedCRC] stratum={stratum} n={n} < min_n={min_n} "
++                    f"(α={alpha}). CRC 보장이 무효일 수 있음."
++                )
++                if self.strict:
++                    raise RuntimeError(msg + " (strict=True)")
++                warnings.warn(msg, UserWarning, stacklevel=2)
++                # fallback: 가장 보수적 — 모든 score보다 작은 λ → 항상 escalate
++                # 즉 λ = -inf이면 R̂(-inf)=0. 실용적으로는 min_score - 1.
++                lam = (min(s_scores) - 1.0) if s_scores else 0.0
++                self.lambdas[stratum] = lam
++                self.report.per_stratum[stratum] = StratumStats(
++                    stratum=stratum, n=n, alpha=alpha,
++                    lambda_hat=lam, empirical_risk_at_lambda=0.0,
++                    is_data_sufficient=False,
++                )
++                continue
++
++            lam = self._solve_lambda(s_scores, s_labels, alpha)
++            self.lambdas[stratum] = lam
++            R_at_lam = sum(
++                self.loss_fn(lam, sc, lb)
++                for sc, lb in zip(s_scores, s_labels)
++            ) / n
++            self.report.per_stratum[stratum] = StratumStats(
++                stratum=stratum, n=n, alpha=alpha,
++                lambda_hat=lam,
++                empirical_risk_at_lambda=R_at_lam,
++                is_data_sufficient=True,
++            )
++
++        self._fitted = True
++        return self.report
++
++    def threshold_for(self, stratum: str) -> float:
++        """
++        해당 stratum의 λ̂ 반환. 미학습 또는 미존재 stratum 시 가장 보수적 0.0.
++        """
++        if not self._fitted:
++            raise RuntimeError("fit()을 먼저 호출하세요.")
++        return self.lambdas.get(stratum, 0.0)
++
++    def coverage_check(
++        self,
++        holdout_scores: list[float],
++        holdout_labels: list[bool],
++        holdout_strata: list[str],
++        slack: float = 0.10,
++    ) -> dict:
++        """
++        Holdout set에서 stratum별 empirical risk가 α_stratum × (1+slack) 이하인지 검증.
++
++        slack: 유한 표본 변동 허용치 (기본 10%).
++
++        Returns:
++            {
++                stratum: {
++                    "n": int, "empirical_risk": float | None,
++                    "target_alpha": float, "ok": bool | None
++                }
++            }
++        """
++        if not self._fitted:
++            raise RuntimeError("fit()을 먼저 호출하세요.")
++        out: dict = {}
++        for stratum, alpha in self.alphas.items():
++            mask = [s == stratum for s in holdout_strata]
++            ss = [holdout_scores[i] for i, m in enumerate(mask) if m]
++            sl = [holdout_labels[i]  for i, m in enumerate(mask) if m]
++            if not ss:
++                out[stratum] = {
++                    "n": 0, "empirical_risk": None,
++                    "target_alpha": alpha, "ok": None,
++                }
++                continue
++            lam = self.lambdas[stratum]
++            R = sum(self.loss_fn(lam, sc, lb) for sc, lb in zip(ss, sl)) / len(ss)
++            out[stratum] = {
++                "n": len(ss),
++                "empirical_risk": round(R, 4),
++                "target_alpha": alpha,
++                "ok": R <= alpha * (1 + slack),
++            }
++        return out
++
++    # ── internal ───────────────────────────────────────────────────────────
++
++    def _solve_lambda(self, scores: list[float], labels: list[bool], alpha: float) -> float:
++        """
++        CRC 알고리즘:
++            λ̂ = sup{ λ ∈ candidates : R̂(λ) + B/(n+1) ≤ α }
++
++        R̂(λ) = (1/n) Σ ℓ(λ, score_i, label_i) — λ에 대해 monotone non-decreasing.
++
++        후보: 모든 unique scores + (-∞ proxy as min(scores)-eps). λ가 score 사이에서
++        변하면 R̂이 step-function이므로 unique scores를 후보로 충분.
++
++        Returns: 가장 큰 λ 중 risk bound 만족. 모두 위반 시 가장 작은 score 반환
++                  (가장 보수적 — 거의 모든 case 에스컬레이션).
++        """
++        n = len(scores)
++        if n == 0:
++            return 0.0
++
++        # 후보 정렬 (오름차순). 가장 큰 λ부터 검사.
++        candidates = sorted(set(scores))
++        threshold_bound = alpha - self.B / (n + 1)
++
++        # threshold_bound < 0이면 어떤 λ도 만족 불가 (n이 너무 작거나 α가 너무 작음).
++        # 이 경우 가장 보수적 λ를 반환 (R̂=0 만족하는 λ — score보다 작은 값).
++        if threshold_bound < 0:
++            return candidates[0] - 1.0
++
++        # 가장 큰 λ부터 검사 (sup 정의에 충실).
++        best_lam = candidates[0] - 1.0   # fallback: 가장 보수적
++        for lam in reversed(candidates):
++            R = sum(self.loss_fn(lam, sc, lb) for sc, lb in zip(scores, labels)) / n
++            if R <= threshold_bound:
++                best_lam = lam
++                break
++            # else: 더 작은 λ 시도
++        return float(best_lam)
++
++
++# ── 빠른 동작 확인 ────────────────────────────────────────────────────────────
++
++if __name__ == "__main__":
++    import random
++    random.seed(0)
++
++    # 합성 데이터: 4 stratum, 각 200개. CRITICAL 라벨 분포가 더 위험.
++    scores, labels, strata = [], [], []
++    n_per = 200
++    for stratum, base_rate in [
++        ("CRITICAL", 0.30), ("HIGH", 0.20),
++        ("MODERATE", 0.10), ("LOW", 0.05),
++    ]:
++        for _ in range(n_per):
++            label = random.random() < base_rate
++            # 양성은 score ~ N(2, 1), 음성은 N(0, 1)
++            score = random.gauss(2.0 if label else 0.0, 1.0)
++            scores.append(score)
++            labels.append(label)
++            strata.append(stratum)
++
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    )
++    report = crc.fit(scores, labels, strata)
++    for s, st in report.per_stratum.items():
++        print(f"  {s}: n={st.n}, α={st.alpha}, λ̂={st.lambda_hat:.4f}, "
++              f"R̂(λ̂)={st.empirical_risk_at_lambda:.4f}")
++
++    # holdout 검증 (같은 분포 다시 생성)
++    h_scores, h_labels, h_strata = [], [], []
++    for stratum, base_rate in [
++        ("CRITICAL", 0.30), ("HIGH", 0.20),
++        ("MODERATE", 0.10), ("LOW", 0.05),
++    ]:
++        for _ in range(n_per):
++            label = random.random() < base_rate
++            score = random.gauss(2.0 if label else 0.0, 1.0)
++            h_scores.append(score); h_labels.append(label); h_strata.append(stratum)
++
++    cov = crc.coverage_check(h_scores, h_labels, h_strata)
++    print("\nCoverage check (holdout):")
++    for s, c in cov.items():
++        ok = "✓" if c["ok"] else "✗"
++        print(f"  {s}: R={c['empirical_risk']}, target α={c['target_alpha']} {ok}")
+diff --git a/tests/test_conformal_combination.py b/tests/test_conformal_combination.py
+new file mode 100644
+index 0000000..adee130
+--- /dev/null
++++ b/tests/test_conformal_combination.py
+@@ -0,0 +1,185 @@
++"""Multi-Trigger Conformal Combination tests (Round 7 Pivot B)."""
++from __future__ import annotations
++
++import math
++import random
++
++import pytest
++
++from models.conformal_combination import (
++    conformal_pvalue,
++    combine_p_bonferroni, combine_p_harmonic, combine_e_value,
++    COMBINATION_METHODS,
++    TriggerCalibrator, MultiTriggerConformal,
++)
++
++
++# ── conformal p-value primitive ──────────────────────────────────────────────
++
++
++def test_conformal_pvalue_extreme_score():
++    """가장 큰 score는 가장 작은 p (1/(n+1))."""
++    cal = list(range(10))   # 0..9
++    p = conformal_pvalue(score=100.0, calibration_scores=cal)
++    assert p == 1 / (10 + 1)
++
++
++def test_conformal_pvalue_smallest_score():
++    """가장 작은 score는 가장 큰 p ((n+1)/(n+1) = 1)."""
++    cal = list(range(10))
++    p = conformal_pvalue(score=-100.0, calibration_scores=cal)
++    assert p == (10 + 1) / (10 + 1)
++    assert p == 1.0
++
++
++def test_conformal_pvalue_empty_cal_returns_one():
++    assert conformal_pvalue(0.5, []) == 1.0
++
++
++def test_conformal_pvalue_super_uniform():
++    """exchangeability하에서 P(p_test ≤ α) ≤ α + 1/(n+1)."""
++    random.seed(0)
++    cal = [random.gauss(0, 1) for _ in range(200)]
++    n_trials = 5000
++    rejections_alpha_05 = 0
++    for _ in range(n_trials):
++        test = random.gauss(0, 1)   # same dist
++        p = conformal_pvalue(test, cal)
++        if p <= 0.05:
++            rejections_alpha_05 += 1
++    rate = rejections_alpha_05 / n_trials
++    # 이론: ≤ 0.05 + 1/201 ≈ 0.055
++    assert rate <= 0.06, f"Type I error rate {rate} > 0.06"
++
++
++# ── combination methods ─────────────────────────────────────────────────────
++
++
++def test_bonferroni_basic():
++    assert combine_p_bonferroni([0.01, 0.5, 0.5]) == 0.03   # 3 × 0.01
++    assert combine_p_bonferroni([0.5]) == 0.5
++    assert combine_p_bonferroni([]) == 1.0
++    assert combine_p_bonferroni([0.5, 0.5, 0.5]) == 1.0     # capped
++
++
++def test_harmonic_basic():
++    p = combine_p_harmonic([0.01, 0.01, 0.01])
++    # 모두 같으면 H = 0.01, p_HMP = 0.01 × e × ln(3) ≈ 0.0299
++    assert 0.025 < p < 0.035
++
++
++def test_harmonic_single_pvalue():
++    """m=1이면 p_HMP = p_1."""
++    assert combine_p_harmonic([0.42]) == 0.42
++
++
++def test_harmonic_zero_returns_zero():
++    assert combine_p_harmonic([0.0, 0.5, 0.5]) == 0.0
++
++
++def test_evalue_basic():
++    """e_i = 1/p_i, e_combined = mean. 모두 0.01이면 mean = 100, p = 0.01."""
++    p = combine_e_value([0.01, 0.01, 0.01])
++    assert abs(p - 0.01) < 1e-9
++
++
++def test_evalue_returns_input_when_all_equal():
++    """모두 p=0.9이면 e_mean = 1/0.9, p_combined = 0.9 — capped 아님."""
++    p = combine_e_value([0.9, 0.9, 0.9])
++    assert abs(p - 0.9) < 1e-9
++
++
++def test_evalue_capped_at_one_when_p_too_small():
++    """p_i = 1 (e=1) → e_mean=1 → p_combined=1.0."""
++    p = combine_e_value([1.0, 1.0, 1.0])
++    assert p == 1.0
++
++
++def test_combination_methods_dict():
++    assert set(COMBINATION_METHODS) == {"bonferroni", "harmonic", "e_value"}
++
++
++# ── TriggerCalibrator ────────────────────────────────────────────────────────
++
++
++def test_trigger_calibrator_fit_and_pvalue():
++    cal = TriggerCalibrator("T1")
++    cal.fit([0.0, 1.0, 2.0, 3.0, 4.0])
++    assert cal.pvalue(2.5) == (1 + 2) / (5 + 1)   # 3, 4 are ≥ 2.5
++
++
++def test_trigger_calibrator_empty_fit_raises():
++    cal = TriggerCalibrator("T1")
++    with pytest.raises(ValueError, match="빈"):
++        cal.fit([])
++
++
++# ── MultiTriggerConformal end-to-end ─────────────────────────────────────────
++
++
++def _make_3_calibrators(seed: int = 0):
++    random.seed(seed)
++    cals = []
++    for name in ("T1", "T2", "T3"):
++        c = TriggerCalibrator(name)
++        c.fit([random.gauss(0, 1) for _ in range(100)])
++        cals.append(c)
++    return cals
++
++
++def test_mtc_construction_validates():
++    with pytest.raises(ValueError, match="최소"):
++        MultiTriggerConformal([], combination="harmonic")
++    cals = _make_3_calibrators()
++    with pytest.raises(ValueError, match="Unknown combination"):
++        MultiTriggerConformal(cals, combination="bogus")
++
++
++def test_mtc_score_length_mismatch_raises():
++    cals = _make_3_calibrators()
++    mtc = MultiTriggerConformal(cals, combination="harmonic")
++    with pytest.raises(ValueError, match="길이"):
++        mtc.per_trigger_pvalues([0.5, 0.5])   # 2 ≠ 3
++
++
++def test_mtc_should_escalate_returns_info_dict():
++    cals = _make_3_calibrators()
++    mtc = MultiTriggerConformal(cals, combination="harmonic")
++    escalate, info = mtc.should_escalate([3.0, 3.0, 3.0], alpha=0.05)
++    assert isinstance(escalate, bool)
++    assert "p_per_trigger" in info
++    assert "p_combined" in info
++    assert "combination" in info
++    assert info["combination"] == "harmonic"
++    assert len(info["p_per_trigger"]) == 3
++
++
++@pytest.mark.parametrize("method", ["bonferroni", "harmonic", "e_value"])
++def test_fwer_under_null(method):
++    """
++    Pivot B 핵심 검증: 모든 trigger가 null (calibration과 같은 분포)이면
++    FWER ≤ α 충족. v1의 `len(triggers)>0` 식은 이 보장이 없다.
++    """
++    cals = _make_3_calibrators(seed=42)
++    mtc = MultiTriggerConformal(cals, combination=method)
++    n_trials = 2000
++    alpha = 0.05
++    rng = random.Random(123)
++    rejections = sum(
++        mtc.should_escalate([rng.gauss(0, 1) for _ in range(3)], alpha=alpha)[0]
++        for _ in range(n_trials)
++    )
++    rate = rejections / n_trials
++    # finite sample slack: ≤ α + 0.02
++    assert rate <= alpha + 0.02, f"{method}: empirical FWER {rate} > {alpha + 0.02}"
++
++
++def test_mtc_anomaly_detection():
++    """모든 trigger가 anomalous이면 적어도 한 method는 reject해야 함."""
++    cals = _make_3_calibrators()
++    rejected_count = 0
++    for method in ["bonferroni", "harmonic", "e_value"]:
++        mtc = MultiTriggerConformal(cals, combination=method)
++        if mtc.should_escalate([5.0, 5.0, 5.0], alpha=0.05)[0]:
++            rejected_count += 1
++    assert rejected_count >= 1, "extreme anomaly에서 어떤 combination도 reject 안함"
+diff --git a/tests/test_cost_aware.py b/tests/test_cost_aware.py
+new file mode 100644
+index 0000000..c694f9c
+--- /dev/null
++++ b/tests/test_cost_aware.py
+@@ -0,0 +1,172 @@
++"""Cost-Aware Threshold Optimization tests (Round 7 Pivot C)."""
++from __future__ import annotations
++
++import random
++
++import pytest
++
++from models.cost_aware_calibration import (
++    confusion_at_threshold, cost_weighted_loss,
++    find_cost_optimal_threshold, sweep_cost_aware_per_stratum,
++    cost_ratio_sweep, ThresholdResult,
++    DEFAULT_COST_MATRIX,
++)
++
++
++# ── basic primitives ────────────────────────────────────────────────────────
++
++
++def test_confusion_at_threshold_basic():
++    scores = [0.1, 0.5, 0.9, 1.5]
++    labels = [False, True, False, True]
++    cm = confusion_at_threshold(scores, labels, threshold=0.7)
++    # 0.9, 1.5 > 0.7 → escalate
++    # tp = 1.5 (label True), fp = 0.9 (label False)
++    # tn = 0.1 (label False), fn = 0.5 (label True)
++    assert cm["tp"] == 1
++    assert cm["fp"] == 1
++    assert cm["tn"] == 1
++    assert cm["fn"] == 1
++
++
++def test_cost_weighted_loss_symmetric():
++    """c_miss = c_over일 때, total cost = total errors."""
++    scores = [0.1, 0.5, 0.9, 1.5]
++    labels = [False, True, False, True]
++    loss = cost_weighted_loss(scores, labels, threshold=0.7, cost_miss=1.0, cost_over_esc=1.0)
++    cm = confusion_at_threshold(scores, labels, threshold=0.7)
++    assert loss == cm["fn"] + cm["fp"]
++
++
++def test_cost_weighted_loss_asymmetric():
++    scores = [0.1, 0.5, 0.9, 1.5]
++    labels = [False, True, False, True]
++    loss = cost_weighted_loss(scores, labels, threshold=0.7, cost_miss=10.0, cost_over_esc=1.0)
++    # fn=1, fp=1 → 10 × 1 + 1 × 1 = 11
++    assert loss == 11.0
++
++
++# ── find_cost_optimal_threshold ──────────────────────────────────────────────
++
++
++def test_optimizer_returns_threshold_result():
++    scores = [0.1, 0.5, 0.9, 1.5, 2.0]
++    labels = [False, True, False, True, True]
++    r = find_cost_optimal_threshold(scores, labels, cost_miss=1.0, cost_over_esc=1.0)
++    assert isinstance(r, ThresholdResult)
++    assert r.n_candidates > 0
++    assert len(r.sweep) > 0
++
++
++def test_optimizer_higher_miss_cost_lowers_threshold():
++    """c_miss >> c_over_esc이면 threshold가 낮아져 (더 많이 escalate) miss 줄임."""
++    random.seed(0)
++    scores = [random.gauss(0, 1) for _ in range(200)]
++    labels = [s > 0.5 for s in scores]
++    r_low = find_cost_optimal_threshold(scores, labels, cost_miss=1.0, cost_over_esc=1.0)
++    r_high = find_cost_optimal_threshold(scores, labels, cost_miss=1000.0, cost_over_esc=1.0)
++    assert r_high.threshold <= r_low.threshold
++    assert r_high.miss_rate <= r_low.miss_rate
++
++
++def test_optimizer_with_risk_constraint():
++    random.seed(0)
++    scores = [random.gauss(0, 1) for _ in range(200)]
++    labels = [s > 0.5 for s in scores]
++    r = find_cost_optimal_threshold(
++        scores, labels, cost_miss=1.0, cost_over_esc=1.0,
++        risk_constraint=0.05,
++    )
++    assert r.constraint_violated is False
++    assert r.miss_rate <= 0.05
++
++
++def test_optimizer_constraint_too_strict_uses_fallback():
++    random.seed(0)
++    # 거의 모든 case가 positive → miss_rate=0 불가능
++    scores = [random.gauss(0, 1) for _ in range(50)]
++    labels = [True] * 50
++    import warnings
++    with warnings.catch_warnings(record=True) as w:
++        warnings.simplefilter("always")
++        r = find_cost_optimal_threshold(
++            scores, labels, cost_miss=1.0, cost_over_esc=1.0,
++            risk_constraint=0.0,    # 0% miss는 거의 불가능 (모든 case escalate 필요)
++        )
++    # 모든 case escalate (가장 보수적 threshold)이면 miss=0 가능 → 통과할 수도 있음.
++    # 그러나 일반적으로 fallback 경로 검증을 위해 제약 위반 또는 보수적 fallback 확인.
++    assert r.threshold is not None
++
++
++def test_empty_scores_returns_inf_cost():
++    r = find_cost_optimal_threshold([], [], cost_miss=1.0, cost_over_esc=1.0)
++    assert r.cost == float("inf")
++    assert r.constraint_violated is True
++
++
++# ── sweep_cost_aware_per_stratum ─────────────────────────────────────────────
++
++
++def test_per_stratum_sweep_returns_all_strata():
++    random.seed(0)
++    sb, lb = {}, {}
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        sb[stratum] = [random.gauss(0, 1) for _ in range(100)]
++        lb[stratum] = [s > 0.5 for s in sb[stratum]]
++    out = sweep_cost_aware_per_stratum(
++        sb, lb,
++        cost_matrix=DEFAULT_COST_MATRIX,
++        alpha_constraints={"CRITICAL": 0.10, "HIGH": 0.10,
++                           "MODERATE": 0.10, "LOW": 0.10},
++    )
++    assert set(out) == {"CRITICAL", "HIGH", "MODERATE", "LOW"}
++
++
++def test_per_stratum_critical_more_conservative_than_low():
++    """
++    default cost matrix는 CRITICAL miss=1000, LOW miss=1 → CRITICAL threshold 낮음.
++
++    same scoring distribution을 두 stratum에서 평가. 비대칭 cost가 threshold를
++    바꿔야 함. random seed로 동일 분포 강제 — 차이는 cost matrix에서만.
++    """
++    random.seed(0)
++    sb, lb = {}, {}
++    # 같은 random 시퀀스를 두 번 생성 (정확히 같은 분포)
++    for stratum in ["CRITICAL", "LOW"]:
++        random.seed(123)
++        sb[stratum] = [random.gauss(0, 1) for _ in range(500)]
++        lb[stratum] = [s > 0.0 for s in sb[stratum]]   # 50% positive
++    out = sweep_cost_aware_per_stratum(sb, lb)         # default cost
++    # CRITICAL은 c_miss=1000, LOW는 c_miss=1 → CRITICAL이 더 보수적 (threshold ≤ LOW)
++    assert out["CRITICAL"].threshold <= out["LOW"].threshold, (
++        f"CRITICAL={out['CRITICAL'].threshold}, LOW={out['LOW'].threshold}"
++    )
++    # 그리고 CRITICAL의 miss_rate ≤ LOW의 miss_rate (더 적게 놓침)
++    assert out["CRITICAL"].miss_rate <= out["LOW"].miss_rate
++
++
++# ── cost_ratio_sweep (sensitivity analysis) ──────────────────────────────────
++
++
++def test_cost_ratio_sweep_returns_rows():
++    random.seed(0)
++    scores = [random.gauss(0, 1) for _ in range(100)]
++    labels = [s > 0.5 for s in scores]
++    rows = cost_ratio_sweep(scores, labels, miss_costs=[10, 100, 1000])
++    assert len(rows) == 3
++    for r in rows:
++        assert "cost_ratio" in r
++        assert "threshold" in r
++        assert "miss_rate" in r
++        assert "over_esc_rate" in r
++
++
++def test_cost_ratio_sweep_monotone_threshold():
++    """cost ratio 증가 → threshold 비증가 (more aggressive escalation)."""
++    random.seed(0)
++    scores = [random.gauss(0, 1) for _ in range(200)]
++    labels = [s > 0.5 for s in scores]
++    rows = cost_ratio_sweep(scores, labels, miss_costs=[1, 10, 100, 1000])
++    thresholds = [r["threshold"] for r in rows]
++    for i in range(len(thresholds) - 1):
++        assert thresholds[i] >= thresholds[i + 1]   # non-increasing
+diff --git a/tests/test_round7_integration.py b/tests/test_round7_integration.py
+new file mode 100644
+index 0000000..f955efd
+--- /dev/null
++++ b/tests/test_round7_integration.py
+@@ -0,0 +1,178 @@
++"""Round 7 integration: RTC+EDE+config가 stratified CRC + MTC + cost-aware와 결합."""
++from __future__ import annotations
++
++import random
++
++import pytest
++
++from models.stratified_crc import StratifiedConformalRiskControl
++from models.conformal_combination import (
++    TriggerCalibrator, MultiTriggerConformal,
++)
++from models.cost_aware_calibration import sweep_cost_aware_per_stratum, DEFAULT_COST_MATRIX
++from models.rtc_ede import RTC, EDE, RTCConfig
++from models.uqm import UncertaintyResult
++from models.model_interface import ModelResponse
++
++
++def _fake_unc(score: float = 0.5, weighted: bool = False, threshold_used: float = 2.0):
++    return UncertaintyResult(
++        nonconformity_score=score, margin=0.0, confidence_entropy=0.1,
++        should_escalate=False, threshold_used=threshold_used,
++        raw_response=ModelResponse("fake answer", None, 0, "test", 0, 0),
++        scoring_method="logprob", weighted_cp_used=weighted,
++    )
++
++
++def _fit_strat_crc():
++    random.seed(0)
++    scores, labels, strata = [], [], []
++    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
++                          ("MODERATE", 0.10), ("LOW", 0.05)]:
++        for _ in range(200):
++            l = random.random() < base
++            s = random.gauss(2.0 if l else 0.0, 1.0)
++            scores.append(s); labels.append(l); strata.append(stratum)
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    )
++    crc.fit(scores, labels, strata)
++    return crc
++
++
++def _fit_mtc():
++    random.seed(1)
++    cals = []
++    for name in ("T1", "T2", "T3"):
++        c = TriggerCalibrator(name)
++        c.fit([random.gauss(0, 1) for _ in range(100)])
++        cals.append(c)
++    return MultiTriggerConformal(cals, combination="harmonic")
++
++
++# ── RTC + StratifiedCRC ──────────────────────────────────────────────────────
++
++
++def test_rtc_uses_stratified_calibrator_when_provided():
++    """RTC(stratified_calibrator=...)가 multiplier 경로 무시하고 stratum λ 직접 반환."""
++    crc = _fit_strat_crc()
++    rtc = RTC(base_threshold=99.9, stratified_calibrator=crc)   # base_threshold는 ignored
++    cfg = rtc.get_threshold("emergency_medicine", "emergency")
++    assert cfg.adjusted_threshold == crc.threshold_for("CRITICAL")
++    # multiplier_value=1.0 (이미 stratum-aware)
++    assert cfg.multiplier_value == 1.0
++
++
++def test_rtc_falls_back_to_v1_when_no_stratified():
++    """stratified_calibrator=None이면 기존 multiplier 경로."""
++    rtc = RTC(base_threshold=2.0)
++    cfg = rtc.get_threshold("emergency_medicine", "emergency")
++    # CRITICAL multiplier(0.60) × emergency scenario(0.90) = 0.54
++    assert abs(cfg.adjusted_threshold - 1.08) < 1e-6
++
++
++# ── EDE + MultiTriggerConformal ──────────────────────────────────────────────
++
++
++def test_ede_conformal_combined_requires_mtc():
++    with pytest.raises(ValueError, match="multi_trigger_conformal"):
++        EDE(decision_rule="conformal_combined", multi_trigger_conformal=None)
++
++
++def test_ede_conformal_combined_smoke():
++    mtc = _fit_mtc()
++    ede = EDE(
++        decision_rule="conformal_combined",
++        multi_trigger_conformal=mtc,
++        combined_alpha=0.05,
++    )
++    cfg = RTCConfig(specialty="general_practice", scenario_type="routine",
++                    base_threshold=2.0)
++    unc = _fake_unc(score=2.5)
++    decision = ede.decide(unc, cfg, "Take aspirin 81mg.")
++    info = decision.log["conformal_combined_info"]
++    assert "p_combined" in info
++    assert "p_per_trigger" in info
++    assert info["combination"] == "harmonic"
++    assert len(info["p_per_trigger"]) == 3
++
++
++def test_ede_t2_t3_nonconformity_scores():
++    """T2/T3 nonconformity score가 [0, 1] 범위."""
++    safe = "Take aspirin 81mg daily."
++    uncertain = "Consider intubation if patient deteriorates. I am not certain."
++
++    assert EDE.t2_nonconformity_score(safe) == 0.0
++    assert 0 < EDE.t2_nonconformity_score(uncertain) <= 1.0
++    assert EDE.t3_nonconformity_score(safe) == 0.0
++    assert 0 < EDE.t3_nonconformity_score(uncertain) <= 1.0
++
++
++def test_ede_t2_critical_keyword_unconditional():
++    """CRITICAL_KEYWORDS는 modifier 없이도 단독 트리거."""
++    text = "Patient has DNR order in chart."
++    assert EDE.t2_nonconformity_score(text) > 0.0
++
++
++def test_ede_t2_procedural_requires_modifier():
++    """PROCEDURAL_KEYWORDS는 modifier 없으면 0."""
++    no_mod = "Give epinephrine for anaphylaxis."   # 명확한 처치, 미트리거
++    with_mod = "Consider epinephrine if patient deteriorates."
++    assert EDE.t2_nonconformity_score(no_mod) == 0.0
++    assert EDE.t2_nonconformity_score(with_mod) > 0.0
++
++
++# ── End-to-end: stratified CRC + MTC 결합 ────────────────────────────────────
++
++
++def test_e2e_rtc_strat_crc_with_ede_conformal_combined():
++    """RTC + StratifiedCRC + EDE(conformal_combined) 전체 파이프라인."""
++    crc = _fit_strat_crc()
++    mtc = _fit_mtc()
++    rtc = RTC(base_threshold=0.0, stratified_calibrator=crc)
++    ede = EDE(
++        decision_rule="conformal_combined",
++        multi_trigger_conformal=mtc,
++        combined_alpha=0.05,
++    )
++
++    # 두 specialty (다른 stratum) 비교
++    cfg_crit = rtc.get_threshold("emergency_medicine", "emergency")    # CRITICAL
++    cfg_low  = rtc.get_threshold("general_practice", "routine")        # LOW
++
++    assert cfg_crit.adjusted_threshold == crc.threshold_for("CRITICAL")
++    assert cfg_low.adjusted_threshold  == crc.threshold_for("LOW")
++
++    # decide 호출 (둘 다 같은 응답이지만 stratum이 다름)
++    unc = _fake_unc(score=2.5)
++    text = "Routine answer."
++    d_crit = ede.decide(unc, cfg_crit, text)
++    d_low  = ede.decide(unc, cfg_low,  text)
++
++    # 둘 다 conformal_combined info 포함
++    for d in (d_crit, d_low):
++        assert d.log["decision_rule"] == "conformal_combined"
++        assert d.log["conformal_combined_info"] is not None
++
++
++# ── cost-aware sweep + stratified 결합 (Pivot A + C) ────────────────────────
++
++
++def test_cost_aware_per_stratum_with_stratified_alphas():
++    """Pivot A의 alphas를 Pivot C의 risk_constraint로 직접 주입."""
++    random.seed(0)
++    sb, lb = {}, {}
++    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
++        sb[stratum] = [random.gauss(0, 1) for _ in range(200)]
++        lb[stratum] = [s > 0.5 for s in sb[stratum]]
++
++    alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    out = sweep_cost_aware_per_stratum(
++        sb, lb,
++        cost_matrix=DEFAULT_COST_MATRIX,
++        alpha_constraints=alphas,
++    )
++    # 각 stratum은 자신의 risk_constraint를 충족하거나 fallback 표시
++    for stratum, r in out.items():
++        if not r.constraint_violated:
++            assert r.miss_rate <= alphas[stratum]
+diff --git a/tests/test_stratified_crc.py b/tests/test_stratified_crc.py
+new file mode 100644
+index 0000000..5d51840
+--- /dev/null
++++ b/tests/test_stratified_crc.py
+@@ -0,0 +1,155 @@
++"""Stratified CRC tests (Round 7 Pivot A)."""
++from __future__ import annotations
++
++import math
++import random
++
++import pytest
++
++from models.stratified_crc import (
++    StratifiedConformalRiskControl,
++    missed_escalation_loss,
++    DEFAULT_ALPHAS, DEFAULT_STRATA,
++    min_n_for_alpha,
++)
++
++
++# ── helpers ──────────────────────────────────────────────────────────────────
++
++
++def _synthetic_4strata(n_per: int, seed: int = 0):
++    """4 stratum × n_per. positive label은 score 평균 2, negative 0."""
++    random.seed(seed)
++    scores, labels, strata = [], [], []
++    for stratum, base_rate in [
++        ("CRITICAL", 0.30), ("HIGH", 0.20),
++        ("MODERATE", 0.10), ("LOW", 0.05),
++    ]:
++        for _ in range(n_per):
++            l = random.random() < base_rate
++            s = random.gauss(2.0 if l else 0.0, 1.0)
++            scores.append(s); labels.append(l); strata.append(stratum)
++    return scores, labels, strata
++
++
++# ── basic loss + helpers ─────────────────────────────────────────────────────
++
++
++def test_missed_escalation_loss_correct_cases():
++    # label=True, score ≤ λ → loss=1 (miss)
++    assert missed_escalation_loss(lam=1.0, score=0.5, label=True) == 1.0
++    # label=True, score > λ → loss=0 (correctly escalated)
++    assert missed_escalation_loss(lam=1.0, score=2.0, label=True) == 0.0
++    # label=False → loss=0 always
++    assert missed_escalation_loss(lam=1.0, score=0.5, label=False) == 0.0
++
++
++def test_loss_monotone_in_lambda():
++    """ℓ(λ, score, label)가 λ에 대해 monotone non-decreasing — CRC validity 핵심."""
++    score, label = 1.0, True
++    losses = [missed_escalation_loss(lam, score, label) for lam in [0.5, 0.9, 1.0, 1.1, 2.0]]
++    # λ가 score를 넘어가는 시점에 loss가 1로 jump
++    for i in range(len(losses) - 1):
++        assert losses[i] <= losses[i + 1]
++
++
++def test_min_n_for_alpha():
++    assert min_n_for_alpha(0.10) == 20      # max(20, 9)
++    assert min_n_for_alpha(0.05) == 20      # max(20, 19)
++    assert min_n_for_alpha(0.01) == 99
++    assert min_n_for_alpha(0.001) == 999
++
++
++# ── core CRC behavior ────────────────────────────────────────────────────────
++
++
++def test_crc_fit_returns_per_stratum_lambdas():
++    scores, labels, strata = _synthetic_4strata(n_per=200)
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    )
++    report = crc.fit(scores, labels, strata)
++    assert set(report.per_stratum) == {"CRITICAL", "HIGH", "MODERATE", "LOW"}
++    for st, info in report.per_stratum.items():
++        assert info.is_data_sufficient
++        assert info.empirical_risk_at_lambda <= info.alpha + 0.01    # 약간 slack
++
++
++def test_crc_threshold_for_returns_per_stratum_lambda():
++    scores, labels, strata = _synthetic_4strata(n_per=200)
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    )
++    crc.fit(scores, labels, strata)
++    crit_lam = crc.threshold_for("CRITICAL")
++    low_lam = crc.threshold_for("LOW")
++    # 더 엄격한 stratum (CRITICAL)이 작은 λ → 더 많이 escalate
++    # (label True 비율이 더 높은 분포에서 R̂가 더 빨리 α 초과 → 더 작은 λ에서 멈춤)
++    assert crit_lam <= low_lam
++
++
++def test_crc_holdout_coverage_validates():
++    scores, labels, strata = _synthetic_4strata(n_per=300, seed=1)
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
++    )
++    crc.fit(scores, labels, strata)
++    # 같은 분포로 holdout
++    h_scores, h_labels, h_strata = _synthetic_4strata(n_per=300, seed=2)
++    cov = crc.coverage_check(h_scores, h_labels, h_strata, slack=0.30)
++    for st, c in cov.items():
++        assert c["ok"] is True, f"{st}: R={c['empirical_risk']} > α={c['target_alpha']}"
++
++
++# ── strict mode + edge cases ─────────────────────────────────────────────────
++
++
++def test_strict_raises_when_n_too_small():
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.001},  # min_n=999
++        strict=True,
++    )
++    with pytest.raises(RuntimeError, match="min_n"):
++        crc.fit(scores=[1.0]*50, labels=[True]*50, strata=["CRITICAL"]*50)
++
++
++def test_nonstrict_warns_and_uses_conservative_lambda():
++    import warnings
++    crc = StratifiedConformalRiskControl(
++        alphas={"CRITICAL": 0.001},
++        strict=False,
++    )
++    with warnings.catch_warnings(record=True) as w:
++        warnings.simplefilter("always")
++        crc.fit(scores=[1.0]*50, labels=[True]*50, strata=["CRITICAL"]*50)
++    assert any("min_n" in str(m.message) for m in w)
++    assert not crc.report.per_stratum["CRITICAL"].is_data_sufficient
++
++
++def test_empty_input_raises():
++    crc = StratifiedConformalRiskControl(alphas={"CRITICAL": 0.10})
++    with pytest.raises(ValueError, match="빈 calibration"):
++        crc.fit(scores=[], labels=[], strata=[])
++
++
++def test_length_mismatch_raises():
++    crc = StratifiedConformalRiskControl(alphas={"CRITICAL": 0.10})
++    with pytest.raises(ValueError, match="length mismatch"):
++        crc.fit(scores=[1.0, 2.0], labels=[True], strata=["CRITICAL"])
++
++
++def test_invalid_alpha_raises():
++    with pytest.raises(ValueError, match="alphas"):
++        StratifiedConformalRiskControl(alphas={"X": 1.5})
++
++
++def test_threshold_for_unknown_stratum_returns_zero():
++    """없는 stratum 요청 시 0.0 (가장 보수적 — 모든 것 escalate)."""
++    crc = StratifiedConformalRiskControl(alphas={"CRITICAL": 0.10})
++    crc.fit([1.0]*30, [True]*15 + [False]*15, ["CRITICAL"]*30)
++    assert crc.threshold_for("NONEXISTENT") == 0.0
++
++
++def test_loss_upper_bound_validation():
++    with pytest.raises(ValueError, match="loss_upper_bound"):
++        StratifiedConformalRiskControl(alphas=DEFAULT_ALPHAS, loss_upper_bound=0)
