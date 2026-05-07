@@ -1038,12 +1038,12 @@ python experiments/run_all_experiments.py --backend openai --skip pareto medabst
 
 | CLI 옵션 | 기본값 | 설명 |
 | --- | --- | --- |
-| `--backend {openai,lmstudio}` | 양쪽 모두 | Primary(openai) / Ablation(lmstudio) 선택 |
+| `--backend {openai,lmstudio,mlx,anthropic,gemini}` | 양쪽 모두(openai+lmstudio) | audit 6.9: anthropic/gemini 추가. logprob-free 백엔드는 자동 fallback. |
 | `--n-cal N` | `500` | UQM CP 캘리브레이션 질문 수 (audit #19로 α 대비 최소값 미달 시 경고/중단) |
 | `--n-test N` | `200` | 에이전트·베이스라인 시나리오별 테스트 케이스 수 (audit #11: 50→200) |
 | `--n-medabstain N` | `100` | MedAbstain 변형별 케이스 수 |
 | `--n-pareto-test N` | `100` | Pareto sweep 시나리오별 케이스 수 |
-| `--scoring-method {logprob,self_consistency,auto}` | `auto` | `auto`는 `DeprecationWarning` (audit #21) — 가능하면 `logprob` 명시 |
+| `--scoring-method {logprob,self_consistency,hybrid,auto}` | `auto` | audit 6.9: **`hybrid`** 신규 (SC diversity + answer-mode entropy, logprob-free 환경 권장). `auto`는 `DeprecationWarning`. |
 | `--alpha FLOAT` | (config의 `0.10`) | CP α. 작을수록 q̂↑, 에스컬레이션↓, coverage↑ |
 | `--variants AP NAP A NA ...` | 전체 4종 | MedAbstain 평가 변형 |
 | `--weighted-cp` | off | Tibshirani et al. (2019) WeightedCP 활성화 (audit #8: 인자 정상 반영됨) |
