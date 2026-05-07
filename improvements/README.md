@@ -968,3 +968,105 @@ hybrid:
 
 스냅샷: `improvements/improved/round6_10/`
 
+---
+
+## 7라운드 — Stratified CRC + Multi-Trigger Conformal Combination + Cost-Aware (2026-05-07, **계획 단계**)
+
+### 배경
+
+Round 6.10까지로 코드 품질·재현성·테스트 인프라가 회복되었으나, **TECP / Quach 2024 / MedAbstain 자체 CP 평가와 차별화되는 학술적 contribution이 부재**라는 비판 검증 결과 (`improvements/round6_10` 검토). Round 7은 이 문제를 해결하기 위한 **이론 contribution 강화** 단계.
+
+### 7.0 목표
+
+| 항목 | 내용 |
+| --- | --- |
+| **상태** | 설계 완료 (`improvements/round7_PLAN.md`), 구현 전 |
+| **타겟 venue** | ML4H Spotlight 2026 / AISTATS 2026 / NeurIPS 2026 |
+| **예상 기간** | 4~6주 (코드 3주 + 실험 2~3주) |
+| **선결조건** | Round 6.10의 모든 코드/테스트 안정 (✓ 완료) |
+
+### 7.1 세 contribution (Pivot A + B + C 결합)
+
+| Pivot | 핵심 알고리즘 | 신규 모듈 | 인용 |
+| --- | --- | --- | --- |
+| **A. Stratified Conformal Risk Control** | 위험도 stratum별 (CRITICAL/HIGH/MODERATE/LOW) 별도 calibration + Conformal Risk Control. 각 stratum에 대해 `E[ℓ_stratum] ≤ α_stratum` 보장. | [models/stratified_crc.py](../models/stratified_crc.py) (신규 예정) | Angelopoulos & Bates ICLR 2024; Romano et al. NeurIPS 2020 |
+| **B. Multi-Trigger Conformal Combination** | T1/T2/T3을 별도 nonconformity score로 calibrate, harmonic / e-value combination으로 결합. **FWER ≤ α 보장** under arbitrary dependence. | [models/conformal_combination.py](../models/conformal_combination.py) (신규 예정) | Wilson PNAS 2019; Vovk & Wang Biometrika 2019; Wang & Ramdas JRSS-B 2022 |
+| **C. Cost-Aware Threshold Optimization** | 임상 비대칭 cost (CRITICAL miss=1000× over-esc) 명시화. F1-symmetric grid search → cost-weighted constrained optimization. | [models/cost_aware_calibration.py](../models/cost_aware_calibration.py) (신규 예정) | El-Yaniv & Wiener JMLR 2010 |
+
+세 contribution은 자연스럽게 결합:
+
+```text
+C의 cost matrix → A의 α_stratum 결정
+A의 stratified score → B의 입력
+B의 결합 p-value → C의 최적화 대상
+```
+
+### 7.2 v1 → v2 매핑
+
+| 영역 | v1 (Round 1~6.10) | v2 (Round 7) |
+| --- | --- | --- |
+| Threshold | `q̂_global × heuristic_multiplier` | `λ_stratum (Conformal Risk Control)` |
+| Trigger 결합 | `len(triggers) > 0` (ad-hoc OR) | conformal p-value combination (harmonic / e-value) |
+| Coverage 보장 | 단일 global α | per-stratum α with risk control |
+| Cost 모델 | F1-symmetric (FN==FP) | 비대칭 cost matrix per stratum |
+| Baseline 비교 | (없음) | TECP, Quach 2024 CLM, Semantic Entropy |
+
+### 7.3 변경/신규 예정 파일 (구현 시)
+
+| 영역 | 파일 |
+| --- | --- |
+| 신규 알고리즘 | `models/stratified_crc.py`, `models/conformal_combination.py`, `models/cost_aware_calibration.py` |
+| 통합 수정 | `models/rtc_ede.py` (RTC가 StratifiedCRC wrap, EDE에 `decision_rule="conformal_combined"`) |
+| 파이프라인 | `experiments/run_calibration_pipeline.py` (Step 4a~4c 신규) |
+| Config | `experiments/configs/base_config.yaml` (`stratified_alphas`, `costs`, `multi_trigger` 섹션) |
+| 스키마 | `experiments/config_schema.py` (3개 새 BaseModel) |
+| Loader | `experiments/config_utils.py` (`load_stratified_alphas`, `load_cost_matrix`, `load_multi_trigger_config`) |
+| Baseline | `experiments/baselines/{tecp,quach2024,semantic_entropy}.py` (신규) |
+| 실험 스크립트 | `experiments/round7_table{1,2,3,4}.py` (논문 표 자동 생성) |
+| 테스트 | `tests/test_{stratified_crc,conformal_combination,cost_aware,round7_integration}.py` |
+| 재현 | `experiments/reproduce_round7.sh` (모든 표/그림 한 번에) |
+| 문서 | `improvements/round7_PLAN.md` (✓ 작성됨), README.md §0.5 + §4.5 (✓ 추가됨) |
+
+### 7.4 실험 표 4종 (논문 직접 수록 예정)
+
+| 표 | 검증 대상 | 예상 결과 |
+| --- | --- | --- |
+| **표 1: per-stratum coverage** | Pivot A — stratum별 CRC 보장 충족 | UASEF Round 7만 4/4 stratum 충족, TECP는 CRITICAL 폭증 |
+| **표 2: combination FWER** | Pivot B — 결합 후에도 FWER ≤ α | Naive `len>0`은 위반, harmonic/e-value는 보존 |
+| **표 3: cost-weighted total** | Pivot C — 비대칭 cost 최소화 | Round 7 total cost ≈ 1/3 of Round 6 (F1-symmetric) |
+| **표 4: head-to-head baseline** | TECP / Quach / Semantic Entropy / MedAbstain CP / UASEF Round 7 | Round 7이 CRITICAL Safety Recall + AUROC 우위 |
+
+### 7.5 Reviewer 예상 질문 대비
+
+| 질문 | 답변 |
+| --- | --- |
+| Stratified CP는 Romano 2020이 이미 함 | Romano는 class-conditional. Round 7은 CRC + stratification 결합 (loss function이 stratum별로 다를 수 있음) + medical risk-stratified escalation 도메인 적용 |
+| Multi-trigger combination은 통계학 standard | Combination 자체는 standard. 그러나 (1) trigger를 nonconformity score로 frame, (2) medical safety 문맥에서 FWER 보장이 신규 |
+| Cost matrix 임의성 | 1) Sensitivity analysis (10:1, 100:1, 1000:1 모두 보고)<br>2) 임상 부담 추정 문헌 인용<br>3) 사용자 환경별 조정 가능 명시 |
+| Mock tools / heuristic labels | 인정. Limitation 섹션 + 다음 단계로 Pivot D (실제 임상 검증) 명시 |
+
+### 7.6 위험 요인
+
+| 위험 | 완화 |
+| --- | --- |
+| Stratum별 데이터 부족 (특히 CRITICAL) | MedAbstain + MedQA 응급 키워드 + PubMedQA "maybe" 합쳐 ≥200/stratum 확보 |
+| Combined p-value가 individual α보다 보수적 | sensitivity analysis로 combination 방법 비교 |
+| Cost matrix 정당화 어려움 | 3종 cost ratio 모두 보고하여 robustness 입증 |
+| Baseline (TECP 등) 재구현 정확성 | 원저자 코드 우선 사용, 없으면 paper 명세 + sanity check |
+
+### 7.7 진행 상태 (2026-05-07 기준)
+
+| Phase | 상태 |
+| --- | --- |
+| 비판적 분석 + pivot 설계 | ✓ 완료 |
+| `improvements/round7_PLAN.md` 상세 계획 | ✓ 완료 |
+| README.md §0.5 + §4.5 + 참고문헌 갱신 | ✓ 완료 |
+| `improvements/README.md` Round 7 entry | ✓ 완료 (이 섹션) |
+| **Phase 1: 알고리즘 모듈 3개 구현** | ⏳ 대기 |
+| **Phase 2: RTC/EDE 통합** | ⏳ 대기 |
+| **Phase 3: Baseline 어댑터** | ⏳ 대기 |
+| **Phase 4: 실험 + 표 생성** | ⏳ 대기 |
+| **Phase 5: 논문 작성** | ⏳ 대기 |
+
+상세 일정/위험/구현 인터페이스는 [round7_PLAN.md](round7_PLAN.md) 참조.
+
