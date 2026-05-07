@@ -87,6 +87,51 @@ class HybridConfig(BaseModel):
         return self
 
 
+# ── Round 7 (audit 7) ─────────────────────────────────────────────────────────
+
+
+class StratifiedAlphas(BaseModel):
+    """Pivot A: per-stratum CRC bounds. CRITICAL ≤ HIGH ≤ MODERATE ≤ LOW."""
+    model_config = ConfigDict(extra="forbid")
+    CRITICAL: float = Field(..., gt=0, lt=1)
+    HIGH:     float = Field(..., gt=0, lt=1)
+    MODERATE: float = Field(..., gt=0, lt=1)
+    LOW:      float = Field(..., gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _check_monotone(self):
+        if not (self.CRITICAL <= self.HIGH <= self.MODERATE <= self.LOW):
+            raise ValueError(
+                f"stratified_alphas는 CRITICAL ≤ HIGH ≤ MODERATE ≤ LOW 단조이어야 합니다 "
+                f"(CRITICAL이 가장 엄격). got: {self.model_dump()}"
+            )
+        return self
+
+
+class CostEntry(BaseModel):
+    """Pivot C: 단일 stratum의 (FN cost, FP cost)."""
+    model_config = ConfigDict(extra="forbid")
+    miss:     float = Field(..., gt=0)
+    over_esc: float = Field(..., gt=0)
+
+
+class CostMatrix(BaseModel):
+    """Pivot C: stratum별 비대칭 cost matrix."""
+    model_config = ConfigDict(extra="forbid")
+    CRITICAL: CostEntry
+    HIGH:     CostEntry
+    MODERATE: CostEntry
+    LOW:      CostEntry
+
+
+class MultiTriggerConfig(BaseModel):
+    """Pivot B: trigger conformal combination 옵션."""
+    model_config = ConfigDict(extra="forbid")
+    enabled:        bool = False
+    combination:    Literal["harmonic", "bonferroni", "e_value"] = "harmonic"
+    combined_alpha: float = Field(0.05, gt=0, lt=1)
+
+
 class BaseConfig(BaseModel):
     """base_config.yaml 전체 스키마."""
     model_config = ConfigDict(extra="allow")  # 새 키를 미래 호환을 위해 허용
@@ -99,6 +144,10 @@ class BaseConfig(BaseModel):
     entropy_threshold:    float = Field(0.6, gt=0, lt=2)
     ede:                  EDEConfig
     hybrid:               Optional[HybridConfig] = None
+    # Round 7
+    stratified_alphas:    Optional[StratifiedAlphas]    = None
+    costs:                Optional[CostMatrix]          = None
+    multi_trigger:        Optional[MultiTriggerConfig]  = None
 
     @field_validator("backends")
     @classmethod
