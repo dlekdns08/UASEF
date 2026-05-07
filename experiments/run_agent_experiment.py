@@ -335,8 +335,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UASEF Agent Experiment (LangGraph)")
     parser.add_argument(
         "--backend", type=str, default=None,
-        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
-        help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
+        choices=["openai", "lmstudio", "mlx"],     # audit 6.10: anthropic/gemini는 ReAct 미지원
+        help="단일 백엔드만 실행 (기본: openai+lmstudio 모두). "
+             "anthropic/gemini는 LangGraph ReAct 어댑터 부재로 미지원 — UQM 단독 평가에만 사용.",
     )
     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=50, help="시나리오별 테스트 케이스 수 (권장: 50)")
