@@ -889,7 +889,7 @@ audit 6.9 직후 코드 전반을 다시 훑은 결과, audit 6.9가 만든 갭 
 | #5 | 결과 파일이 매번 덮어써짐 | `--run-tag` 옵션 신규. `experiments/metrics_utils.py:results_dir()` 헬퍼 + `UASEF_RESULTS_DIR` 환경변수 — 모든 sub-runner의 save 함수가 자동 사용. `results/<tag>/`로 ablation 결과 분리. |
 | #11 | logging 모듈 | 신규 [utils/logging.py](../utils/logging.py) — `get_logger()` 헬퍼. `UASEF_LOG_LEVEL/FILE/JSON` 환경변수 제어. 기존 `print()`와 공존, 신규 코드부터 단계 마이그레이션. |
 | #12 | base_config.yaml 검증 부재 | 신규 [experiments/config_schema.py](../experiments/config_schema.py) Pydantic 스키마. `_preflight_check`가 strict=True에서 `RuntimeError`, 그 외 경고. 잘못된 키/타입/범위(α>1, weight 합 ≠ 1, scenario_multiplier="0.9" str 등)를 silent miscalibration 전에 차단. |
-| #13 | Dockerfile + CI 부재 | [Dockerfile](../Dockerfile)(slim python:3.11, 비루트 사용자, uv 빌드, volume-mount 권장) + [.dockerignore](../.dockerignore) + [.github/workflows/test.yml](../.github/workflows/test.yml) (matrix py3.11/3.12, pytest + CLI --help + Docker 빌드). |
+| #13 | Dockerfile (재현성) | [Dockerfile](../Dockerfile)(slim python:3.11, 비루트 사용자, uv 빌드, volume-mount 권장) + [.dockerignore](../.dockerignore). CI 워크플로우(GitHub Actions)는 사용자 요청에 따라 제외. |
 | #14 | Quick Start 부재 | `README.md` / `README_EN.md`에 §0 Quick Start 추가 (5줄, 30초 안에 결과 1개). |
 | #15 | 결과 비교 도구 부재 | 신규 [experiments/compare_runs.py](../experiments/compare_runs.py) — 여러 `--run-tag` 결과를 한 markdown 표로 통합 (메타 / 에이전트 / 베이스라인 / MedAbstain). |
 
@@ -963,7 +963,7 @@ hybrid:
 | `experiments/` | `metrics_utils.py` (bootstrap/Bonferroni/results_dir), `config_utils.py` (load_hybrid_weights), `config_schema.py` (신규), `compare_runs.py` (신규), `run_calibration_pipeline.py` (hybrid grid 통합), `run_all_experiments.py` (--run-tag, --strict pre-flight, dispatcher 가드), 기타 5개 runner (hybrid weight 전달) |
 | `utils/` | `logging.py` (신규), `__init__.py` (신규) |
 | `tests/` | 6개 파일 신규 (82 tests passing) |
-| 메타 | `pyproject.toml` (optional deps + pytest config), `Dockerfile` (신규), `.dockerignore` (신규), `.github/workflows/test.yml` (신규) |
+| 메타 | `pyproject.toml` (optional deps + pytest config), `Dockerfile` (신규), `.dockerignore` (신규) |
 | 문서 | `README.md` §0 Quick Start, `README_EN.md` §0 Quick Start, `improvements/README.md` §6.10 |
 
 스냅샷: `improvements/improved/round6_10/`
