@@ -39,7 +39,9 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
 
 > 코드 변경 / 개선 이력 전체는 [improvements/README.md](improvements/README.md)에서 라운드별로 관리합니다.
 >
-> **📄 논문 draft**: [paper/UASEF_Round7.md](paper/UASEF_Round7.md) (English) · [paper/UASEF_Round7_KO.md](paper/UASEF_Round7_KO.md) (한국어). Round 7 framework의 학술 논문 형식 정리 (Abstract / Related Work / Method / Experiments / Discussion / Limitations / References / Appendix). 동일 내용을 두 언어로 제공. ML4H 2026 / AISTATS 2026 / NeurIPS 2026 target.
+> **📄 논문 draft (Main Paper)**: [paper/UASEF_Round7.md](paper/UASEF_Round7.md) (English) · [paper/UASEF_Round7_KO.md](paper/UASEF_Round7_KO.md) (한국어). Round 7 framework의 학술 논문 형식 정리 (Abstract / Related Work / Method / Experiments / Discussion / Limitations / References / Appendix). ML4H 2026 / AISTATS 2026 / NeurIPS 2026 target.
+>
+> **📚 Supplementary Materials (Appendix B)**: [paper/UASEF_Round7_Supplementary.md](paper/UASEF_Round7_Supplementary.md) (English) · [paper/UASEF_Round7_Supplementary_KO.md](paper/UASEF_Round7_Supplementary_KO.md) (한국어). v1 4개 sub-experiment (agent / baseline / medabstain / pareto) 결과를 학술 형식으로 정리한 template. 실측치는 `bash run_full_evaluation.sh` 실행 시 `results/run_<ts>/result_supplementary.md`에 자동 채워진다.
 
 ---
 
