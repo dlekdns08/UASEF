@@ -139,7 +139,18 @@ class RTC:
         base_threshold: float,
         multipliers: Optional[dict[str, float]] = None,
         scenario_multipliers: Optional[dict[str, float]] = None,
+        # Round 7 (audit 7): per-stratum CRC threshold 우선 사용
+        stratified_calibrator: Optional["object"] = None,
     ):
+        """
+        Args:
+            base_threshold:        v1 호환 — global q̂ × multiplier 경로
+            multipliers:           v1 RiskLevel별 배율
+            scenario_multipliers:  v1 시나리오별 추가 배율
+            stratified_calibrator: v2 (Round 7) — StratifiedConformalRiskControl 인스턴스.
+                                    제공되면 v1 multiplier 경로 무시, stratum별 λ 직접 사용.
+                                    각 stratum에 대해 E[ℓ_s] ≤ α_s 보장.
+        """
         self.base_threshold = base_threshold
         # config에서 전달되는 배율 (대문자 문자열 키 "CRITICAL" 등을 RiskLevel enum으로 변환)
         self._multipliers: dict[RiskLevel, float] = dict(RISK_THRESHOLD_MULTIPLIER)
@@ -154,8 +165,32 @@ class RTC:
         if scenario_multipliers:
             for k, v in scenario_multipliers.items():
                 self._scenario_multipliers[str(k).lower()] = float(v)
+        # Round 7
+        self._stratified = stratified_calibrator
 
     def get_threshold(self, specialty: str, scenario_type: str) -> RTCConfig:
+        # Round 7: stratified calibrator 우선
+        if self._stratified is not None:
+            risk_level = SPECIALTY_RISK_MAP.get(specialty, RiskLevel.MODERATE)
+            stratum = risk_level.value.upper()  # "CRITICAL" 등
+            try:
+                lam = self._stratified.threshold_for(stratum)
+                cfg = RTCConfig(
+                    specialty=specialty,
+                    scenario_type=scenario_type,
+                    base_threshold=lam,
+                    # Round 7: stratum별 λ는 이미 risk-stratified — multiplier 비적용
+                    multipliers={k.value.upper(): 1.0 for k in RiskLevel},
+                    scenario_multipliers={s: 1.0 for s in DEFAULT_SCENARIO_MULTIPLIERS},
+                )
+                # 메타: round 7 path임을 표시
+                cfg.multiplier_value = 1.0
+                cfg.adjusted_threshold = lam
+                return cfg
+            except Exception:
+                # fallback to v1
+                pass
+        # v1 경로
         return RTCConfig(
             specialty=specialty,
             scenario_type=scenario_type,
@@ -436,17 +471,40 @@ class EDE:
         entropy_threshold: float = ENTROPY_HIGH_THRESHOLD,
         decision_rule: str = "trigger_count",
         confidence_threshold: float = 0.5,
+        # Round 7 (audit 7) 신규
+        multi_trigger_conformal: Optional["object"] = None,
+        combined_alpha: float = 0.05,
     ):
+        """
+        Args:
+            decision_rule:
+                "trigger_count" (default, v1 호환): len(triggers) > 0
+                "confidence":                         confidence > confidence_threshold
+                "conformal_combined" (Round 7):       p_combined ≤ combined_alpha
+                                                      MultiTriggerConformal 인스턴스 필요
+            multi_trigger_conformal: Round 7 — MultiTriggerConformal (T1/T2/T3 결합).
+                                       None인데 conformal_combined 모드면 RuntimeError.
+            combined_alpha:          Round 7 — 결합 p-value의 임계값.
+        """
         self.t1_weight = t1_weight
         self.entropy_boost = entropy_boost
         self.entropy_threshold = entropy_threshold
-        if decision_rule not in ("trigger_count", "confidence"):
+        if decision_rule not in ("trigger_count", "confidence", "conformal_combined"):
             raise ValueError(
-                f"decision_rule must be 'trigger_count' or 'confidence', got {decision_rule!r}"
+                f"decision_rule must be one of "
+                f"'trigger_count'|'confidence'|'conformal_combined', got {decision_rule!r}"
             )
         self.decision_rule = decision_rule
         self.confidence_threshold = confidence_threshold
         self.escalation_log: list[EscalationDecision] = []
+        # Round 7
+        self._mtc = multi_trigger_conformal
+        self.combined_alpha = combined_alpha
+        if decision_rule == "conformal_combined" and multi_trigger_conformal is None:
+            raise ValueError(
+                "decision_rule='conformal_combined'은 multi_trigger_conformal 인자가 필수입니다 "
+                "(audit 7 — Pivot B)."
+            )
 
     def decide(
         self,
@@ -498,11 +556,26 @@ class EDE:
             + entropy_boost
         )
 
-        # 결정 규칙: trigger_count (back-compat) 또는 confidence (audit issue #2)
-        if self.decision_rule == "confidence":
+        # 결정 규칙:
+        #   trigger_count (back-compat, audit 6): len(triggers) > 0
+        #   confidence    (audit 6 issue #2):     confidence > confidence_threshold
+        #   conformal_combined (Round 7 / audit 7 Pivot B):
+        #       T1/T2/T3 nonconformity score → p-value combination → escalate if p ≤ α
+        if self.decision_rule == "conformal_combined":
+            t1_score = uncertainty_result.nonconformity_score
+            t2_score = self.t2_nonconformity_score(response_text)
+            t3_score = self.t3_nonconformity_score(response_text)
+            should_escalate, p_info = self._mtc.should_escalate(
+                [t1_score, t2_score, t3_score],
+                alpha=self.combined_alpha,
+            )
+            # p_info는 _build_explanation 후 log에 추가됨
+        elif self.decision_rule == "confidence":
             should_escalate = confidence > self.confidence_threshold
+            p_info = None
         else:
             should_escalate = len(triggers) > 0
+            p_info = None
 
         explanation = self._build_explanation(
             triggers, rtc_config, uncertainty_result, entropy, self.entropy_threshold
@@ -529,6 +602,8 @@ class EDE:
                 "decision_rule": self.decision_rule,
                 "confidence_threshold": self.confidence_threshold if self.decision_rule == "confidence" else None,
                 "scoring_method": uncertainty_result.scoring_method,
+                # Round 7 / audit 7
+                "conformal_combined_info": p_info,
             },
         )
         self.escalation_log.append(decision)
