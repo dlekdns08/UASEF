@@ -142,9 +142,12 @@ def run_baseline_comparison(
 
     # UQM 보정
     print(f"\n[1/3] UQM 보정 중 (MedQA, n={n_cal})...")
+    from experiments.config_utils import load_hybrid_weights   # audit 6.10
+    _hyb_dw, _hyb_ew = load_hybrid_weights()
     uqm = UQM(
         backend=backend, alpha=effective_alpha, scoring_method=effective_method,
         prompt_mode=prompt_mode, strict=strict,
+        hybrid_diversity_weight=_hyb_dw, hybrid_entropy_weight=_hyb_ew,
     )
     try:
         cal_questions = load_calibration_questions(n=n_cal, split="train", seed=seed)
