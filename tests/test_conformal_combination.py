@@ -83,8 +83,15 @@ def test_evalue_basic():
     assert abs(p - 0.01) < 1e-9
 
 
-def test_evalue_capped_at_one():
+def test_evalue_returns_input_when_all_equal():
+    """모두 p=0.9이면 e_mean = 1/0.9, p_combined = 0.9 — capped 아님."""
     p = combine_e_value([0.9, 0.9, 0.9])
+    assert abs(p - 0.9) < 1e-9
+
+
+def test_evalue_capped_at_one_when_p_too_small():
+    """p_i = 1 (e=1) → e_mean=1 → p_combined=1.0."""
+    p = combine_e_value([1.0, 1.0, 1.0])
     assert p == 1.0
 
 
