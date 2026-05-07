@@ -40,3 +40,9 @@ ede:
   # "confidence" — confidence > confidence_threshold (grid search와 정합)
   decision_rule: trigger_count
   confidence_threshold: 0.5
+# audit 6.10: hybrid scoring의 두 신호 가중치 (calibration 결과로 갱신됨).
+# Jaccard diversity와 normalized mode entropy의 convex combination.
+# run_calibration_pipeline.py가 grid_search_hybrid_weights로 자동 산출.
+hybrid:
+  diversity_weight: 0.5
+  entropy_weight: 0.5
