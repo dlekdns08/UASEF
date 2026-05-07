@@ -609,6 +609,56 @@ class EDE:
         self.escalation_log.append(decision)
         return decision
 
+    # ── Round 7 / audit 7 (Pivot B): T2/T3 nonconformity scores ───────────────
+    #
+    # 기존 EDE는 T2/T3을 binary trigger로만 봤음. Round 7에서는 두 trigger를
+    # 연속 nonconformity score로 frame하여 conformal p-value combination에 사용.
+    #
+    # 정규화: 각 score는 [0, 1] 범위. score=0이면 trigger 없음 (정상),
+    #         score=1이면 maximum suspicion (예: 5+ 키워드 매칭).
+
+    T2_NORMALIZER: float = 5.0   # 5개 키워드 매칭이면 score=1
+    T3_NORMALIZER: float = 5.0
+
+    @staticmethod
+    def t2_nonconformity_score(text: str) -> float:
+        """
+        T2 (HIGH_RISK_ACTION) nonconformity score ∈ [0, 1].
+
+        결합 공식:
+            critical_hits     = #(CRITICAL_KEYWORDS matched)         # 단독 카운트
+            procedural_hits   = #(PROCEDURAL_KEYWORDS matched)
+            modifier_present  = any(UNCERTAINTY_MODIFIERS in text)
+            score = (critical_hits + procedural_hits × modifier_present) / NORMALIZER
+
+        critical은 절대적, procedural은 modifier 동반 시만 합산 — Round 6 audit #15와
+        정합 ("code blue" 강등 후 PROCEDURAL_KEYWORDS는 맥락 조건부).
+        """
+        text_lower = text.lower()
+        critical_hits = sum(1 for kw in CRITICAL_KEYWORDS if kw in text_lower)
+        procedural_hits = sum(1 for kw in PROCEDURAL_KEYWORDS if kw in text_lower)
+        modifier_present = any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS)
+        raw = critical_hits + procedural_hits * (1 if modifier_present else 0)
+        return min(1.0, raw / EDE.T2_NORMALIZER)
+
+    @staticmethod
+    def t3_nonconformity_score(text: str) -> float:
+        """
+        T3 (NO_EVIDENCE) nonconformity score ∈ [0, 1].
+
+        Round 6 audit #6의 strong/weak 분리와 정합:
+            strong_hits = #(NO_EVIDENCE_STRONG matched)         # 단독 카운트
+            weak_hits   = #(NO_EVIDENCE_WEAK matched)
+            modifier    = any(UNCERTAINTY_MODIFIERS in text)
+            score = (strong_hits + weak_hits × modifier) / NORMALIZER
+        """
+        text_lower = text.lower()
+        strong_hits = sum(1 for p in NO_EVIDENCE_STRONG if p in text_lower)
+        weak_hits = sum(1 for p in NO_EVIDENCE_WEAK if p in text_lower)
+        modifier_present = any(mod in text_lower for mod in UNCERTAINTY_MODIFIERS)
+        raw = strong_hits + weak_hits * (1 if modifier_present else 0)
+        return min(1.0, raw / EDE.T3_NORMALIZER)
+
     @staticmethod
     def _build_explanation(
         triggers: list[EscalationTrigger],
