@@ -537,14 +537,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UASEF Pareto Frontier Alpha Sweep")
     parser.add_argument(
         "--backend", type=str, default=None,
-        choices=["lmstudio", "openai"],
+        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=100, help="시나리오별 테스트 케이스 수 (권장: 100)")
     parser.add_argument(
         "--scoring-method", type=str, default="logprob",
-        choices=["logprob", "self_consistency"],
+        choices=["logprob", "self_consistency", "hybrid"],
         help="비적합 점수 방식 (logprob=primary, self_consistency=ablation)",
     )
     parser.add_argument(

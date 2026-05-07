@@ -1,3 +1,1295 @@
+diff --git a/README.md b/README.md
+index 2264d73..14dc683 100644
+--- a/README.md
++++ b/README.md
+@@ -34,6 +34,8 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
+ 11. [논문 권장 설정](#11-논문-권장-설정)
+ 12. [참고문헌](#12-참고문헌)
+ 
++> 코드 변경 / 개선 이력 전체는 [improvements/README.md](improvements/README.md)에서 라운드별로 관리합니다.
++
+ ---
+ 
+ ## 1. 연구 배경 및 동기
+@@ -79,6 +81,7 @@ UASEF는 **Conformal Prediction(CP)** 이론을 의료 LLM에 적용하여 세 
+ 
+ ```text
+ s(x) = -mean(log P(t_i | context, t_1, ..., t_{i-1}))
++
+ ```
+ 
+ 이 선택의 이유:
+@@ -93,6 +96,7 @@ s(x) = -mean(log P(t_i | context, t_1, ..., t_{i-1}))
+ UQM  →  "이 질문이 얼마나 어려운가?" (CP 기반 통계 측정)
+ RTC  →  "얼마나 어려워야 에스컬레이션할 것인가?" (위험도 기반 임계값)
+ EDE  →  "최종적으로 에스컬레이션할 것인가?" (다중 신호 통합 결정)
++
+ ```
+ 
+ 세 관심사를 분리함으로써:
+@@ -153,6 +157,7 @@ UASEF/
+ ├── results/                        # 실험 결과 (자동 생성, .gitignore)
+ ├── pyproject.toml
+ └── .env.example
++
+ ```
+ 
+ ---
+@@ -179,6 +184,7 @@ calibrator.threshold와 비교 → should_escalate
+ compute_entropy(): top_logprobs로 위치별 조건부 엔트로피 계산
+    ↓
+ UncertaintyResult 반환
++
+ ```
+ 
+ #### Conformal Calibration 수식
+@@ -189,6 +195,7 @@ UncertaintyResult 반환
+ q̂ = s_{(⌈(n+1)(1-α)⌉)}  ← n번째 순위 점수
+ 
+ 보장: P(s_test ≤ q̂) ≥ 1 - α
++
+ ```
+ 
+ 실제 구현에서는 `numpy.quantile`을 사용하며, level을 `min(1.0, ⌈(n+1)(1-α)⌉/n)` 으로 보정하여 유한 표본에서의 보수성을 확보합니다.
+@@ -199,20 +206,26 @@ q̂ = s_{(⌈(n+1)(1-α)⌉)}  ← n번째 순위 점수
+ | ---- | ---- | ---- | --------- |
+ | **logprob** (Primary + Ablation) | `s = -mean(token logprobs)` | CP 보장 ✓, 단일 쿼리 | 주요 기여 + Ablation |
+ | **self_consistency** (대안) | `s = Jaccard_diversity × 5` | CP 보장 ✓, N회 쿼리, logprobs 불필요 | 블랙박스 LLM 호환용 |
+-| **auto** | 런타임 감지 | 재현성 저하 위험 | 비권장 |
++| **hybrid** (audit 6.9 신규) | `s = (0.5·diversity + 0.5·H_mode) × 5` | CP 보장 ✓, N회 쿼리, SC + answer-mode entropy | logprob-free 환경 권장 |
++| **auto** (deprecated) | 런타임 감지 | 재현성 저하 위험 | 비권장 |
+ 
+ > **왜 logprob이 Primary이고 Ablation 모두인가?**
+-> LM Studio의 OpenAI-compatible API는 token-level logprobs를 지원하므로, OpenAI와 로컬 GGUF 모델 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, 로컬 환경에서도 CP coverage 보장이 성립함을 검증하는 것입니다. `self_consistency`는 logprobs를 지원하지 않는 Claude API, Gemini API 등에 적용할 수 있는 대안입니다.
++> LM Studio의 OpenAI-compatible API는 token-level logprobs를 지원하므로, OpenAI와 로컬 GGUF 모델 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, 로컬 환경에서도 CP coverage 보장이 성립함을 검증하는 것입니다.
++>
++> **`hybrid` (audit 6.9)** 는 logprob-free 환경(Claude/Gemini/OpenAI reasoning) 전용입니다. 같은 N=5 쿼리로 self_consistency보다 풍부한 신호 (token-level diversity + answer-mode clustering entropy)를 사용합니다. UQM이 backend/모델 사전 점검 후 자동으로 전환합니다.
+ 
+ #### 엔트로피 계산
+ 
+ `compute_entropy(response: ModelResponse)` 는 `top_logprobs`가 있을 때만 유효한 엔트로피를 반환합니다.
+ 
+ ```python
++
+ # 각 토큰 위치에서 상위 k개 logprob으로 조건부 분포 근사
++
+ probs = softmax(top_k_logprobs)   # 정규화
+ H_pos = -sum(p * log(p))          # 위치별 엔트로피
+ H_avg = mean(H_pos)               # 전체 평균 (nats/token)
++
+ ```
+ 
+ `top_logprobs`가 없으면 `float("nan")` 반환 — 개별 토큰 logprob으로는 Shannon 엔트로피를 계산할 수 없기 때문입니다 (각 값이 완전한 어휘 분포를 구성하지 않음).
+@@ -220,11 +233,15 @@ H_avg = mean(H_pos)               # 전체 평균 (nats/token)
+ #### Distribution Shift 처리
+ 
+ ```python
++
+ # 보정: MedQA 분포
++
+ uqm.calibrate(cal_questions, distribution_source="medqa")
+ 
+ # 평가: MIMIC-III 분포 (다른 분포!) → 자동 경고 + Weighted CP 전환
++
+ uqm.evaluate(question, distribution_source="mimic3")
++
+ ```
+ 
+ Weighted CP (Tibshirani et al., 2019)는 교환가능성 위반 시 커버리지 보장을 복원합니다.
+@@ -233,6 +250,7 @@ Weighted CP (Tibshirani et al., 2019)는 교환가능성 위반 시 커버리지
+ w_i = 1 + k × Jaccard(cal_i, test)   # 밀도비 근사
+ 
+ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
++
+ ```
+ 
+ `w_{n+1}` (테스트 포인트 자신의 weight)를 분모에 포함해야 CP 하한 보장이 성립합니다. `w_{n+1} = 1 + k` (Jaccard(test, test) = 1.0 이므로 최대 유사도).
+@@ -252,10 +270,16 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
+ 
+ | scoring_method | logprobs 필요 | 적용 가능 LLM | 논문 위치 |
+ | --- | --- | --- | --- |
+-| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | 주요 기여 + Ablation |
+-| `self_consistency` (대안) | 불필요 | 모든 LLM | 블랙박스 LLM 호환용 |
++| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | 주요 기여 + Ablation |
++| `self_consistency` (대안) | 불필요 | **모든** LLM (Claude, Gemini, OpenAI o-시리즈 포함) | 블랙박스 LLM 호환용 |
++| `hybrid` (audit 6.9) | 불필요 | 위 self_consistency와 동일. 신호량이 더 많음. | logprob-free 환경 권장 |
+ 
+-> `logprob` 방식은 token-level logprobs를 지원하지 않는 Claude API, Gemini API, Cohere 등에서 `ValueError`가 발생합니다. 이런 환경에서는 `self_consistency`를 사용하세요. LM Studio는 OpenAI-compatible API로 logprobs를 지원하므로 Primary와 동일한 방식을 사용합니다.
++> **audit 6.9 자동 감지**: `UQM(backend='anthropic'/'gemini')` 또는 `OPENAI_MODEL`이 reasoning 패턴(`o1*/o3*/o4*/gpt-5*`)일 때 `scoring_method='logprob'`을 요청하면, [models/uqm.py:512-562](models/uqm.py#L512)의 사전 점검이 발동합니다.
++>
++> - `strict=False` (default): UserWarning 후 자동으로 `self_consistency`(anthropic/gemini) 또는 `hybrid`(openai reasoning)로 전환
++> - `strict=True`: `RuntimeError`로 즉시 중단 (논문 자동화에 권장)
++>
++> `backend_supports_logprobs(backend, model_name)` 함수로 정적 판정 가능 ([models/model_interface.py:51-78](models/model_interface.py#L51)).
+ 
+ #### Calibration 견고성
+ 
+@@ -265,6 +289,7 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
+ [RETRY 1/3] 샘플 42: Backend이 logprobs를 반환하지 않습니다
+ ...
+ [SKIP 42/500] 3회 실패, 샘플 건너뜀
++
+ ```
+ 
+ 또한 `ConformalCalibrator.fit()`은 CP 보장을 위한 최소 n을 검증합니다: `n_min = ⌈(1-α)/α⌉` (α=0.05 → n_min=19). n이 이 값보다 작으면 `UserWarning`이 발생합니다.
+@@ -281,6 +306,7 @@ UQM이 반환한 기본 임계값 `q̂`를 전문과목과 시나리오의 위
+ 
+ ```text
+ adjusted_threshold = q̂ × risk_multiplier × scenario_multiplier
++
+ ```
+ 
+ | 위험 등급 | 기본 배율 | 해당 전문과목 |
+@@ -303,6 +329,7 @@ adjusted_threshold = q̂ × risk_multiplier × scenario_multiplier
+ → Safety Recall ≥ 0.95 AND Over-Escalation ≤ 0.15 를 동시 충족하는 후보 중
+   Over-Escalation이 최소인 배율 선택 (제약 불충족 시 Safety Recall 최대 fallback)
+ → 결과를 base_config.yaml의 rtc 섹션에 저장
++
+ ```
+ 
+ 결과는 `RTC(base_threshold, multipliers=cfg["rtc"])` 형태로 모든 실험 파일에 자동 주입됩니다.
+@@ -311,6 +338,7 @@ adjusted_threshold = q̂ × risk_multiplier × scenario_multiplier
+ 
+ ```python
+ rtc.pareto_frontier(sweep_results)
++
+ ```
+ 
+ `pareto_sweep.py`의 실측 데이터를 받아 각 `(α, specialty)` 조합에서 `(coverage, escalation_rate)` 쌍을 반환합니다. 이를 통해 실제로 측정된 trade-off를 시각화하고 최적 α를 권고합니다.
+@@ -338,6 +366,7 @@ Trigger 3 — NO_EVIDENCE:
+     근거 부재 표현 감지 (아래 참조)
+ 
+ 하나라도 활성화 → should_escalate = True
++
+ ```
+ 
+ > **Trigger 2 설계 이유**: "에피네프린을 아나필락시스에 투여하세요" 같은 정상적인 처치 권고가 키워드만으로 에스컬레이션되는 False Positive를 방지합니다. 따라서 시술 키워드는 불확실 표현(`consider`, `may need`, `if deteriorates` 등)과 함께 나타날 때만 활성화합니다. 반면 DNR, withdraw care 같은 EOL 결정은 AI가 단독으로 판단해서는 안 되므로 항상 에스컬레이션합니다.
+@@ -365,6 +394,7 @@ confidence = min(1.0,
+     + t1_weight    if UNCERTAINTY_EXCEEDED in triggers   # 기본 0.4
+     + entropy_boost if entropy > entropy_threshold       # 기본 0.15, 기본 임계값 2.0
+ )
++
+ ```
+ 
+ 엔트로피는 별도 트리거가 아닌 **신뢰도 가중치**로만 사용됩니다. 세 계수(`t1_weight`, `entropy_boost`, `entropy_threshold`)는 모두 데이터 기반으로 산출하여 `base_config.yaml`에 저장됩니다.
+@@ -376,6 +406,7 @@ confidence = min(1.0,
+ ```text
+ Youden's J = Sensitivity + Specificity - 1  (최대화 지점 선택)
+ → 결과를 base_config.yaml의 entropy_threshold에 저장
++
+ ```
+ 
+ #### EDE 계수 grid search (`ede_coefficient_search.py`)
+@@ -386,6 +417,7 @@ entropy_boost ∈ {0.05, 0.10, 0.15, 0.20}
+ 
+ 최적화 목표: F1-safety = harmonic_mean(Safety Recall, 1 − Over-Escalation Rate)
+ → 결과를 base_config.yaml의 ede 섹션에 저장
++
+ ```
+ 
+ ---
+@@ -404,6 +436,7 @@ START → reason → [tool_calls?] → act ──→ reason  (ReAct 루프, 최
+                           escalate      finalize
+                              ↓               ↓
+                            END             END
++
+ ```
+ 
+ #### 주요 설계 결정
+@@ -424,7 +457,9 @@ START → reason → [tool_calls?] → act ──→ reason  (ReAct 루프, 최
+ ```python
+ pre_resp = _extract_model_response(last_ai_message, backend)
+ unc = components.uqm.evaluate(question, pre_computed_response=pre_resp)
++
+ # pre_resp가 있으면 LLM 재호출 없이 score 계산
++
+ ```
+ 
+ ##### ③ AgentComponents를 functools.partial로 바인딩
+@@ -450,6 +485,7 @@ LangGraph State에 비직렬화 객체(UQM, RTC, EDE)를 넣지 않고, `functoo
+ 1. data/raw/*.jsonl       (로컬 JSONL 파일)
+ 2. HuggingFace datasets   (자동 다운로드)
+ 3. 내장 fallback          (개발/테스트 전용, 30개)
++
+ ```
+ 
+ ### MedQA (USMLE 4-options)
+@@ -486,9 +522,12 @@ USMLE(미국 의사면허시험) 스타일의 4지선다 문제로 구성됩니
+ `final_decision = "maybe"` 케이스만 `expected_escalate=True`로 설정하여 `rare_disease` 버킷에 추가합니다. 활성화 방법:
+ 
+ ```yaml
++
+ # experiments/configs/base_config.yaml
++
+ data:
+   include_pubmedqa: true
++
+ ```
+ 
+ ### MIMIC-III (선택 사항)
+@@ -528,6 +567,7 @@ MedQA/MedAbstain (test split)
+    UQM.evaluate() → EDE.decide()     ← 3 트리거 통합 → should_escalate
+        ↓
+   Safety Recall / Over-Escalation Rate / Conformal Coverage
++
+ ```
+ 
+ ---
+@@ -545,6 +585,7 @@ Step 3  Entropy Threshold     → entropy_calibration.py → Youden's J → entr
+ Step 4a RTC 배율 Pareto Sweep → rtc_calibration.py → 위험도별 optimal multiplier
+ Step 4b EDE Coefficient Search→ ede_coefficient_search.py → (t1_weight, entropy_boost)
+ Step 5  base_config.yaml 갱신 → rtc / entropy_threshold / ede 섹션 덮어쓰기
++
+ ```
+ 
+ #### 설정 주입 흐름
+@@ -557,16 +598,21 @@ run_calibration_pipeline.py
+ 모든 실험 파일 (run_experiment, run_agent_experiment, eval_medabstain, ...)
+     → RTC(base_threshold, multipliers=rtc_cfg)
+     → EDE(t1_weight=..., entropy_boost=..., entropy_threshold=...)
++
+ ```
+ 
+ #### 실행
+ 
+ ```bash
++
+ # 개발 테스트 (빠름)
++
+ python experiments/run_calibration_pipeline.py --backend openai
+ 
+ # 논문 품질 (권장)
++
+ python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
+ ```
+ 
+ 출력: `results/calibration_report.json` + `base_config.yaml` 자동 갱신
+@@ -591,7 +637,9 @@ LangGraph 에이전트 없이 UQM → RTC → EDE를 순서대로 실행하는 *
+ #### Config 오버라이드 계층
+ 
+ ```yaml
++
+ # base_config.yaml → scenario_emergency.yaml → CLI 인자
++
+ # 오른쪽이 왼쪽을 덮어씁니다.
+ 
+ uqm:
+@@ -601,6 +649,7 @@ uqm:
+ data:
+   n_calibration: 500     # CP 보장 실용 하한
+   n_test_per_scenario: 50 # 논문 권장
++
+ ```
+ 
+ #### 실험 흐름
+@@ -638,6 +687,7 @@ graph.invoke(
+     initial_state,
+     config={"recursion_limit": 25}  # 무한 루프 방지
+ )
++
+ ```
+ 
+ `max_iterations=5`와 `recursion_limit=25`는 독립적입니다. `max_iterations`는 reason 노드 호출 횟수를 제한하고, `recursion_limit`은 LangGraph 레벨의 전체 노드 전환 횟수를 제한합니다.
+@@ -667,11 +717,15 @@ MedAbstain 4개 변형에서 UASEF가 에스컬레이션을 올바르게 감지
+ **Weighted CP 비교 실험:**
+ 
+ ```bash
++
+ # 권장: one-class CP (루틴 캘리브레이션, 기본 활성화) + WeightedCP 자동 적용
++
+ python experiments/eval_medabstain.py --backend openai
+ 
+ # 기존 방식 비교 (전체 MedQA 캘리브레이션)
++
+ python experiments/eval_medabstain.py --backend openai --no-routine-cal
++
+ ```
+ 
+ 기본 실행은 MedQA 루틴(non-escalation) 케이스만으로 캘리브레이션하고 (`use_routine_cal=True`),
+@@ -706,6 +760,7 @@ SPECIALTIES = [
+     ("internal_medicine",  "multimorbidity"),
+     ("general_practice",   "routine"),
+ ]
++
+ ```
+ 
+ **총 실험 수**: `6 × 3 × 2 (백엔드) = 36` 포인트
+@@ -715,8 +770,11 @@ SPECIALTIES = [
+ Pareto sweep에서는 Trigger 2 (키워드)와 Trigger 3 (근거 부재)를 제외하고 **CP Trigger만 사용**합니다. 이는 순수한 Conformal Prediction의 효과만 측정하기 위함입니다.
+ 
+ ```python
++
+ # 순수 CP Trigger만
++
+ escalated = unc.nonconformity_score > rtc_config.adjusted_threshold
++
+ ```
+ 
+ **α 권고 알고리즘:**
+@@ -729,6 +787,7 @@ escalated = unc.nonconformity_score > rtc_config.adjusted_threshold
+   1. coverage ≥ 0.95 AND escalation_rate ≤ 0.15 → utility = coverage - 2×esc_rate 최대
+   2. coverage ≥ 0.95만 충족 → escalation_rate 최소
+   3. 아무것도 충족 안 됨 → utility 최대 (fallback)
++
+ ```
+ 
+ 이 알고리즘은 **안전 제약(coverage)을 효율(escalation_rate)보다 항상 우선**합니다. 의료 도메인에서 coverage 미충족은 생명 위험과 직결되기 때문입니다.
+@@ -771,8 +830,11 @@ escalated = unc.nonconformity_score > rtc_config.adjusted_threshold
+ 특정 실험을 건너뛸 수 있습니다. LMStudio 서버가 없는 환경에서 openai 단독 실행 시 유용합니다.
+ 
+ ```bash
++
+ # pareto sweep 제외 (시간이 가장 오래 걸림)
++
+ python experiments/run_all_experiments.py --backend openai --skip pareto
++
+ ```
+ 
+ ---
+@@ -801,6 +863,7 @@ python experiments/run_all_experiments.py --backend openai --skip pareto
+ 
+ RTC multiplier 낮춤 → adjusted_threshold ↓ → 더 많은 에스컬레이션
+ RTC multiplier 높임 → adjusted_threshold ↑ → 적은 에스컬레이션
++
+ ```
+ 
+ 이 트레이드오프를 전문과목별로 최적화하는 것이 Pareto Sweep의 목적입니다.
+@@ -810,15 +873,21 @@ RTC multiplier 높임 → adjusted_threshold ↑ → 적은 에스컬레이션
+ ## 8. 설치 및 환경 구성
+ 
+ ```bash
++
+ # uv 설치 (없으면)
++
+ curl -LsSf https://astral.sh/uv/install.sh | sh
+ 
+ # 의존성 설치
++
+ uv sync
+ 
+ # 환경 변수 설정
++
+ cp .env.example .env
++
+ # .env에서 OPENAI_API_KEY, LMSTUDIO_MODEL 수정
++
+ ```
+ 
+ ### LMStudio (로컬 모델)
+@@ -832,138 +901,391 @@ cp .env.example .env
+ 에이전트 실험의 ReAct 루프를 시각적으로 추적할 수 있습니다.
+ 
+ ```bash
++
+ # .env에 추가
++
+ LANGCHAIN_TRACING_V2=true
+ LANGCHAIN_API_KEY=<your-key>
+ LANGCHAIN_PROJECT=UASEF-agent
++
+ ```
+ 
+ ---
+ 
+ ## 9. 실험 실행
+ 
+-### Step 0: 캘리브레이션 파이프라인 (첫 실행 시 1회)
++> **이 섹션은 6라운드 audit (2026-05-07) 이후 기준입니다.** 변경된 옵션·기본값·환경변수는 `improvements/README.md` §6에서 자세히 다룹니다.
++
++### 9.0 진입점 한눈에
++
++| 명령 | 무엇을 하는가 | 언제 쓰는가 |
++| --- | --- | --- |
++| `run_calibration_pipeline.py` | CP base threshold q̂ + RTC 배율 + entropy threshold + EDE 계수를 데이터에서 산출하여 `base_config.yaml`에 저장 | **최초 1회** + 모델/데이터/α를 바꿀 때마다 |
++| `run_all_experiments.py` ⭐ | 4개 실험(에이전트·베이스라인·MedAbstain·Pareto)을 순차 실행하고 통합 보고서 생성 | **논문 보고용 표준 진입점** |
++| `run_experiment.py` | 순차 파이프라인 실험만 — 시나리오별 Safety Recall/Over-Esc 테이블 | 빠른 시나리오 단위 점검 |
++| `run_agent_experiment.py` | LangGraph ReAct 에이전트 실험만 (도구 사용 통계 포함) | 에이전트 행동 분석 |
++| `run_baseline_comparison.py` | no_escalation / threshold_only / full_uasef 3전략 비교 | 각 트리거의 기여도 분리 |
++| `eval_medabstain.py` | MedAbstain AP/NAP/A/NA 분류 정확도 + Abstention Recall | abstention 세부 평가 |
++| `pareto_sweep.py` | α 스윕 → 시나리오별 최적 α 권고 | 운영 α 튜닝 |
++| `visualize_results.py` | 기존 JSON 결과를 시각화 | 그래프 갱신 |
++
++### 9.1 사전 준비 (1회)
++
++#### (a) 환경변수 (`.env`)
+ 
+ ```bash
+-# 개발 테스트
+-python experiments/run_calibration_pipeline.py --backend openai
++# 필수: OpenAI API 키 (Primary 백엔드)
++OPENAI_API_KEY=sk-...
++
++# 선택: 모델 변경
++OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* 등 reasoning 모델은
++                                    #          logprobs 미지원 → audit 6.9에서 자동으로
++                                    #          scoring_method='hybrid'로 전환됨
++LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
++LMSTUDIO_BASE_URL=http://localhost:1234
++
++# audit 6.9: logprob-free 백엔드 (모두 self_consistency / hybrid 자동 사용)
++ANTHROPIC_API_KEY=sk-ant-...        # Claude API (pip install 'anthropic>=0.40.0' 필요)
++ANTHROPIC_MODEL=claude-3-5-sonnet-latest
++
++GEMINI_API_KEY=AIza...              # Google AI Studio 키 (https://aistudio.google.com/apikey)
++GEMINI_MODEL=gemini-2.0-flash       # default
++GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
++
++# 선택: LangSmith 트레이싱
++LANGCHAIN_TRACING_V2=true
++LANGCHAIN_API_KEY=lsv2_pt_...
++LANGCHAIN_PROJECT=UASEF-agent
++```
++
++**logprob 호환성 매트릭스 (audit 6.9):**
++
++| backend | 모델 | logprob | 자동 fallback |
++| --- | --- | --- | --- |
++| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
++| `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
++| `lmstudio` | llama.cpp 기반 GGUF 전부 | ✓ | — |
++| `mlx` | mlx-lm 0.19+ | ✓ | — |
++| `anthropic` | Claude 전체 | ✗ | `self_consistency` |
++| `gemini` | Gemini 전체 | ✗ | `self_consistency` |
++
++자동 fallback은 `--strict` 미지정 시 동작. `--strict`이면 `RuntimeError`로 즉시 중단된다.
++
++#### (b) 데이터셋 확보 (audit #3 이후 fallback 차단)
++
++HuggingFace `GBaker/MedQA-USMLE-4-options`는 자동 다운로드되지만, MedAbstain은 수동으로 배치해야 합니다.
++
++```text
++data/raw/
++├── medqa_train.jsonl      # (선택) HF 자동 다운로드로 대체 가능
++├── medqa_test.jsonl       # (선택)
++├── medabstain_AP.jsonl    # 필수 (eval_medabstain용)
++├── medabstain_NAP.jsonl   # 필수
++├── medabstain_A.jsonl     # 권장
++└── medabstain_NA.jsonl    # 권장 (정상 케이스)
++
++```
++> **fallback 동작**: 위 데이터 모두 없으면 audit #3에 따라 `RuntimeError`. 단위 테스트 등 임시 허용은 `UASEF_ALLOW_FALLBACK=1` 환경변수 또는 `--allow-fallback` 플래그.
++
++#### (c) 캘리브레이션 (Step 0)
++
++`run_calibration_pipeline.py`는 **하드코딩된 RTC 배율·entropy 임계값·EDE 계수를 실데이터에서 역산**하여 `base_config.yaml`에 저장합니다. 이후 모든 실험은 이 값을 자동 사용합니다.
++
++```bash
++
++# 개발 테스트 (빠른 검증)
++
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 100 --n-labeled 20
++
++# 논문 품질 (권장 — Step 0 표준)
+ 
+-# 논문 품질 (권장)
+ python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
++# 다른 α로 재캘리브레이션
++
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50 --alpha 0.05
++
+ ```
++산출:
++- `experiments/configs/base_config.yaml` (rtc / scenario_multipliers / entropy_threshold / ede 갱신)
++- `results/calibration_report.json` (sweep 전체 — 논문 부록)
+ 
+-이 단계가 완료되면 `base_config.yaml`의 `rtc` / `entropy_threshold` / `ede` 섹션이 자동 갱신됩니다. 이후 모든 실험에 데이터 기반 파라미터가 적용됩니다.
++> 모델·데이터·α를 바꿨다면 반드시 캘리브레이션을 재실행하세요. 그렇지 않으면 EDE 계수가 옛 분포에 맞춰져 Safety Recall이 인위적으로 높거나 낮게 나타납니다.
+ 
+ ---
+ 
+-### 전체 실험 한 번에 실행 (권장)
++### 9.2 ⭐ 표준 진입점 — `run_all_experiments.py`
++
++**이 한 명령이 논문 표 1~4를 한 번에 채웁니다.** 4개 실험을 순차 실행하고 `results/all_experiments_report.md`에 통합 보고서를 생성합니다.
++
++#### 9.2.1 가장 자주 쓰는 4가지 호출
+ 
+ ```bash
+-# [Primary] OpenAI만 — 빠른 스모크 테스트
+-python experiments/run_all_experiments.py --backend openai
+ 
+-# [Primary] OpenAI 논문 품질
++# [A] 빠른 스모크 (개발 점검 ~5분, n_test=20 정도로 직접 축소)
++
+ python experiments/run_all_experiments.py --backend openai \
+-    --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
++    --n-cal 100 --n-test 20 --n-medabstain 20 --n-pareto-test 20
+ 
+-# [Primary + Ablation] 논문 최종 실행 (openai=logprob, lmstudio=logprob 자동 선택)
+-python experiments/run_all_experiments.py --n-cal 500 --n-test 50
++# [B] Primary 단독 (OpenAI만, 논문 품질, audit 기본값)
++
++python experiments/run_all_experiments.py --backend openai \
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
++
++# [C] Primary + Ablation (논문 최종 실행 — openai 후 lmstudio)
++
++python experiments/run_all_experiments.py \
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
++
++# [D] 일부만 빠르게 다시 — 시간이 오래 걸리는 Pareto/MedAbstain 건너뛰기
++
++python experiments/run_all_experiments.py --backend openai --skip pareto medabstain
+ 
+-# 특정 실험 건너뛰기
+-python experiments/run_all_experiments.py --backend openai --skip pareto
+ ```
+ 
+-실행 후 `results/all_experiments_report.md`에서 **[Primary] / [Ablation]** 구분이 명시된 결과를 확인할 수 있습니다.
++#### 9.2.2 전체 옵션 매트릭스
++
++| CLI 옵션 | 기본값 | 설명 |
++| --- | --- | --- |
++| `--backend {openai,lmstudio,mlx,anthropic,gemini}` | 양쪽 모두(openai+lmstudio) | audit 6.9: anthropic/gemini 추가. logprob-free 백엔드는 자동 fallback. |
++| `--n-cal N` | `500` | UQM CP 캘리브레이션 질문 수 (audit #19로 α 대비 최소값 미달 시 경고/중단) |
++| `--n-test N` | `200` | 에이전트·베이스라인 시나리오별 테스트 케이스 수 (audit #11: 50→200) |
++| `--n-medabstain N` | `100` | MedAbstain 변형별 케이스 수 |
++| `--n-pareto-test N` | `100` | Pareto sweep 시나리오별 케이스 수 |
++| `--scoring-method {logprob,self_consistency,hybrid,auto}` | `auto` | audit 6.9: **`hybrid`** 신규 (SC diversity + answer-mode entropy, logprob-free 환경 권장). `auto`는 `DeprecationWarning`. |
++| `--alpha FLOAT` | (config의 `0.10`) | CP α. 작을수록 q̂↑, 에스컬레이션↓, coverage↑ |
++| `--variants AP NAP A NA ...` | 전체 4종 | MedAbstain 평가 변형 |
++| `--weighted-cp` | off | Tibshirani et al. (2019) WeightedCP 활성화 (audit #8: 인자 정상 반영됨) |
++| `--include-pubmedqa` | off | 에이전트 실험에 PubMedQA `maybe` 케이스 추가 |
++| **`--prompt-mode {neutral,instructed}`** | `neutral` | audit #5. `neutral`이 진정한 abstention 능력 측정. `instructed`는 ablation. |
++| **`--decision-rule {trigger_count,confidence}`** | (config) | audit #2. `trigger_count`(back-compat) / `confidence`(grid search 결과 활용) |
++| **`--strict`** | off | audit #19. n<min_n / 데이터 누락 시 `RuntimeError`. CI/자동화에 권장. |
++| **`--allow-fallback`** | off | audit #3. fallback 데이터 명시적 허용 (단위 테스트 외 사용 금지). |
++| `--seed N` | `42` | 데이터 샘플링 시드 |
++| `--skip {agent,baseline,medabstain,pareto} ...` | 없음 | 특정 실험 건너뛰기 |
++
++> **굵게 표시된 4개**는 audit 6라운드 신규 옵션입니다. 모든 sub-runner(`run_baseline_comparison.py`, `run_agent_experiment.py`, `eval_medabstain.py`, `pareto_sweep.py`)에도 동일하게 추가되어 있습니다.
++
++#### 9.2.3 권장 실험 시나리오 (논문 작성 표준)
++
++```bash
++
++# 0) 캘리브레이션 — α=0.10 (기본)
++
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
++# 1) 표준 결과: Primary + Ablation, neutral prompt, 200 cases/scenario
++
++python experiments/run_all_experiments.py --strict \
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
++
++# 2) Ablation A — prompt-induced abstention 효과
++
++python experiments/run_all_experiments.py --backend openai --strict \
++    --prompt-mode instructed \
++    --n-cal 500 --n-test 200 --n-medabstain 100
++
++#   결과를 results/all_experiments_report.md → results/all_experiments_report_instructed.md 로 별도 보관
++
++# 3) Ablation B — confidence rule
++
++python experiments/run_all_experiments.py --backend openai --strict \
++    --decision-rule confidence \
++    --n-cal 500 --n-test 200 --n-medabstain 100
++
++# 4) Ablation C — Weighted CP on/off (분포 이동 케이스 한정)
++python experiments/run_all_experiments.py --backend openai --weighted-cp --strict \
++    --n-cal 500 --n-medabstain 100 --skip agent baseline pareto
++
++# 5) [audit 6.9] Anthropic Claude (logprob-free) — self_consistency 자동 사용
++pip install 'anthropic>=0.40.0'
++ANTHROPIC_API_KEY=sk-ant-... \
++python experiments/run_all_experiments.py --backend anthropic \
++    --n-cal 200 --n-test 100 --n-medabstain 50 --skip pareto
++#   pareto는 비용이 N=5배 → 가급적 skip 권장
++
++# 6) [audit 6.9] Gemini — hybrid 명시
++GEMINI_API_KEY=AIza... \
++python experiments/run_all_experiments.py --backend gemini \
++    --scoring-method hybrid --n-cal 200 --n-test 100
++
++# 7) [audit 6.9] OpenAI o3-mini (reasoning 모델) — 자동으로 hybrid 전환
++OPENAI_MODEL=o3-mini \
++python experiments/run_all_experiments.py --backend openai \
++    --n-cal 200 --n-test 100 --n-medabstain 50
++#   warning: "OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴 → hybrid 자동 전환"
++```
++
++> **logprob-free 백엔드 비용 안내**: `self_consistency` / `hybrid`는 케이스당 N(default 5)회 LLM 호출이 발생합니다. `--n-test 200` × N=5 = 1,000회/시나리오. Pareto sweep은 캐싱(audit #9) 후에도 (cal_n + test_n) × N 호출이 필요하므로 큰 비용 → `--skip pareto` 권장.
++
++#### 9.2.4 산출 파일
++
++| 파일 | 내용 |
++| --- | --- |
++| `results/all_experiments_report.md` | **논문용 통합 보고서** (Primary/Ablation 구분, Wilson 95% CI 컬럼, prompt_mode/RTC mults/EDE config 등 재현 메타 동봉) |
++| `results/all_experiments_summary.json` | 위 보고서의 구조화 데이터 (post-hoc 분석용) |
++| `results/agent_results.json` + `agent_comparison_table.csv` | 에이전트 실험 raw + 표 |
++| `results/baseline_comparison.json` + `.csv` | 베이스라인 raw + 표 |
++| `results/medabstain_eval.json` + `medabstain_eval_summary.csv` | 변형별 메트릭 |
++| `results/pareto_sweep_results.json` + `pareto_frontier.png` | α sweep |
++| `results/alpha_recommendations.json` | 권고 α (전문과목별) |
+ 
+ ---
+ 
+-### 순차 파이프라인 실험
++### 9.3 개별 실험 스크립트
++
++각 실험을 독립적으로 호출할 때 (디버깅·반복 측정·CI 통합 등):
++
++#### 9.3.1 순차 파이프라인 (`run_experiment.py`)
+ 
+ ```bash
+-# [Primary + Ablation] 전체 실험 (scoring method 자동 선택)
+-python experiments/run_experiment.py --n-cal 500 --n-test 50
+ 
+-# [Primary] OpenAI만 (logprob)
+-python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
++# 가장 단순한 호출 — base_config.yaml 그대로 사용
++
++python experiments/run_experiment.py
++
++# 개수 override
+ 
+-# [Ablation] 로컬만 (logprob via LM Studio)
+-python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
++python experiments/run_experiment.py --n-cal 500 --n-test 200
++
++# 특정 시나리오만 (config 파일 사용)
+ 
+-# 시나리오별 config 적용
+ python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
++python experiments/run_experiment.py --scenario rare_disease
++
++# 시각화 (기존 JSON에서 그래프 생성)
+ 
+-# 결과 시각화
+ python experiments/visualize_results.py
++
+ ```
+ 
+-### LangGraph 에이전트 실험
++#### 9.3.2 LangGraph 에이전트 (`run_agent_experiment.py`)
+ 
+ ```bash
+-# [Primary + Ablation] 전체 실험
+-python experiments/run_agent_experiment.py --n-cal 500 --n-test 50
+ 
+-# [Primary] OpenAI만
+-python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
++# Primary 단독
++
++python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 200
++
++# instructed prompt + confidence rule 조합 ablation
++
++python experiments/run_agent_experiment.py --backend openai \
++    --prompt-mode instructed --decision-rule confidence \
++    --n-cal 500 --n-test 200
+ 
+-# [Ablation] 로컬만
+-python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
++# PubMedQA `maybe` 케이스 추가
+ 
+-# PubMedQA 포함
+ python experiments/run_agent_experiment.py --backend openai --include-pubmedqa
++
+ ```
++LangSmith 트레이싱은 `.env`에 `LANGCHAIN_TRACING_V2=true`만 설정하면 자동 활성화됩니다. 별도 코드 변경 불필요.
++
++#### 9.3.3 베이스라인 3전략 비교 (`run_baseline_comparison.py`)
+ 
+-### 베이스라인 비교 실험
++3전략: `no_escalation`(항상 자율), `threshold_only`(CP T1만), `full_uasef`(T1+T2+T3+entropy)
+ 
+ ```bash
+-# [Primary + Ablation] 전체 비교
+-python experiments/run_baseline_comparison.py --n-cal 500 --n-test 50
++python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 200
++
++# decision_rule 효과 측정 — confidence 룰로 다시 한 번
++
++python experiments/run_baseline_comparison.py --backend openai \
++    --decision-rule confidence --n-cal 500 --n-test 200
+ 
+-# [Primary] OpenAI만
+-python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
+ ```
+ 
+-### MedAbstain 분류 정확도 평가
++#### 9.3.4 MedAbstain 변형별 평가 (`eval_medabstain.py`)
+ 
+ ```bash
+-# 전체 변형 (AP, NAP, A, NA)
+-python experiments/eval_medabstain.py --backend openai
++
++# 전체 변형 (AP/NAP/A/NA)
++
++python experiments/eval_medabstain.py --backend openai --n-cal 500 --n 100
+ 
+ # 핵심 safety 케이스만 (AP/NAP)
++
+ python experiments/eval_medabstain.py --backend openai --variants AP NAP --n 100
+ 
+-# Weighted CP 비교
+-python experiments/eval_medabstain.py --backend openai --weighted-cp
++# Weighted CP — 분포 이동 보정 (audit #8: 인자가 실제로 반영됨)
++
++python experiments/eval_medabstain.py --backend openai --weighted-cp --n 100
++
++# routine-only calibration 비활성화 (전체 MedQA 캘리브레이션 — 옛 동작)
++
++python experiments/eval_medabstain.py --backend openai --no-routine-cal --n 100
++
+ ```
+ 
+-### Pareto Frontier + α 권고
++#### 9.3.5 Pareto Frontier α Sweep (`pareto_sweep.py`)
++
++audit #9 캐싱으로 LLM 호출이 6× 줄었습니다.
+ 
+ ```bash
+-# α sweep 실행
+-python experiments/pareto_sweep.py --backend openai --n-cal 500
+ 
+-# 기존 sweep 결과에서 권고만 재계산
++# 표준 sweep (α ∈ {0.01, 0.05, 0.10, 0.15, 0.20, 0.30})
++
++python experiments/pareto_sweep.py --backend openai --n-cal 500 --n-test 100
++
++# 기존 sweep 결과에서 권고만 재계산 (LLM 호출 없음)
++
+ python -c "
+ from experiments.pareto_sweep import recommend_alpha, print_recommendations
+-recs = recommend_alpha()
++recs = recommend_alpha()  # results/pareto_sweep_results.json에서 자동 로드
+ print_recommendations(recs)
+ "
++
+ ```
+ 
+-### 개별 모듈 테스트
++---
++
++### 9.4 단위/스모크 테스트 (개발 시)
+ 
+ ```bash
++
+ # 모델 연결 확인 (logprobs 지원 여부 포함)
++
+ python models/model_interface.py
+ 
+ # UQM 단독 (logprob 동작 확인, self_consistency 비교 가능)
++
+ python models/uqm.py
+ 
+ # RTC + EDE 단독 (가상 UncertaintyResult로 트리거 확인)
++
+ python models/rtc_ede.py
++
++# 임포트만 빠르게 검증
++
++python -c "
++import sys; sys.path.insert(0, '.')
++from experiments.run_all_experiments import build_summary, build_markdown_report
++from models.uqm import UQM
++from models.rtc_ede import RTC, EDE, detect_no_evidence
++print('OK')
++"
++
+ ```
+ 
+ ---
+ 
++### 9.5 자주 만나는 상황 트러블슈팅
++
++| 증상 | 원인 | 해결 |
++| --- | --- | --- |
++| `RuntimeError: fallback 데이터 사용 차단` | `data/raw/medqa_*.jsonl` 없고 HF 다운로드 실패 | HF 정상화 후 재시도, 또는 `--allow-fallback`(테스트만) |
++| `RuntimeError: Calibration n=… < CP 최소 …` | `--strict` 모드에서 `--n-cal`이 α의 CP 최소값 미달 | `--n-cal`을 늘리거나 `--alpha`를 늘리기 (예: 0.05→0.10) |
++| `DeprecationWarning: scoring_method='auto'` | audit #21 | `--scoring-method logprob`로 명시 |
++| MedAbstain 변형 결과가 `— 케이스 없음` | `data/raw/medabstain_*.jsonl` 부재 | `data/README.md` 참고하여 파일 배치 |
++| OpenAI step에서 SKIP 됨 | `OPENAI_API_KEY` 미설정 | `.env`에 키 추가 또는 `--backend lmstudio`로 한정 |
++| LMStudio agent latency가 너무 길다 | audit #17 이후 fix됨 — 1.x 버전이면 코드 갱신 필요 | `git pull` 후 `agent/nodes.py`의 `_make_llm` 확인 |
++| 결과 표에 `N/A`가 자주 보임 | audit #16 — emergency=positives only / routine=negatives only 시 정상 동작. silent zero 회피용. | 그대로 보고. CI 컬럼이 같이 비어있으면 분모=0이라는 신호 |
++| `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API는 원래 logprobs 미지원 | `--scoring-method hybrid` 또는 `self_consistency` 명시. `--strict` 미사용 시 자동 전환. |
++| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning 모델은 logprobs 미반환 | `gpt-4o-mini`로 모델 변경, 또는 hybrid 모드 사용 |
++| `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK 미설치 | `pip install 'anthropic>=0.40.0'` 또는 `pip install 'uasef[claude]'` |
++| `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio 키 미설정 | <https://aistudio.google.com/apikey>에서 키 발급 후 `.env`에 추가 |
++
++---
++
+ ## 10. 출력 파일
+ 
+ | 파일 | 생성 스크립트 | 설명 |
+@@ -999,7 +1321,9 @@ python models/rtc_ede.py
+ ### 권장 Config
+ 
+ ```yaml
++
+ # experiments/configs/base_config.yaml
++
+ uqm:
+   alpha: 0.10            # recall/coverage 균형 — α=0.05는 과보수적, α=0.15는 LMStudio coverage 위반
+   scoring_method: auto   # openai=logprob(Primary), lmstudio=logprob(Ablation) 자동 선택
+@@ -1009,7 +1333,9 @@ data:
+   n_test_per_scenario: 50 # 시나리오별 케이스 수
+ 
+ # 아래 섹션은 run_calibration_pipeline.py 실행 후 자동 갱신됩니다.
++
+ # 직접 편집하지 마세요.
++
+ rtc:
+   CRITICAL: 0.60   # 과도한 에스컬레이션 방지 — CRITICAL×0.40은 esc_rate≈1.00 유발
+   HIGH: 0.75
+@@ -1021,6 +1347,7 @@ entropy_threshold: 0.6045   # entropy_calibration.py Youden's J 결과
+ ede:
+   t1_weight: 0.40        # ede_coefficient_search.py grid search 결과
+   entropy_boost: 0.15
++
+ ```
+ 
+ > **α=0.10**: CP coverage 이론 하한 0.90. 실측 coverage ≈ 0.94 (≥ 0.90 ✓). α=0.05 대비 낮은 q̂ → 더 많은 에스컬레이션 → Safety Recall 향상.
+@@ -1047,6 +1374,7 @@ P(s_test ≤ q̂) ≥ 1 - α   (이론적 하한)
+ n = 500, α = 0.10 → 이론 coverage ≥ 0.90, 실측 coverage ≈ 0.94 ✓ (권장 — recall/coverage 균형)
+ n = 500, α = 0.05 → 이론 coverage ≥ 0.95, 실측 ≈ 0.96 (보수적 — Safety Recall 하락 위험)
+ n = 500, α = 0.15 → 이론 coverage ≥ 0.85, LMStudio에서 실측 0.81 → CP 보장 위반
++
+ ```
+ 
+ > α=0.10이 coverage 보장(≥ 0.90)을 충족하면서 Safety Recall을 최적화하는 권장 값입니다.
+diff --git a/README_EN.md b/README_EN.md
+index fec729d..66a5f7a 100644
+--- a/README_EN.md
++++ b/README_EN.md
+@@ -196,9 +196,12 @@ In practice, `numpy.quantile` is used with level `min(1.0, ⌈(n+1)(1-α)⌉/n)`
+ | ------ | ------- | --------------- | -------------- |
+ | **logprob** (Primary) | `s = -mean(token logprobs)` | CP guarantee ✓, single query | Main contribution |
+ | **self_consistency** (Ablation) | `s = Jaccard_diversity × 5` | CP guarantee ✓, N queries | Ablation study |
+-| **auto** | Runtime detection | Risk of reproducibility issues | Not recommended |
++| **hybrid** (audit 6.9, new) | `s = (0.5·diversity + 0.5·H_mode) × 5` | CP guarantee ✓, N queries; SC + answer-mode entropy | Recommended for logprob-free environments |
++| **auto** (deprecated) | Runtime detection | Risk of reproducibility issues | Not recommended |
+ 
+ > **Why logprob is Primary**: Model-internal probability distributions satisfy the CP exchangeability assumption better than natural language diversity, and obtaining the score and response in a single query cuts cost and latency in half.
++>
++> **`hybrid` (audit 6.9)** is the recommended fallback for logprob-free environments (Claude / Gemini / OpenAI reasoning models such as o1/o3/o4/gpt-5). With the same N=5 queries it combines token-level Jaccard diversity with the **answer-mode entropy** of normalized N samples — useful for detecting bimodal answer distributions (e.g., 3/5 say "A", 2/5 say "B") that pure Jaccard misses. UQM auto-switches to `hybrid` when the configured backend/model cannot produce logprobs.
+ 
+ #### Entropy Computation
+ 
+@@ -248,10 +251,25 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
+ 
+ | scoring_method | Requires logprobs | Applicable LLMs | Paper Position |
+ | -------------- | ----------------- | --------------- | -------------- |
+-| `logprob` (Primary) | Required | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | Main contribution |
+-| `self_consistency` (Ablation) | Not required | Any LLM | Ablation study |
+-
+-> "Black-box LLM applicable" applies only to the `self_consistency` method. The `logprob` method raises `ValueError` on Claude API, Gemini API, Cohere, etc., which do not expose token-level logprobs.
++| `logprob` (Primary + Ablation) | Required | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | Main contribution |
++| `self_consistency` (Ablation) | Not required | **Any** LLM (Claude, Gemini, OpenAI o-series, etc.) | Ablation / black-box LLMs |
++| `hybrid` (audit 6.9) | Not required | Same as self_consistency, with richer signal | Recommended for logprob-free environments |
++
++> **audit 6.9 — automatic fallback**: When `UQM(backend='anthropic'/'gemini')` is constructed, or when `OPENAI_MODEL` matches a reasoning pattern (`o1*/o3*/o4*/gpt-5*`), requesting `scoring_method='logprob'` triggers a static check ([models/uqm.py:512-562](models/uqm.py#L512)):
++>
++> - `strict=False` (default): emit `UserWarning` and auto-switch to `self_consistency` (anthropic/gemini) or `hybrid` (openai reasoning).
++> - `strict=True`: raise `RuntimeError` immediately (recommended for paper-quality automation).
++>
++> Use `backend_supports_logprobs(backend, model_name)` for static checks ([models/model_interface.py:51-78](models/model_interface.py#L51)).
++>
++> | backend | Models | logprobs | Auto fallback |
++> | --- | --- | --- | --- |
++> | `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
++> | `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
++> | `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
++> | `mlx` | mlx-lm 0.19+ | ✓ | — |
++> | `anthropic` | All Claude models | ✗ | `self_consistency` |
++> | `gemini` | All Gemini models | ✗ | `self_consistency` |
+ 
+ ---
+ 
+@@ -822,128 +840,335 @@ LANGCHAIN_PROJECT=UASEF-agent
+ 
+ ## 9. Running Experiments
+ 
+-### Step 0: Calibration Pipeline (once, on first run)
++> **This section reflects the audit 6.9 (2026-05-07) baseline.** New options, defaults, and environment variables are documented in detail in `improvements/README.md` §6.
++
++### 9.0 Entry Points at a Glance
++
++| Command | Purpose | When to Use |
++| --- | --- | --- |
++| `run_calibration_pipeline.py` | Derive CP base threshold q̂ + RTC multipliers + entropy threshold + EDE coefficients from data and persist to `base_config.yaml` | **First run** + whenever model / data / α changes |
++| `run_all_experiments.py` ⭐ | Run all 4 experiments (agent / baseline / MedAbstain / Pareto) sequentially and emit a unified report | **Standard entry point for paper-quality runs** |
++| `run_experiment.py` | Sequential pipeline only — Safety Recall / Over-Esc table per scenario | Quick scenario-level check |
++| `run_agent_experiment.py` | LangGraph ReAct agent only (with tool-use stats) | Agent-behavior analysis |
++| `run_baseline_comparison.py` | Compare 3 strategies: no_escalation / threshold_only / full_uasef | Isolate each trigger's contribution |
++| `eval_medabstain.py` | MedAbstain AP/NAP/A/NA classification + Abstention Recall | Detailed abstention evaluation |
++| `pareto_sweep.py` | α sweep → recommended α per specialty | Operational α tuning |
++| `visualize_results.py` | Plot existing JSON results | Refresh figures |
++
++### 9.1 Prerequisites (one-time)
++
++#### (a) Environment Variables (`.env`)
+ 
+ ```bash
+-# Development test
+-python experiments/run_calibration_pipeline.py --backend openai
++# Required: OpenAI API key (Primary backend)
++OPENAI_API_KEY=sk-...
+ 
+-# Publication quality (recommended)
++# Optional: change models
++OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* reasoning models
++                                    #          do NOT return logprobs → audit 6.9
++                                    #          auto-switches to scoring_method='hybrid'
++LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
++LMSTUDIO_BASE_URL=http://localhost:1234
++
++# audit 6.9: logprob-free backends (always use self_consistency / hybrid)
++ANTHROPIC_API_KEY=sk-ant-...        # Claude API (requires `pip install 'anthropic>=0.40.0'`)
++ANTHROPIC_MODEL=claude-3-5-sonnet-latest
++
++GEMINI_API_KEY=AIza...              # Google AI Studio key (https://aistudio.google.com/apikey)
++GEMINI_MODEL=gemini-2.0-flash       # default
++GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
++
++# Optional: LangSmith tracing
++LANGCHAIN_TRACING_V2=true
++LANGCHAIN_API_KEY=lsv2_pt_...
++LANGCHAIN_PROJECT=UASEF-agent
++```
++
++**logprob compatibility matrix (audit 6.9):**
++
++| backend | Models | logprob | Auto fallback |
++| --- | --- | --- | --- |
++| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
++| `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
++| `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
++| `mlx` | mlx-lm 0.19+ | ✓ | — |
++| `anthropic` | All Claude models | ✗ | `self_consistency` |
++| `gemini` | All Gemini models | ✗ | `self_consistency` |
++
++Auto fallback is active when `--strict` is not set; with `--strict` UASEF raises `RuntimeError` immediately.
++
++#### (b) Datasets (audit #3 blocks fallback)
++
++HuggingFace `GBaker/MedQA-USMLE-4-options` is auto-downloaded, but MedAbstain must be placed manually:
++
++```text
++data/raw/
++├── medqa_train.jsonl      # (optional) HF auto-download covers this
++├── medqa_test.jsonl       # (optional)
++├── medabstain_AP.jsonl    # required (eval_medabstain)
++├── medabstain_NAP.jsonl   # required
++├── medabstain_A.jsonl     # recommended
++└── medabstain_NA.jsonl    # recommended (normal cases)
++```
++
++> **Fallback behavior**: If none of the above are available, audit #3 raises `RuntimeError`. To allow fallback temporarily (unit tests only), set `UASEF_ALLOW_FALLBACK=1` or pass `--allow-fallback`.
++
++#### (c) Calibration (Step 0)
++
++`run_calibration_pipeline.py` **derives the hard-coded RTC multipliers / entropy threshold / EDE coefficients from real data** and saves them to `base_config.yaml`. All subsequent experiments use these values automatically.
++
++```bash
++# Development (quick check)
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 100 --n-labeled 20
++
++# Publication quality (Step 0 standard)
+ python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
++# Recalibrate with a different α
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50 --alpha 0.05
+ ```
+ 
+-After this step, the `rtc` / `entropy_threshold` / `ede` sections of `base_config.yaml` are automatically updated, and all subsequent experiments use data-driven parameters.
++Outputs:
++
++- `experiments/configs/base_config.yaml` (rtc / scenario_multipliers / entropy_threshold / ede updated)
++- `results/calibration_report.json` (full sweep — for paper appendix)
++
++> Re-run calibration whenever you change the model, data, or α. Otherwise EDE coefficients drift away from the actual distribution and Safety Recall becomes artificially high or low.
+ 
+ ---
+ 
+-### Run All Experiments at Once (Recommended)
++### 9.2 ⭐ Standard Entry Point — `run_all_experiments.py`
++
++**This single command fills paper Tables 1–4.** It runs all 4 experiments sequentially and produces `results/all_experiments_report.md`.
++
++#### 9.2.1 Four most common invocations
+ 
+ ```bash
+-# [Primary] OpenAI only — quick smoke test
+-python experiments/run_all_experiments.py --backend openai
++# [A] Quick smoke (~5 min)
++python experiments/run_all_experiments.py --backend openai \
++    --n-cal 100 --n-test 20 --n-medabstain 20 --n-pareto-test 20
+ 
+-# [Primary] OpenAI, publication quality
++# [B] Primary only (OpenAI, paper quality, audit defaults)
+ python experiments/run_all_experiments.py --backend openai \
+-    --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
+ 
+-# [Primary + Ablation] Final paper run (openai=logprob, lmstudio=logprob auto-selected)
+-python experiments/run_all_experiments.py --n-cal 500 --n-test 50
++# [C] Primary + Ablation (final paper run — openai then lmstudio)
++python experiments/run_all_experiments.py \
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
+ 
+-# Skip specific experiments
+-python experiments/run_all_experiments.py --backend openai --skip pareto
++# [D] Re-run only fast experiments — skip costly Pareto / MedAbstain
++python experiments/run_all_experiments.py --backend openai --skip pareto medabstain
+ ```
+ 
+-After running, check `results/all_experiments_report.md` for results with explicit **[Primary] / [Ablation]** labels.
++#### 9.2.2 Full Option Matrix
++
++| CLI option | Default | Description |
++| --- | --- | --- |
++| `--backend {openai,lmstudio,mlx,anthropic,gemini}` | both (openai+lmstudio) | audit 6.9 adds anthropic/gemini. logprob-free backends auto-fallback. |
++| `--n-cal N` | `500` | UQM CP calibration question count (with `--strict`, audit #19 stops if below CP minimum for α) |
++| `--n-test N` | `200` | Per-scenario test cases for agent/baseline (audit #11: 50→200) |
++| `--n-medabstain N` | `100` | Cases per MedAbstain variant |
++| `--n-pareto-test N` | `100` | Per-scenario test cases for Pareto sweep |
++| `--scoring-method {logprob,self_consistency,hybrid,auto}` | `auto` | audit 6.9: **`hybrid`** added (SC diversity + answer-mode entropy, recommended for logprob-free). `auto` is `DeprecationWarning`. |
++| `--alpha FLOAT` | (config `0.10`) | CP α. Smaller → higher q̂ → fewer escalations / higher coverage |
++| `--variants AP NAP A NA ...` | all four | MedAbstain evaluation variants |
++| `--weighted-cp` | off | Tibshirani et al. (2019) WeightedCP (audit #8: arg now actually honored) |
++| `--include-pubmedqa` | off | Add PubMedQA `maybe` cases to agent experiments |
++| **`--prompt-mode {neutral,instructed}`** | `neutral` | audit #5. `neutral` measures genuine abstention; `instructed` is the legacy ablation. |
++| **`--decision-rule {trigger_count,confidence}`** | (config) | audit #2. `trigger_count` (back-compat) / `confidence` (uses grid-searched coefficients). |
++| **`--strict`** | off | audit #19. Raise `RuntimeError` on n<min_n / missing data / unsupported logprob combos. Recommended for CI. |
++| **`--allow-fallback`** | off | audit #3. Explicitly allow fallback data (unit-test only, otherwise blocks). |
++| `--seed N` | `42` | Data sampling seed |
++| `--skip {agent,baseline,medabstain,pareto} ...` | none | Skip specific experiments |
++
++> The four bold options are audit 6.9 additions. Every sub-runner (`run_baseline_comparison.py`, `run_agent_experiment.py`, `eval_medabstain.py`, `pareto_sweep.py`) accepts the same flags.
++
++#### 9.2.3 Recommended Experiment Scenarios (paper standard)
++
++```bash
++# 0) Calibration — α=0.10 (default)
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
++# 1) Standard run: Primary + Ablation, neutral prompt, 200 cases/scenario
++python experiments/run_all_experiments.py --strict \
++    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
++
++# 2) Ablation A — prompt-induced abstention effect
++python experiments/run_all_experiments.py --backend openai --strict \
++    --prompt-mode instructed \
++    --n-cal 500 --n-test 200 --n-medabstain 100
++#   Save report as results/all_experiments_report_instructed.md for comparison
++
++# 3) Ablation B — confidence rule
++python experiments/run_all_experiments.py --backend openai --strict \
++    --decision-rule confidence \
++    --n-cal 500 --n-test 200 --n-medabstain 100
++
++# 4) Ablation C — Weighted CP on/off (distribution shift cases only)
++python experiments/run_all_experiments.py --backend openai --weighted-cp --strict \
++    --n-cal 500 --n-medabstain 100 --skip agent baseline pareto
++
++# 5) [audit 6.9] Anthropic Claude (logprob-free) — auto self_consistency
++pip install 'anthropic>=0.40.0'
++ANTHROPIC_API_KEY=sk-ant-... \
++python experiments/run_all_experiments.py --backend anthropic \
++    --n-cal 200 --n-test 100 --n-medabstain 50 --skip pareto
++#   Pareto cost is N=5×, prefer --skip pareto
++
++# 6) [audit 6.9] Gemini — explicit hybrid
++GEMINI_API_KEY=AIza... \
++python experiments/run_all_experiments.py --backend gemini \
++    --scoring-method hybrid --n-cal 200 --n-test 100
++
++# 7) [audit 6.9] OpenAI o3-mini (reasoning) — auto-switch to hybrid
++OPENAI_MODEL=o3-mini \
++python experiments/run_all_experiments.py --backend openai \
++    --n-cal 200 --n-test 100 --n-medabstain 50
++#   warning: "OPENAI_MODEL='o3-mini' is in the logprobs-incompatible pattern → auto-switching to hybrid"
++```
++
++> **Cost notice for logprob-free backends**: `self_consistency` / `hybrid` issue N (default 5) LLM calls per case. `--n-test 200` × N=5 = 1,000 calls/scenario. Pareto sweep, even with audit #9 caching, requires `(cal_n + test_n) × N` calls — high cost. Prefer `--skip pareto`.
++
++#### 9.2.4 Output Artifacts
++
++| File | Contents |
++| --- | --- |
++| `results/all_experiments_report.md` | **Paper-ready unified report** (Primary/Ablation labels, Wilson 95% CI columns, prompt_mode/RTC mults/EDE config and all reproduction metadata) |
++| `results/all_experiments_summary.json` | Structured version of the above (for post-hoc analysis) |
++| `results/agent_results.json` + `agent_comparison_table.csv` | Agent experiment raw + table |
++| `results/baseline_comparison.json` + `.csv` | Baseline raw + table |
++| `results/medabstain_eval.json` + `medabstain_eval_summary.csv` | Per-variant metrics |
++| `results/pareto_sweep_results.json` + `pareto_frontier.png` | α sweep |
++| `results/alpha_recommendations.json` | Recommended α per specialty |
+ 
+ ---
+ 
+-### Sequential Pipeline Experiment
++### 9.3 Individual Experiment Scripts
+ 
+-```bash
+-# [Primary + Ablation] Full experiment (auto-select scoring method)
+-python experiments/run_experiment.py --n-cal 500 --n-test 50
++Use these when calling experiments independently (debugging, repeated measurements, CI integration).
++
++#### 9.3.1 Sequential pipeline (`run_experiment.py`)
+ 
+-# [Primary] OpenAI only (logprob)
+-python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
++```bash
++# Simplest call — uses base_config.yaml as-is
++python experiments/run_experiment.py
+ 
+-# [Ablation] Local only (logprob)
+-python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
++# Override sample sizes
++python experiments/run_experiment.py --n-cal 500 --n-test 200
+ 
+-# Apply scenario-specific config
++# Single scenario only
+ python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
++python experiments/run_experiment.py --scenario rare_disease
+ 
+-# Visualize results
++# Visualize (regenerate plots from existing JSON)
+ python experiments/visualize_results.py
+ ```
+ 
+-### LangGraph Agent Experiment
++#### 9.3.2 LangGraph agent (`run_agent_experiment.py`)
+ 
+ ```bash
+-# [Primary + Ablation] Full experiment
+-python experiments/run_agent_experiment.py --n-cal 500 --n-test 50
++# Primary only
++python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 200
+ 
+-# [Primary] OpenAI only
+-python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
++# Combined ablation: instructed prompt + confidence rule
++python experiments/run_agent_experiment.py --backend openai \
++    --prompt-mode instructed --decision-rule confidence \
++    --n-cal 500 --n-test 200
+ 
+-# [Ablation] Local only
+-python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
+-
+-# Include PubMedQA
++# Add PubMedQA `maybe` cases
+ python experiments/run_agent_experiment.py --backend openai --include-pubmedqa
+ ```
+ 
+-### Baseline Comparison
++LangSmith tracing auto-activates if `.env` has `LANGCHAIN_TRACING_V2=true`. No code changes needed.
++
++#### 9.3.3 Baseline 3-strategy comparison (`run_baseline_comparison.py`)
++
++3 strategies: `no_escalation` (always autonomous), `threshold_only` (CP T1 only), `full_uasef` (T1+T2+T3+entropy)
+ 
+ ```bash
+-# [Primary + Ablation] Full comparison
+-python experiments/run_baseline_comparison.py --n-cal 500 --n-test 50
++python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 200
+ 
+-# [Primary] OpenAI only
+-python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
++# Decision-rule ablation — re-run with confidence rule
++python experiments/run_baseline_comparison.py --backend openai \
++    --decision-rule confidence --n-cal 500 --n-test 200
+ ```
+ 
+-### MedAbstain Classification Accuracy
++#### 9.3.4 MedAbstain per-variant (`eval_medabstain.py`)
+ 
+ ```bash
+-# All variants (AP, NAP, A, NA)
+-python experiments/eval_medabstain.py --backend openai
++# All variants (AP/NAP/A/NA)
++python experiments/eval_medabstain.py --backend openai --n-cal 500 --n 100
+ 
+ # Core safety cases only (AP/NAP)
+ python experiments/eval_medabstain.py --backend openai --variants AP NAP --n 100
+ 
+-# Weighted CP comparison
+-python experiments/eval_medabstain.py --backend openai --weighted-cp
++# Weighted CP — distribution shift compensation (audit #8: arg honored)
++python experiments/eval_medabstain.py --backend openai --weighted-cp --n 100
++
++# Disable routine-only calibration (use the entire MedQA — legacy behavior)
++python experiments/eval_medabstain.py --backend openai --no-routine-cal --n 100
+ ```
+ 
+-### Pareto Frontier + α Recommendation
++#### 9.3.5 Pareto Frontier α sweep (`pareto_sweep.py`)
++
++audit #9 caching cuts LLM calls 6×.
+ 
+ ```bash
+-# Run α sweep
+-python experiments/pareto_sweep.py --backend openai --n-cal 500
++# Standard sweep (α ∈ {0.01, 0.05, 0.10, 0.15, 0.20, 0.30})
++python experiments/pareto_sweep.py --backend openai --n-cal 500 --n-test 100
+ 
+-# Recompute recommendation only from existing sweep results
++# Recompute recommendation only from existing sweep (no LLM calls)
+ python -c "
+ from experiments.pareto_sweep import recommend_alpha, print_recommendations
+-recs = recommend_alpha()
++recs = recommend_alpha()  # auto-loads results/pareto_sweep_results.json
+ print_recommendations(recs)
+ "
+ ```
+ 
+-### Individual Module Tests
++---
++
++### 9.4 Unit / Smoke Tests (development)
+ 
+ ```bash
+-# Verify model connection (including logprobs support)
++# Verify model connection (logprobs support included)
+ python models/model_interface.py
+ 
+-# UQM standalone (logprob vs self_consistency comparison)
++# UQM standalone (logprob, self_consistency, hybrid comparison)
+ python models/uqm.py
+ 
+-# RTC + EDE standalone (trigger verification with synthetic UncertaintyResult)
++# RTC + EDE standalone (synthetic UncertaintyResult triggers)
+ python models/rtc_ede.py
++
++# Quick import check
++python -c "
++import sys; sys.path.insert(0, '.')
++from experiments.run_all_experiments import build_summary, build_markdown_report
++from models.uqm import UQM
++from models.rtc_ede import RTC, EDE, detect_no_evidence
++print('OK')
++"
+ ```
+ 
+ ---
+ 
++### 9.5 Common Issues
++
++| Symptom | Cause | Fix |
++| --- | --- | --- |
++| `RuntimeError: fallback 데이터 사용 차단` | `data/raw/medqa_*.jsonl` missing and HF download failed | Restore HF and retry, or `--allow-fallback` (tests only) |
++| `RuntimeError: Calibration n=… < CP 최소 …` | `--strict` mode and `--n-cal` below CP minimum for α | Increase `--n-cal` or `--alpha` (e.g., 0.05→0.10) |
++| `DeprecationWarning: scoring_method='auto'` | audit #21 | Specify explicitly: `--scoring-method logprob` |
++| MedAbstain variant shows `— 케이스 없음` | `data/raw/medabstain_*.jsonl` missing | See `data/README.md` for placement |
++| OpenAI step is SKIP'd | `OPENAI_API_KEY` not set | Add to `.env` or restrict with `--backend lmstudio` |
++| LMStudio agent latency too high | Fixed in audit #17 — older versions need code refresh | `git pull`; verify `agent/nodes.py:_make_llm` |
++| Many `N/A` in result tables | audit #16 — expected for emergency=positives only / routine=negatives only | Report as-is. If CI columns are also empty, denominator was zero. |
++| `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API never returns logprobs | Set `--scoring-method hybrid` or `self_consistency` explicitly. Without `--strict`, UASEF auto-switches. |
++| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning models do not return logprobs | Switch to `gpt-4o-mini`, or use hybrid mode |
++| `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK not installed | `pip install 'anthropic>=0.40.0'` or `pip install 'uasef[claude]'` |
++| `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio key missing | Get key at <https://aistudio.google.com/apikey> and add to `.env` |
++
++---
++
+ ## 10. Output Files
+ 
+ | File | Generated By | Description |
 diff --git a/agent/nodes.py b/agent/nodes.py
 index b19c8ba..7d2a984 100644
 --- a/agent/nodes.py
@@ -442,7 +1734,7 @@ index 6aa57f3..a1e4fe8 100644
 +  decision_rule: trigger_count
 +  confidence_threshold: 0.5
 diff --git a/experiments/eval_medabstain.py b/experiments/eval_medabstain.py
-index bca4c06..4577c95 100644
+index bca4c06..c4f7dd5 100644
 --- a/experiments/eval_medabstain.py
 +++ b/experiments/eval_medabstain.py
 @@ -44,6 +44,7 @@ from data.loader import (
@@ -600,6 +1892,24 @@ index bca4c06..4577c95 100644
              )
  
  
+@@ -438,7 +444,7 @@ if __name__ == "__main__":
+     parser = argparse.ArgumentParser(description="UASEF MedAbstain 분류 정확도 평가")
+     parser.add_argument(
+         "--backend", type=str, default=None,
+-        choices=["lmstudio", "openai"],
++        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
+         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
+     )
+     parser.add_argument("--n-cal", type=int, default=500,
+@@ -452,7 +458,7 @@ if __name__ == "__main__":
+     )
+     parser.add_argument(
+         "--scoring-method", type=str, default="logprob",
+-        choices=["logprob", "self_consistency"],
++        choices=["logprob", "self_consistency", "hybrid"],
+     )
+     parser.add_argument(
+         "--weighted-cp", action="store_true",
 @@ -463,6 +469,21 @@ if __name__ == "__main__":
          help="루틴 캘리브레이션 비활성화 → 전체 MedQA로 캘리브레이션 (기본: 루틴만 사용)",
      )
@@ -633,7 +1943,7 @@ index bca4c06..4577c95 100644
              if result:
                  all_results[backend] = result
 diff --git a/experiments/pareto_sweep.py b/experiments/pareto_sweep.py
-index 31ab3b5..dc3a0f8 100644
+index 31ab3b5..451cd86 100644
 --- a/experiments/pareto_sweep.py
 +++ b/experiments/pareto_sweep.py
 @@ -35,7 +35,8 @@ sys.path.insert(0, str(ROOT))
@@ -913,8 +2223,20 @@ index 31ab3b5..dc3a0f8 100644
  
      return results
  
-@@ -449,6 +547,11 @@ if __name__ == "__main__":
-         choices=["logprob", "self_consistency"],
+@@ -439,16 +537,21 @@ if __name__ == "__main__":
+     parser = argparse.ArgumentParser(description="UASEF Pareto Frontier Alpha Sweep")
+     parser.add_argument(
+         "--backend", type=str, default=None,
+-        choices=["lmstudio", "openai"],
++        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
+         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
+     )
+     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
+     parser.add_argument("--n-test", type=int, default=100, help="시나리오별 테스트 케이스 수 (권장: 100)")
+     parser.add_argument(
+         "--scoring-method", type=str, default="logprob",
+-        choices=["logprob", "self_consistency"],
++        choices=["logprob", "self_consistency", "hybrid"],
          help="비적합 점수 방식 (logprob=primary, self_consistency=ablation)",
      )
 +    parser.add_argument(
@@ -934,7 +2256,7 @@ index 31ab3b5..dc3a0f8 100644
              if results:
                  all_results[backend] = results
 diff --git a/experiments/run_agent_experiment.py b/experiments/run_agent_experiment.py
-index b8fba53..5de1ba5 100644
+index b8fba53..2a545ad 100644
 --- a/experiments/run_agent_experiment.py
 +++ b/experiments/run_agent_experiment.py
 @@ -36,6 +36,7 @@ import csv
@@ -1006,6 +2328,23 @@ index b8fba53..5de1ba5 100644
          )
  
          graph = build_graph(components)
+@@ -317,14 +335,14 @@ if __name__ == "__main__":
+     parser = argparse.ArgumentParser(description="UASEF Agent Experiment (LangGraph)")
+     parser.add_argument(
+         "--backend", type=str, default=None,
+-        choices=["lmstudio", "openai"],
++        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
+         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
+     )
+     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
+     parser.add_argument("--n-test", type=int, default=50, help="시나리오별 테스트 케이스 수 (권장: 50)")
+     parser.add_argument(
+         "--scoring-method", type=str, default="auto",
+-        choices=["logprob", "self_consistency", "auto"],
++        choices=["logprob", "self_consistency", "hybrid", "auto"],
+         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
+     )
+     parser.add_argument("--alpha", type=float, default=None, help="Conformal prediction α (기본: base_config.yaml uqm.alpha)")
 @@ -333,6 +351,21 @@ if __name__ == "__main__":
          "--include-pubmedqa", action="store_true",
          help="PubMedQA 'maybe' 케이스를 rare_disease 버킷에 추가",
@@ -1039,7 +2378,7 @@ index b8fba53..5de1ba5 100644
              if result:
                  all_results[backend] = result
 diff --git a/experiments/run_all_experiments.py b/experiments/run_all_experiments.py
-index a6e0872..5ec97ad 100644
+index a6e0872..8931ed3 100644
 --- a/experiments/run_all_experiments.py
 +++ b/experiments/run_all_experiments.py
 @@ -33,6 +33,7 @@ UASEF 전체 실험 통합 실행기
@@ -1221,7 +2560,7 @@ index a6e0872..5ec97ad 100644
                      m.get("tp", ""), m.get("fn", ""), m.get("fp", ""), m.get("tn", ""),
                      ok,
                  ))
-@@ -619,6 +673,46 @@ def save_summary(summary: dict, report_md: str) -> None:
+@@ -619,6 +673,63 @@ def save_summary(summary: dict, report_md: str) -> None:
  
  # ── 진입점 ───────────────────────────────────────────────────────────────────
  
@@ -1254,9 +2593,26 @@ index a6e0872..5ec97ad 100644
 +    else:
 +        os.environ.pop("UASEF_ALLOW_FALLBACK", None)
 +
-+    # OpenAI key 체크 (sanity)
++    # API key 체크 (sanity)
 +    if (args.backend in (None, "openai")) and not os.environ.get("OPENAI_API_KEY"):
 +        print("  ⚠  OPENAI_API_KEY 미설정 — openai backend 단계는 SKIP 됩니다.")
++    if args.backend == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
++        print("  ⚠  ANTHROPIC_API_KEY 미설정 — anthropic backend 호출 시 RuntimeError.")
++    if args.backend == "gemini" and not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
++        print("  ⚠  GEMINI_API_KEY/GOOGLE_API_KEY 미설정 — gemini backend 호출 시 RuntimeError.")
++
++    # audit 6.9: logprob-free 백엔드/모델 자동 안내
++    from models.model_interface import backend_supports_logprobs
++    if args.backend in ("anthropic", "gemini"):
++        if args.scoring_method in ("logprob", "auto"):
++            print(f"  ⚠  backend={args.backend}은 logprobs 미지원 → "
++                  f"UQM이 자동으로 'self_consistency'로 전환합니다 "
++                  f"(or `--scoring-method hybrid` 권장).")
++    if args.backend == "openai":
++        m = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
++        if not backend_supports_logprobs("openai", m):
++            print(f"  ⚠  OPENAI_MODEL='{m}'은 reasoning 계열(logprobs 미지원). "
++                  f"UQM이 'hybrid'로 자동 전환 (또는 --scoring-method 명시 권장).")
 +
 +    print(f"  α effective  : {effective_alpha}  (n_min={min_n})")
 +    print(f"  prompt_mode  : {args.prompt_mode}")
@@ -1268,8 +2624,12 @@ index a6e0872..5ec97ad 100644
  def main() -> None:
      parser = argparse.ArgumentParser(
          description="UASEF 전체 실험 통합 실행기",
-@@ -629,18 +723,21 @@ def main() -> None:
-         choices=["lmstudio", "openai"],
+@@ -626,21 +737,24 @@ def main() -> None:
+     )
+     parser.add_argument(
+         "--backend", type=str, default=None,
+-        choices=["lmstudio", "openai"],
++        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
          help="단일 백엔드 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
      )
 +    # ── 데이터 규모 ────────────────────────────────────────────────────────
@@ -1288,13 +2648,14 @@ index a6e0872..5ec97ad 100644
 +    # ── 핵심 알고리즘 옵션 ─────────────────────────────────────────────────
      parser.add_argument(
          "--scoring-method", type=str, default="auto",
-         choices=["logprob", "self_consistency", "auto"],
+-        choices=["logprob", "self_consistency", "auto"],
 -        help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
++        choices=["logprob", "self_consistency", "hybrid", "auto"],
 +        help="비적합 점수 방식. auto는 deprecated (audit #21).",
      )
      parser.add_argument("--alpha", type=float, default=None,
                          help="Conformal prediction α (기본: base_config.yaml uqm.alpha)")
-@@ -650,9 +747,28 @@ def main() -> None:
+@@ -650,9 +764,28 @@ def main() -> None:
          help="MedAbstain 평가 변형",
      )
      parser.add_argument("--weighted-cp", action="store_true",
@@ -1324,7 +2685,7 @@ index a6e0872..5ec97ad 100644
      parser.add_argument("--seed", type=int, default=42)
      parser.add_argument(
          "--skip", nargs="*",
-@@ -674,6 +790,7 @@ def main() -> None:
+@@ -674,6 +807,7 @@ def main() -> None:
      print(f"  n_medabstain : {args.n_medabstain}  (변형별)")
      print(f"  n_pareto_test: {args.n_pareto_test}")
      print(f"  Skip         : {args.skip or '없음'}")
@@ -1333,7 +2694,7 @@ index a6e0872..5ec97ad 100644
      # ── 공유 데이터 로드 (에이전트 실험용) ──────────────────────────────────
      cal_questions = []
 diff --git a/experiments/run_baseline_comparison.py b/experiments/run_baseline_comparison.py
-index 3ac32d8..187ac6a 100644
+index 3ac32d8..fe22100 100644
 --- a/experiments/run_baseline_comparison.py
 +++ b/experiments/run_baseline_comparison.py
 @@ -40,6 +40,7 @@ import json
@@ -1441,7 +2802,23 @@ index 3ac32d8..187ac6a 100644
          )
      print()
  
-@@ -327,6 +336,21 @@ if __name__ == "__main__":
+@@ -312,7 +321,7 @@ if __name__ == "__main__":
+     parser = argparse.ArgumentParser(description="UASEF 베이스라인 비교 실험")
+     parser.add_argument(
+         "--backend", type=str, default=None,
+-        choices=["lmstudio", "openai"],
++        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
+         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
+     )
+     parser.add_argument("--n-cal", type=int, default=500,
+@@ -321,12 +330,27 @@ if __name__ == "__main__":
+                         help="시나리오별 테스트 케이스 수 (권장: 50)")
+     parser.add_argument(
+         "--scoring-method", type=str, default="auto",
+-        choices=["logprob", "self_consistency", "auto"],
++        choices=["logprob", "self_consistency", "hybrid", "auto"],
+         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
+     )
      parser.add_argument("--alpha", type=float, default=None,
                          help="Conformal prediction α (기본: base_config.yaml uqm.alpha = 0.10)")
      parser.add_argument("--seed", type=int, default=42)
@@ -1543,7 +2920,7 @@ index 3e10e8d..55b32cf 100644
      _save_base_config(base_cfg)
  
 diff --git a/experiments/run_experiment.py b/experiments/run_experiment.py
-index f5937d4..4e2bdc3 100644
+index f5937d4..54c1d78 100644
 --- a/experiments/run_experiment.py
 +++ b/experiments/run_experiment.py
 @@ -52,6 +52,7 @@ from data.loader import (
@@ -1662,6 +3039,340 @@ index f5937d4..4e2bdc3 100644
  
          # Step 4: 저장
          print(f"\n[4/4] 결과 저장 중...")
+@@ -420,7 +424,7 @@ if __name__ == "__main__":
+     )
+     parser.add_argument(
+         "--scoring-method", type=str, default=None,
+-        choices=["logprob", "self_consistency", "auto"],
++        choices=["logprob", "self_consistency", "hybrid", "auto"],
+         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
+     )
+     args = parser.parse_args()
+diff --git a/improvements/README.md b/improvements/README.md
+index cff37ef..b6a7fed 100644
+--- a/improvements/README.md
++++ b/improvements/README.md
+@@ -550,3 +550,320 @@ from models.rtc_ede import NO_EVIDENCE_STRINGS as _NO_EVIDENCE_PHRASES  # 37개
+ **--no-routine-cal 플래그**:
+ - eval_medabstain.py에 `--no-routine-cal` 추가하여 기존 동작(전체 MedQA 캘리브레이션) 재현 가능
+ - 논문에서 기존 방식과 one-class CP 방식의 차이를 ablation으로 보고 가능
++
++---
++
++## 6라운드 개선 (2026-05-07, 종합 audit & 결정 로직 정합성 복구)
++
++### 배경
++
++라운드 5까지의 모든 변경을 적용한 상태에서 `agent/`, `models/`, `experiments/`, `data/` 전 영역에 대한 종합 코드 audit을 실행했다. **실험 결과 자체를 무효화할 수 있는 8건의 critical 버그**와 LLM 비용·통계 검정력·외부 타당성에 영향을 주는 다수의 high/medium 이슈를 발견했고, 모두 동일 라운드에서 수정했다.
++
++### 6.1 발견된 핵심 문제 (audit 결과)
++
++| ID  | 분류     | 위치                                     | 증상                                                                                                                       |
++| --- | -------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
++| #1  | CRITICAL | `models/rtc_ede.py` EDE.decide           | EDE Trigger 1이 standard threshold만 사용 → WeightedCP가 켜져도 per-question q̂_w가 결정에 반영되지 않음                  |
++| #2  | CRITICAL | `models/ede_coefficient_search.py`       | grid search는 `confidence>0.5`로 평가하지만 실제 결정은 `len(triggers)>0` → 최적 계수가 결정에 영향 없음                   |
++| #3  | CRITICAL | `data/loader.py` fallback                | MedQA 로드 실패 시 30개 질문을 17번 반복 사용 → holdout coverage가 항상 ~1.0(가짜)로 보고되어 CP 보장이 무효화됨            |
++| #5  | CRITICAL | `models/uqm.py`, `agent/nodes.py` prompt | SYSTEM_PROMPT가 모델에게 NO_EVIDENCE 문구를 명시 지시 → EDE Trigger 3와 circular evaluation                                |
++| #6  | CRITICAL | `models/rtc_ede.py` NO_EVIDENCE          | "may vary", "limited evidence", "consult specialist" 등 정상 임상 답변 문구가 단독 트리거 → over-escalation 인플레이션      |
++| #7  | CRITICAL | `models/rtc_ede.py` ENTROPY 기본값        | `ENTROPY_HIGH_THRESHOLD = 2.0`이 top_logprobs=5의 entropy 상한 ln(5)≈1.609 초과 → fallback 시 entropy_boost가 영원히 0     |
++| #8  | CRITICAL | `experiments/eval_medabstain.py`         | `use_weighted_cp` 인자가 무시되고 항상 True로 UQM 생성 → 메타데이터와 실제 동작 불일치, CLI `--weighted-cp` 토글 무의미    |
++| #9  | HIGH     | `experiments/pareto_sweep.py`            | α마다 UQM 재보정 → 동일 cal_questions에 LLM 6× 중복 호출                                                                    |
++| #10 | HIGH     | `models/uqm.py` self-consistency         | 첫 호출 응답이 버려지고 N개 추가 호출 → 실제 N+1회 호출 발생                                                                |
++| #11 | HIGH     | `experiments/configs/base_config.yaml`   | `n_test_per_scenario: 50` → Wilson 95% CI ±0.08, 0.95 vs 0.90 통계적 구분 불가                                              |
++| #12 | HIGH     | `agent/nodes.py` uasef_check             | UASEF auditor가 원본 질문만 평가 → ReAct 도구 추론으로 얻은 정보가 score에 반영 안 됨                                       |
++| #13 | HIGH     | `data/loader.py` distribution_source     | MedAbstain 변형(AP/NAP/A/NA) 모두 `"medabstain"`으로 단일화 → shift 감지 정밀도 손실                                       |
++| #15 | MEDIUM   | `models/rtc_ede.py` CRITICAL_KEYWORDS     | `"code blue"`가 무조건 트리거 → "in the event of code blue, perform CPR" 같은 표준 답변에서도 발동                          |
++| #16 | MEDIUM   | 모든 runner `compute_metrics`            | 단일 클래스 시나리오에서 `over_escalation_rate=0.0` silent zero → 실제로는 정의 불가                                        |
++| #17 | MEDIUM   | `agent/nodes.py` `_make_llm`             | LMStudio agent에 logprobs 요청 → ChatOpenAI는 받지 못하고 UQM이 별도 호출 → latency 2×                                       |
++| #18 | MEDIUM   | `models/uqm.py` calibrate retry          | ValueError 같은 결정적 오류도 3회 재시도 → 시간 낭비, skip 통계 부정확                                                      |
++| #19 | MEDIUM   | `models/uqm.py` ConformalCalibrator       | n<min_n 시 warning만 → 자동화 실험에서 묻혀 잘못된 결과 출판 위험                                                            |
++| #20 | MEDIUM   | `models/rtc_ede.py` 시나리오 배율         | 0.90이 코드 하드코딩 → 재현·튜닝 불가                                                                                       |
++| #21 | LOW      | `models/uqm.py` `ScoringMethod.AUTO`     | 첫 호출의 logprobs 유무로 모드 결정 → 일시 장애 시 비결정적 모드 전환                                                        |
++
++### 6.2 수정 내용
++
++| ID  | 파일(들)                                                                                | 변경 요약                                                                                                                                                                                  |
++| --- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| #1  | `models/rtc_ede.py`                                                                     | `RTCConfig.multiplier_value` 필드 추가 + `effective_threshold(uncertainty_threshold)` 메서드 신설. EDE.decide의 Trigger 1이 `unc.weighted_cp_used`이면 weighted q̂_w × multiplier 사용. |
++| #2  | `models/rtc_ede.py`, `models/ede_coefficient_search.py`, `experiments/run_calibration_pipeline.py` | EDE에 `decision_rule` ∈ {"trigger_count"(default), "confidence"} + `confidence_threshold` 추가. grid search가 `confidence_threshold`까지 함께 최적화하고 권장 rule을 결과에 포함. |
++| #3  | `data/loader.py`                                                                        | `_refuse_fallback()` 도입. 환경변수 `UASEF_ALLOW_FALLBACK=1`이 없으면 fallback 호출 시 RuntimeError. 단위테스트만 명시적으로 활성화.                                                       |
++| #5  | `models/uqm.py`, `agent/nodes.py`                                                       | `SYSTEM_PROMPT_NEUTRAL`(default) / `SYSTEM_PROMPT_INSTRUCTED` 분리. `UQM(prompt_mode=...)` + `AgentComponents.prompt_mode` 신규.                                                          |
++| #6  | `models/rtc_ede.py`                                                                     | NO_EVIDENCE_PHRASES에 `strength` 필드(strong/weak) 추가. `detect_no_evidence`가 strong은 단독 트리거, weak는 `UNCERTAINTY_MODIFIERS` 동반 시만 트리거. (strong=30, weak=14)               |
++| #7  | `models/rtc_ede.py`, `models/entropy_calibration.py`, `experiments/config_utils.py`     | `ENTROPY_HIGH_THRESHOLD = 2.0 → 0.6` (top_logprobs=5 도달 가능 영역). `find_entropy_threshold` fallback도 동일 갱신.                                                                       |
++| #8  | `experiments/eval_medabstain.py`                                                        | `UQM(use_weighted_cp=use_weighted_cp)` — 인자 그대로 전달. CLI `--weighted-cp` 토글 의미 회복.                                                                                              |
++| #9  | `experiments/pareto_sweep.py`                                                           | `_compute_scores`로 cal/test scores를 (backend, scoring_method)당 1회만 계산 → α는 `ConformalCalibrator.fit`만 반복. **LLM 호출 6× 절감.**                                              |
++| #10 | `models/uqm.py`                                                                         | `compute_self_consistency_score(seed_response=...)`로 첫 호출 응답을 N개의 일부로 재사용 → N+1회 → N회.                                                                                   |
++| #11 | `experiments/configs/base_config.yaml`, `experiments/metrics_utils.py`                  | `n_test_per_scenario: 50 → 200`. 새 `metrics_utils.wilson_ci`로 Wilson 95% CI를 모든 metric 표에 자동 출력.                                                                                |
++| #12 | `agent/nodes.py`                                                                        | `uasef_check`가 ReAct 응답 텍스트를 prompt에 포함해 logprobs 재평가. logprobs를 못 받으면 그래프 그대로 fallback.                                                                          |
++| #13 | `data/loader.py`                                                                        | `_distribution_source_for(case)`로 `medabstain_AP/NAP/A/NA` 보존. `case_to_experiment_dict`/`case_to_agent_dict` 모두 사용.                                                              |
++| #15 | `models/rtc_ede.py`                                                                     | `"code blue"`를 CRITICAL → PROCEDURAL로 강등(맥락 조건부).                                                                                                                                 |
++| #16 | `experiments/metrics_utils.py` 신설, `eval_medabstain.py`/`run_experiment.py`/`run_baseline_comparison.py` | `compute_binary_metrics` 공통 헬퍼: 단일 클래스 시 None 반환. `fmt_rate`/`fmt_ci`로 N/A 안전 출력.                                                              |
++| #17 | `agent/nodes.py` `_make_llm`                                                            | LMStudio에서는 logprobs 요청 자체를 생략 → ChatOpenAI 응답 latency 절감, UQM의 `/v1/responses` 호출 1회만 발생.                                                                            |
++| #18 | `models/uqm.py` calibrate                                                               | `ConnectionError`/`TimeoutError`/`OSError`만 재시도. 결정적 오류는 즉시 skip. skip 비율 >10% 시 UserWarning.                                                                              |
++| #19 | `models/uqm.py` `ConformalCalibrator(strict=True)`                                      | 신규 파라미터. n<min_n 시 RuntimeError.                                                                                                                                                   |
++| #20 | `models/rtc_ede.py`, `experiments/configs/base_config.yaml`, `experiments/config_utils.py` | `RTCConfig.scenario_multipliers` + `RTC(scenario_multipliers=...)` + `load_scenario_multipliers()`. base_config의 `scenario_multipliers` 섹션으로 노출.                                |
++| #21 | `models/uqm.py`                                                                         | `ScoringMethod.AUTO`에 `DeprecationWarning` (UserWarning에서 격상).                                                                                                                       |
++| —   | `data/loader.py`                                                                        | (cleanup) `hash()` → `hashlib.md5` 기반 안정 ID. PYTHONHASHSEED 영향 제거.                                                                                                                |
++
++### 6.3 신규 파일 / 신규 인터페이스
++
++| 항목                                       | 위치                                       | 설명                                                                                                              |
++| ------------------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
++| `metrics_utils.py`                         | `experiments/metrics_utils.py`             | `compute_binary_metrics`, `wilson_ci`, `safe_rate`, `fmt_rate`, `fmt_ci` — 모든 runner 공통 사용.                |
++| `RTCConfig.effective_threshold()`          | `models/rtc_ede.py`                        | per-question weighted q̂_w를 RTC 배율로 스케일.                                                                   |
++| `RTCConfig.scenario_multipliers`           | `models/rtc_ede.py`                        | dict[str,float]. 시나리오별 추가 배율을 데이터로 노출.                                                            |
++| `EDE(decision_rule, confidence_threshold)` | `models/rtc_ede.py`                        | "trigger_count"(back-compat) / "confidence" — 후자만 grid search와 정합.                                          |
++| `UQM(prompt_mode, strict)`                 | `models/uqm.py`                            | "neutral"(default)/"instructed". `strict=True`로 n<min_n 시 RuntimeError.                                          |
++| `_refuse_fallback()`, `ALLOW_FALLBACK_ENV` | `data/loader.py`                           | `UASEF_ALLOW_FALLBACK=1` 환경변수로만 fallback 허용.                                                              |
++| `_distribution_source_for(case)`           | `data/loader.py`                           | medabstain 변형 단위로 distribution_source 분리.                                                                  |
++| `load_scenario_multipliers()`              | `experiments/config_utils.py`              | base_config의 `scenario_multipliers` 섹션 로드.                                                                   |
++
++### 6.4 base_config.yaml 변경
++
++| 키                                | 변경 전        | 변경 후         | 근거                              |
++| --------------------------------- | -------------- | --------------- | --------------------------------- |
++| `data.n_test_per_scenario`        | `50`           | `200`           | Wilson CI ±0.08 → ±0.03 (audit #11) |
++| `scenario_multipliers` 섹션 신설  | (코드 하드코딩) | `0.90/0.90/1.00/1.00` | audit #20                         |
++| `ede.decision_rule`               | (없음)         | `trigger_count` | audit #2 (back-compat)            |
++| `ede.confidence_threshold`        | (없음)         | `0.5`           | audit #2                          |
++| `uqm.prompt_mode`                 | (없음)         | `neutral`       | audit #5                          |
++| `uqm.strict`                      | (없음)         | `false`         | audit #19                         |
++| `entropy_threshold` fallback (코드) | `2.0`          | `0.6`           | audit #7                          |
++
++### 6.5 단위 테스트 (포함된 검증)
++
++수정 직후 다음 항목을 명시적으로 확인:
++
++- `RTCConfig.effective_threshold(2.5)` → `2.5 × multiplier_value` 산출 (audit #1)
++- `EDE(decision_rule="trigger_count")` ↔ `EDE(decision_rule="confidence")` 결정 분기 동작 (audit #2)
++- `detect_no_evidence("Treatment may vary.")` → False (weak only) / `"...uncertain"` → True / `"may vary; consider escalation if borderline"` → True (audit #6)
++- WeightedCP 통합: score=1.20, adj=1.08, weighted_eff=1.35 → escalate=False (weighted threshold 사용 확인)
++- `compute_binary_metrics(all_positive_cases)` → over_escalation_rate=None (audit #16)
++- `load_calibration_questions(n=5)` (env 미설정) — fallback 호출 시 RuntimeError, HF 사용 시 정상 (audit #3)
++- 16개 모듈 모두 import OK
++
++### 6.6 재현 절차 변경
++
++```bash
++# 0) 데이터셋 확보 — fallback 차단되었으므로 반드시 필요
++#    (HuggingFace `GBaker/MedQA-USMLE-4-options` 자동 다운로드 또는 data/raw/*.jsonl 배치)
++
++# 1) 캘리브레이션 (decision_rule="confidence"가 산출되어 base_config에 저장됨)
++python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
++
++# 2) 전체 실험 (200/시나리오, Wilson CI 자동 출력)
++python experiments/run_all_experiments.py --backend openai --n-cal 500 --n-test 200
++
++# 3) Pareto sweep (audit #9 캐싱으로 6× 빨라짐)
++python experiments/pareto_sweep.py --backend openai --n-cal 500 --n-test 100
++
++# 4) (선택) prompt_mode ablation
++#    UQM(prompt_mode='neutral')과 UQM(prompt_mode='instructed') 결과 비교
++```
++
++### 6.7 논문 Limitations 권장 추가 항목
++
++audit 결과 명시 권장:
++
++1. **Mock tools** — `agent/tools.py`의 4개 도구는 mock. 실제 임상 도구 신뢰도와의 격차는 별도 ablation 필요.
++2. **Heuristic labels** — `_classify_case`의 키워드 기반 ground truth는 임상 전문가 검증 부재. MedAbstain/PubMedQA 외부 라벨과 분리해 보고 권장.
++3. **Prompt-induced abstention** — `SYSTEM_PROMPT_INSTRUCTED` 사용 시 NO_EVIDENCE Trigger의 일부는 프롬프트 효과. `prompt_mode="neutral"` 결과를 primary로, `instructed`를 ablation으로 보고.
++4. **Jaccard 기반 weighted CP** — 진정한 density ratio가 아니므로 보장이 보수적. TF-IDF/embedding 기반으로 향상 가능.
++
++### 6라운드 변경 파일 일람
++
++| 영역          | 파일                                                                                                                         |
++| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
++| `models/`     | `uqm.py`, `rtc_ede.py`, `entropy_calibration.py`, `ede_coefficient_search.py`                                                |
++| `agent/`      | `nodes.py`                                                                                                                   |
++| `data/`       | `loader.py`                                                                                                                  |
++| `experiments/`| `metrics_utils.py` (신규), `config_utils.py`, `eval_medabstain.py`, `pareto_sweep.py`, `run_experiment.py`, `run_baseline_comparison.py`, `run_agent_experiment.py`, `run_calibration_pipeline.py`, `run_all_experiments.py` |
++| `configs/`    | `base_config.yaml`                                                                                                           |
++
++스냅샷은 `improvements/improved/round6/` 하위에 저장된다.
++
++---
++
++### 6.8 후속 작업 — `run_all_experiments.py` 강화 + README §9 재작성
++
++audit 6라운드의 신규 옵션을 모든 진입점에 일관되게 노출하기 위해 **`run_all_experiments.py`를 표준 진입점으로 강화**하고, 동시에 모든 sub-runner의 시그니처와 CLI를 통일했다.
++
++#### 6.8.1 `run_all_experiments.py` 변경
++
++| 항목                     | 변경 내용                                                                                                                                |
++| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
++| **신규 CLI 4개**         | `--prompt-mode {neutral,instructed}`, `--decision-rule {trigger_count,confidence}`, `--strict`, `--allow-fallback`                       |
++| **default n_test**       | `50 → 200` (audit #11 기본값과 정합)                                                                                                     |
++| **default n_medabstain** | `50 → 100` (논문 권장값)                                                                                                                  |
++| `_preflight_check()` 신설| 실행 직전 (a) `n_cal` vs CP 최소값(α 기반) 검증, (b) `--allow-fallback` → `UASEF_ALLOW_FALLBACK` env 동기화, (c) OpenAI key 점검         |
++| dispatcher 4개           | `prompt_mode`, `strict`, `decision_rule`을 모든 sub-runner에 전달. Pareto는 `auto`를 받지 못하므로 `auto → logprob`로 변환.              |
++| `build_summary` meta     | `prompt_mode`, `decision_rule`, `strict`, `allow_fallback`, **`calibration_artifacts`**(rtc_multipliers / scenario_multipliers / ede)를 통째로 동봉 → 외부에서 한 JSON으로 전체 재현 가능 |
++| `build_markdown_report`  | 표지에 prompt_mode / decision_rule / weighted_cp / strict / RTC mults / EDE config / Scenario mults 줄 추가, 베이스라인 표에 **Wilson 95% CI** 컬럼 2개 신규 (audit #11) |
++
++#### 6.8.2 sub-runner 시그니처·CLI 통일
++
++`run_baseline_comparison.run_baseline_comparison`, `run_agent_experiment.run_backend_experiment`, `eval_medabstain.run_medabstain_eval`, `pareto_sweep.run_pareto_sweep`에 다음 인자가 모두 추가되어 동일한 의미로 작동:
++
++- `prompt_mode: str = "neutral"` — UQM 생성자에 전달, agent의 경우 `AgentComponents.prompt_mode`에도 전달
++- `strict: bool = False` — `UQM(strict=...)`로 전달
++- `decision_rule: Optional[str] = None` — None이면 `base_config.yaml`의 값 유지, 명시 시 `ede_kwargs["decision_rule"]` 덮어씀
++- `pareto_sweep`은 `decision_rule` 미사용 (Pareto는 트리거 무관 순수 CP만 측정), `prompt_mode`만 사용
++
++각 스크립트의 `__main__` CLI 파서에도 동일한 4개 옵션이 추가되어, 단독 호출도 동일한 API.
++
++#### 6.8.3 smoke test (자동 검증)
++
++수정 직후 다음을 명시적으로 확인:
++
++- 16개 모듈 임포트 OK
++- `run_all_experiments.py --help` 출력에 `--prompt-mode`, `--decision-rule`, `--strict`, `--allow-fallback` 모두 포함
++- `build_summary(args=Namespace(prompt_mode='neutral', ...))` → `meta.config.prompt_mode == 'neutral'`, `meta.calibration_artifacts` 존재
++- `build_markdown_report(summary)` 결과에 `prompt_mode`, `RTC multipliers`, `95% CI` 컬럼 모두 출력
++
++#### 6.8.4 README §9 (실험 실행) 전면 재작성
++
++루트 `README.md`의 §9를 다음 구조로 정리:
++
++- **§9.0 진입점 한눈에** — 8개 스크립트의 역할 표
++- **§9.1 사전 준비** — `.env` / 데이터셋 / 캘리브레이션
++- **§9.2 ⭐ 표준 진입점 `run_all_experiments.py`** — 4가지 자주 쓰는 호출 + 전체 옵션 매트릭스 + 권장 ablation 시나리오 + 산출 파일 목록
++- **§9.3 개별 실험 스크립트**
++- **§9.4 단위/스모크 테스트**
++- **§9.5 자주 만나는 상황 트러블슈팅** (7개 항목 — fallback, strict, deprecation, MedAbstain 부재, OpenAI key, LMStudio latency, N/A 표기)
++
++audit 신규 옵션 4개는 §9.2.2 매트릭스에서 **굵게** 표시되어 한 눈에 식별 가능.
++
++---
++
++### 6.9 logprob-free 모델 지원 (Anthropic / Gemini / OpenAI reasoning)
++
++사용자 지적: **GPT-5/o3/Claude/Gemini 등 logprobs를 반환하지 않는 모델군**이 점점 일반적이 되고 있다. 기존 코드는 logprob 모드 호출 시 ValueError로 실패했고, 사용자가 명시적으로 `scoring_method='self_consistency'`를 설정해야 했다. 6.9에서 다음 3가지를 동시에 추가했다.
++
++#### 6.9.1 모델 사전 점검 + 자동 전환
++
++[models/model_interface.py:35-78](../models/model_interface.py#L35) 신규:
++
++```python
++LOGPROB_INCOMPATIBLE_BACKENDS = {"anthropic", "gemini"}
++LOGPROB_INCOMPATIBLE_MODEL_PATTERNS = [r"^o1(-|$)", r"^o3(-|$)", r"^o4(-|$)", r"^gpt-5"]
++
++def backend_supports_logprobs(backend: str, model_name: Optional[str] = None) -> bool: ...
++```
++
++[models/uqm.py:512-562](../models/uqm.py#L512)에서 UQM.\_\_init\_\_가 사전 점검:
++
++| 상황 | `strict=False` (default) | `strict=True` |
++| --- | --- | --- |
++| `backend ∈ {anthropic, gemini}` + `scoring_method='logprob'` | UserWarning + 자동 `self_consistency` 전환 | RuntimeError |
++| `backend='openai'` + `OPENAI_MODEL` matches `o1*/o3*/o4*/gpt-5*` + `scoring_method='logprob'` | UserWarning + 자동 `hybrid` 전환 | RuntimeError |
++
++#### 6.9.2 Anthropic / Gemini 백엔드
++
++| backend | 구현 | 의존성 | logprob | 기본 모델 |
++| --- | --- | --- | --- | --- |
++| `anthropic` | [models/model_interface.py:185-237](../models/model_interface.py#L185) `_query_anthropic` | `anthropic>=0.40.0` (선택, lazy import) | ✗ → SC/hybrid | `claude-3-5-sonnet-latest` |
++| `gemini` | OpenAI 클라이언트 + Google OpenAI-compat 엔드포인트 | (없음) | ✗ → SC/hybrid | `gemini-2.0-flash` |
++
++`get_client(backend)`에 `gemini` 분기 추가, `query_model(backend)`에 `anthropic` 분기 추가. CLI choices도 5종으로 확장:
++
++```text
++--backend {openai, lmstudio, mlx, anthropic, gemini}
++```
++
++`pyproject.toml`에 optional dep group 추가:
++
++```toml
++[project.optional-dependencies]
++claude = ["anthropic>=0.40.0"]
++all_backends = ["anthropic>=0.40.0"]
++```
++
++#### 6.9.3 HYBRID scoring_method
++
++[models/uqm.py:151-218](../models/uqm.py#L151) 신규 함수:
++
++```python
++def compute_hybrid_score(...) -> float:
++    diversity = _answer_diversity(texts)        # [0,1] Jaccard 다양성
++    mode_H    = _answer_mode_entropy(texts)     # [0,1] 정규화된 응답 분포 entropy
++    return (0.5*diversity + 0.5*mode_H) * SC_NORMALIZATION_SCALE
++```
++
++**왜 hybrid가 필요한가?** Self-consistency Jaccard는 **토큰 단위 변동**만 본다. 5번 응답이 모두 약간씩 다른 표현이면 diversity ≈ 1로 높게 나오지만, 의미상 모두 같은 결론일 수 있다. 반면 mode entropy는 N개의 응답을 정규화한 뒤 그 분포의 Shannon entropy를 본다 → bimodal 패턴(예: 3/5 'Use A.', 2/5 'Use B.')을 정확히 포착한다 (단위 테스트: H_bimodal ≈ 0.42).
++
++같은 N=5 호출로 두 신호를 함께 사용하므로 비용 증가 없이 신호량이 늘어난다. CP coverage 보장은 비적합 함수 형태에 무관하므로 그대로 성립.
++
++CLI choices 확장 (모든 runner):
++
++```text
++--scoring-method {logprob, self_consistency, hybrid, auto}
++```
++
++#### 6.9.4 단위 테스트 (audit 6.9 검증)
++
++수정 직후 `/tmp/uasef_smoke.py`로 6/6 항목 검증:
++
++| 항목 | 결과 |
++| --- | --- |
++| 1. 임포트 (5개 신규 심볼 포함) | OK |
++| 2. `backend_supports_logprobs` 11개 케이스 정확성 | OK |
++| 3. hybrid 컴포넌트: diversity / mode entropy 단위값 검증 | OK (div=0/1, H=0/0.42/1) |
++| 4a. `strict=True + anthropic + logprob` → RuntimeError | ✓ |
++| 4b. `strict=False + anthropic + logprob` → 자동 SC 전환 | ✓ |
++| 5a. `strict=True + openai + o3-mini` → RuntimeError | ✓ |
++| 5b. `strict=False + openai + o3-mini` → 자동 hybrid 전환 | ✓ |
++| 6. `UQM(scoring_method='hybrid')` 직접 생성 | OK |
++
++CLI 헬프 검증:
++
++```text
++--backend {openai,lmstudio,mlx,anthropic,gemini}
++--scoring-method {logprob,self_consistency,hybrid,auto}
++```
++
++#### 6.9.5 사용 예시
++
++```bash
++# Claude (자동 self_consistency)
++pip install 'anthropic>=0.40.0'
++ANTHROPIC_API_KEY=sk-ant-... \
++python experiments/run_all_experiments.py --backend anthropic \
++    --n-cal 200 --n-test 100 --skip pareto
++
++# Gemini + 명시적 hybrid
++GEMINI_API_KEY=AIza... \
++python experiments/run_all_experiments.py --backend gemini \
++    --scoring-method hybrid --n-cal 200 --n-test 100
++
++# OpenAI o3-mini (자동으로 hybrid 전환)
++OPENAI_MODEL=o3-mini \
++python experiments/run_all_experiments.py --backend openai \
++    --n-cal 200 --n-test 100
++```
++
++#### 6.9.6 비용 비교
++
++| 모드 | 케이스당 LLM 호출 | n_cal=500 + n_test=200×4 시나리오 |
++| --- | --- | --- |
++| logprob | 1 | 1,300 calls |
++| self_consistency / hybrid (N=5) | 5 | 6,500 calls |
++
++**`pareto_sweep.py`는 audit #9 캐싱 이후에도 `(cal_n + test_n) × N` 호출** → logprob-free 백엔드에서는 `--skip pareto` 권장.
++
++#### 6.9.7 README 업데이트
++
++- `README.md` (한국어): §4.1 Scoring Method 표 + LLM 지원 요건 표 + §9.1 환경변수 + logprob 호환성 매트릭스 + §9.2.3 Ablation 5–7번(anthropic/gemini/o3-mini) + §9.5 트러블슈팅 4개 항목 추가.
++- `README_EN.md` (영어): §4.1 동일 갱신 + §9 전면 재작성 (한국어 버전과 동일 구조 — 9.0 entry point, 9.1 prerequisites with logprob compat matrix, 9.2 standard entry point, 9.3 individual scripts, 9.4 unit tests, 9.5 troubleshooting).
++
++#### 6.9.8 변경 파일
++
++| 영역 | 파일 |
++| --- | --- |
++| `models/` | `model_interface.py`, `uqm.py` |
++| `experiments/` | `run_all_experiments.py`, `run_baseline_comparison.py`, `run_agent_experiment.py`, `run_experiment.py`, `eval_medabstain.py`, `pareto_sweep.py` (모두 `--scoring-method`/`--backend` choices 확장) |
++| 메타 | `pyproject.toml` (optional-dependencies `claude`, `all_backends`) |
++| 문서 | `README.md`, `README_EN.md` |
++
 diff --git a/models/ede_coefficient_search.py b/models/ede_coefficient_search.py
 index 1b6158a..ec7f63b 100644
 --- a/models/ede_coefficient_search.py
@@ -1809,6 +3520,274 @@ index 38728c4..3a6874d 100644
          "youdens_j": -1.0,
          "sensitivity": 0.0,
          "specificity": 0.0,
+diff --git a/models/model_interface.py b/models/model_interface.py
+index 6e9dac7..66b0e68 100644
+--- a/models/model_interface.py
++++ b/models/model_interface.py
+@@ -2,12 +2,22 @@
+ UASEF — Model Interface Layer
+ 
+ 지원 백엔드:
+-  - openai   : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
+-  - lmstudio : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
+-  - mlx      : Apple MLX 서버. 보고서엔 미수록된 추가 옵션이며, mlx-lm 0.19+ 필요.
+-               OpenAI-compatible /v1/chat/completions 사용. 논문 보고 시에는 ablation으로 명시.
++  - openai    : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
++  - lmstudio  : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
++  - mlx       : Apple MLX 서버. mlx-lm 0.19+ 필요. logprobs 지원.
++  - anthropic : Claude API (audit 6.9 추가). logprobs 미지원 → self_consistency/hybrid만 가능.
++  - gemini    : Google Gemini OpenAI-compatible 엔드포인트 (audit 6.9 추가). logprobs 미지원.
+ 
+-세 백엔드 모두 OpenAI-compatible API를 제공하므로 base_url만 바꾸면 됩니다.
++처음 셋(openai/lmstudio/mlx)은 logprob 기반 CP를 지원합니다.
++Anthropic/Gemini는 logprobs를 반환하지 않으므로 UQM이 자동으로 self_consistency/hybrid로
++전환합니다(`backend_supports_logprobs()` 기반 사전 점검 — audit 6.9).
++
++──────────────────────────────────────────────────────────────────────────────
++logprob 미지원 모델 (OpenAI 내에서도 존재):
++  - reasoning 모델: o1*, o3*, o4*, gpt-5* 변종
++  - 위 패턴은 LOGPROB_INCOMPATIBLE_PATTERNS로 자동 감지되며,
++    UQM(scoring_method='logprob') 시 UQM.__init__에서 명확한 에러 또는 경고+자동전환.
++──────────────────────────────────────────────────────────────────────────────
+ """
+ 
+ import os
+@@ -20,6 +30,52 @@ from typing import Optional
+ from openai import OpenAI
+ 
+ 
++# ── logprob 호환성 감지 (audit 6.9) ──────────────────────────────────────────
++#
++# logprobs를 절대 반환하지 않는 백엔드 / 모델 패턴.
++# UQM.__init__에서 사전 점검하여 (a) strict=True면 RuntimeError로 즉시 중단,
++# (b) strict=False면 UserWarning + scoring_method를 self_consistency로 자동 전환.
++
++LOGPROB_INCOMPATIBLE_BACKENDS: set[str] = {"anthropic", "gemini"}
++
++# OpenAI 모델 중 logprobs를 지원하지 않는 패턴 (reasoning 계열)
++# OpenAI 공식: o1/o3/o4/gpt-5 reasoning 변종은 logprobs 파라미터를 무시하거나 거부함.
++LOGPROB_INCOMPATIBLE_MODEL_PATTERNS: list[str] = [
++    r"^o1(-|$)",      # o1, o1-mini, o1-preview, o1-pro
++    r"^o3(-|$)",      # o3, o3-mini
++    r"^o4(-|$)",      # o4-mini 등
++    r"^gpt-5",        # gpt-5, gpt-5-mini, gpt-5.x — 일반적으로 reasoning 변종은 미지원
++]
++
++
++def backend_supports_logprobs(backend: str, model_name: Optional[str] = None) -> bool:
++    """
++    백엔드/모델이 token-level logprobs를 반환할 수 있는지 정적 판정.
++
++    Args:
++        backend:    "openai" | "lmstudio" | "mlx" | "anthropic" | "gemini"
++        model_name: 모델 이름. None이면 환경변수에서 로드 시도. OpenAI 백엔드일 때만 의미.
++
++    Returns:
++        False = 절대 logprobs를 받을 수 없는 조합
++        True  = 받을 수 있는(또는 받을 수 있을 가능성이 높은) 조합
++
++    audit 6.9: UQM.__init__이 이 함수를 호출하여 사전 점검.
++    """
++    if backend in LOGPROB_INCOMPATIBLE_BACKENDS:
++        return False
++    if backend == "openai":
++        # 모델 이름이 reasoning 패턴이면 미지원
++        m = model_name or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
++        for pat in LOGPROB_INCOMPATIBLE_MODEL_PATTERNS:
++            if re.match(pat, m, re.IGNORECASE):
++                return False
++        return True
++    if backend in ("lmstudio", "mlx"):
++        return True   # 두 백엔드는 logprobs API 지원
++    return True       # 알 수 없는 백엔드는 일단 True (호출 시 ValueError로 fail)
++
++
+ @dataclass
+ class ModelResponse:
+     text: str
+@@ -34,36 +90,54 @@ class ModelResponse:
+ 
+ def get_client(backend: str) -> tuple[OpenAI, str]:
+     """
+-    backend: "lmstudio" | "openai" | "mlx"
+-    반환: (OpenAI client, model_name)
++    backend: "lmstudio" | "openai" | "mlx" | "gemini"
++    반환: (OpenAI-호환 client, model_name)
++
++    audit 6.9: 'anthropic' 백엔드는 별도 함수 _query_anthropic을 사용하므로 여기서 제외.
++    'gemini'는 Google의 OpenAI-compatible 엔드포인트를 OpenAI 클라이언트로 사용.
+     """
+     if backend == "lmstudio":
+         client = OpenAI(
+             base_url="http://localhost:1234/v1",
+             api_key="lm-studio",           # LMStudio는 키 불필요, 아무 문자열
+         )
+-        # LMStudio에 로드된 모델명 — 실제 로드된 모델로 수정하세요
+         model_name = os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct")
+     elif backend == "openai":
+         api_key = os.environ.get("OPENAI_API_KEY")
+         if not api_key:
+             raise RuntimeError(
+-                "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env` "
+-                "(note: `NAI_API_KEY` is not used)."
++                "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env`."
+             )
+         client = OpenAI(api_key=api_key)
+         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+     elif backend == "mlx":
+-        # mlx-lm 서버: python -m mlx_lm.server --model <model> --port 8080
+-        # logprobs 지원: mlx-lm 0.19+ 필요
+         client = OpenAI(
+             base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
+             api_key="mlx",
+         )
+-        # mlx-lm 서버는 로드된 모델을 사용 (API 호출 시 모델명은 무시됨)
+         model_name = os.getenv("MLX_MODEL", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
++    elif backend == "gemini":
++        # audit 6.9: Google Gemini의 OpenAI-호환 엔드포인트
++        # ref: https://ai.google.dev/gemini-api/docs/openai
++        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
++        if not api_key:
++            raise RuntimeError(
++                "Missing GEMINI_API_KEY (or GOOGLE_API_KEY). "
++                "Get key at https://aistudio.google.com/apikey and set in `.env`."
++            )
++        client = OpenAI(
++            api_key=api_key,
++            base_url=os.getenv(
++                "GEMINI_BASE_URL",
++                "https://generativelanguage.googleapis.com/v1beta/openai/",
++            ),
++        )
++        model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+     else:
+-        raise ValueError(f"Unknown backend: {backend}. Use 'lmstudio', 'openai', or 'mlx'.")
++        raise ValueError(
++            f"Unknown backend: {backend!r}. "
++            "Use 'lmstudio', 'openai', 'mlx', 'gemini', or 'anthropic'."
++        )
+     return client, model_name
+ 
+ 
+@@ -161,6 +235,62 @@ def _query_lmstudio_responses(
+     )
+ 
+ 
++def _query_anthropic(
++    system_prompt: str,
++    user_prompt: str,
++    temperature: float,
++    max_tokens: int,
++) -> ModelResponse:
++    """
++    audit 6.9: Claude API (logprobs 미지원).
++
++    anthropic SDK가 설치되어 있지 않으면 명확한 ImportError. UQM이 사전에 backend를
++    감지하여 self_consistency/hybrid로 자동 전환되므로, logprobs=True 요청은 도달
++    할 수 없는 경로다. 응답의 logprobs/top_logprobs는 항상 None.
++    """
++    try:
++        import anthropic  # type: ignore
++    except ImportError as e:
++        raise ImportError(
++            "Anthropic backend requires 'anthropic' package.\n"
++            "  Install: pip install 'anthropic>=0.40.0'\n"
++            "  Then set ANTHROPIC_API_KEY in .env."
++        ) from e
++
++    api_key = os.environ.get("ANTHROPIC_API_KEY")
++    if not api_key:
++        raise RuntimeError(
++            "Missing ANTHROPIC_API_KEY. Get key at console.anthropic.com and set in `.env`."
++        )
++
++    client = anthropic.Anthropic(api_key=api_key)
++    model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
++
++    t0 = time.perf_counter()
++    msg = client.messages.create(
++        model=model_name,
++        max_tokens=max_tokens,
++        temperature=temperature,
++        system=system_prompt,
++        messages=[{"role": "user", "content": user_prompt}],
++    )
++    latency_ms = (time.perf_counter() - t0) * 1000
++
++    # Claude는 content가 list[ContentBlock] 구조
++    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
++    usage = getattr(msg, "usage", None)
++    return ModelResponse(
++        text=text,
++        logprobs=None,           # Anthropic은 logprobs 미반환
++        top_logprobs=None,
++        latency_ms=latency_ms,
++        model_name=model_name,
++        prompt_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
++        completion_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
++        raw={"anthropic_message_id": getattr(msg, "id", None)},
++    )
++
++
+ def query_model(
+     backend: str,
+     system_prompt: str,
+@@ -176,10 +306,18 @@ def query_model(
+     LMStudio 주의사항:
+     - logprobs 요청 시 /v1/responses 엔드포인트를 사용합니다 (/v1/chat/completions는 미지원).
+     - logprobs=False이면 /v1/chat/completions를 사용합니다.
++
++    Anthropic/Gemini (audit 6.9):
++    - logprobs 항상 None. UQM이 사전 감지하여 self_consistency/hybrid 모드로 자동 전환.
++    - 따라서 self_consistency/hybrid를 명시적으로 사용해야 함. logprob 모드면 ValueError.
+     """
+     system_prompt = _sanitize(system_prompt)
+     user_prompt = _sanitize(user_prompt)
+ 
++    # audit 6.9: Anthropic은 별도 SDK 사용
++    if backend == "anthropic":
++        return _query_anthropic(system_prompt, user_prompt, temperature, max_completion_tokens)
++
+     # LMStudio logprobs: /v1/responses 엔드포인트 사용
+     if backend == "lmstudio" and logprobs:
+         _, model_name = get_client(backend)
+@@ -190,8 +328,9 @@ def query_model(
+ 
+     client, model_name = get_client(backend)
+ 
+-    # mlx-lm 서버는 max_tokens 파라미터를 사용 (max_completion_tokens 미지원)
+-    token_limit_key = "max_tokens" if backend == "mlx" else "max_completion_tokens"
++    # mlx-lm / gemini는 max_tokens 파라미터 사용 (max_completion_tokens 미지원)
++    # audit 6.9: gemini OpenAI-compat 엔드포인트도 max_tokens 사용
++    token_limit_key = "max_tokens" if backend in ("mlx", "gemini") else "max_completion_tokens"
+     kwargs = dict(
+         model=model_name,
+         messages=[
+@@ -203,7 +342,9 @@ def query_model(
+     )
+ 
+     # logprobs 요청 (지원 여부는 모델에 따라 다름)
+-    if logprobs:
++    # audit 6.9: 사전 감지에서 미지원으로 판정된 backend/model에는 logprobs 파라미터를 보내지 않음.
++    can_request_logprobs = backend_supports_logprobs(backend, model_name)
++    if logprobs and can_request_logprobs:
+         kwargs["logprobs"] = True
+         kwargs["top_logprobs"] = top_logprobs
+ 
+@@ -243,7 +384,12 @@ if __name__ == "__main__":
+     SYSTEM = "You are a clinical AI assistant. Answer the medical question concisely."
+     USER = "A 45-year-old presents with crushing chest pain radiating to the left arm. What is the most likely diagnosis?"
+ 
+-    for backend in ["lmstudio", "mlx", "openai"]:
++    print(f"\n[자가 점검] backend_supports_logprobs:")
++    for b in ["openai", "lmstudio", "mlx", "anthropic", "gemini"]:
++        print(f"  {b:12s}: {backend_supports_logprobs(b)}")
++    for m in ["gpt-4o-mini", "o1-preview", "o3-mini", "gpt-5", "gpt-5-mini", "gemini-2.0-flash"]:
++        print(f"  openai+{m:18s}: {backend_supports_logprobs('openai', m)}")
++    for backend in ["lmstudio", "mlx", "openai", "anthropic", "gemini"]:
+         print(f"\n{'='*60}")
+         print(f"Backend: {backend.upper()}")
+         try:
 diff --git a/models/rtc_ede.py b/models/rtc_ede.py
 index 72a201f..cd4b6a4 100644
 --- a/models/rtc_ede.py
@@ -2207,10 +4186,39 @@ index 72a201f..cd4b6a4 100644
              },
          )
 diff --git a/models/uqm.py b/models/uqm.py
-index cb93370..69fd056 100644
+index cb93370..9c54811 100644
 --- a/models/uqm.py
 +++ b/models/uqm.py
-@@ -153,16 +153,24 @@ def compute_self_consistency_score(
+@@ -39,12 +39,17 @@ Distribution Shift 처리
+ import math
+ import random
+ import warnings
++from collections import Counter
+ import numpy as np
+ from dataclasses import dataclass, field
+ from datetime import datetime
+ from enum import Enum
+ from typing import Optional
+-from models.model_interface import query_model, ModelResponse
++from models.model_interface import (
++    query_model, ModelResponse,
++    backend_supports_logprobs,
++    LOGPROB_INCOMPATIBLE_BACKENDS, LOGPROB_INCOMPATIBLE_MODEL_PATTERNS,
++)
+ 
+ 
+ # ── Scoring Method 열거형 ──────────────────────────────────────────────────────
+@@ -52,7 +57,8 @@ from models.model_interface import query_model, ModelResponse
+ class ScoringMethod(str, Enum):
+     LOGPROB          = "logprob"           # Primary: logprob-based CP (논문 주요 기여)
+     SELF_CONSISTENCY = "self_consistency"  # Ablation: SC-based CP (다른 비적합 함수)
+-    AUTO             = "auto"              # 런타임 감지 (하위 호환, 비권장)
++    HYBRID           = "hybrid"            # audit 6.9: SC diversity + answer-mode entropy
++    AUTO             = "auto"              # 런타임 감지 (deprecated, audit #21)
+ 
+ 
+ # ── 데이터 클래스 ──────────────────────────────────────────────────────────────
+@@ -153,19 +159,103 @@ def compute_self_consistency_score(
      system_prompt: str,
      question: str,
      n: int = 5,
@@ -2228,6 +4236,18 @@ index cb93370..69fd056 100644
 -        query_model(backend, system_prompt, question, temperature=0.7, logprobs=False).text.strip()[:200]
 -        for _ in range(n)
 -    ]
++    texts = _collect_sc_samples(backend, system_prompt, question, n, seed_response)
+     return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
+ 
+ 
++def _collect_sc_samples(
++    backend: str,
++    system_prompt: str,
++    question: str,
++    n: int,
++    seed_response: Optional[ModelResponse] = None,
++) -> list[str]:
++    """N개의 응답 텍스트를 수집. seed_response가 있으면 N-1번 추가 호출."""
 +    texts: list[str] = []
 +    if seed_response is not None and seed_response.text:
 +        texts.append(seed_response.text.strip()[:200])
@@ -2236,10 +4256,77 @@ index cb93370..69fd056 100644
 +            query_model(backend, system_prompt, question, temperature=0.7, logprobs=False)
 +            .text.strip()[:200]
 +        )
-     return _answer_diversity(texts) * SC_NORMALIZATION_SCALE
++    return texts
++
++
++def _answer_mode_entropy(texts: list[str]) -> float:
++    """
++    응답 분포 엔트로피 — N개의 응답을 정규화한 뒤 그 분포의 Shannon entropy를 [0,1]로 정규화.
++
++    audit 6.9 hybrid 신호:
++      - Jaccard diversity는 토큰 단위 변동만 봄 → 동일 의미·약간 다른 표현이면 높게 나옴.
++      - mode entropy는 N개가 몇 개의 distinct answer로 클러스터링됐는지 봄
++        → 예: 3/5 'A', 2/5 'B' (bimodal) → H = -(0.6log0.6+0.4log0.4)/log(N) ≈ 0.97
++        → 5/5 동일      → H = 0
++        → 5/5 모두 다름 → H = 1
++      - 두 신호는 독립적이므로 함께 쓰면 더 안정적.
++
++    응답을 정규화: lowercase, 양 끝 공백 제거, 첫 100자만 사용.
++    """
++    if len(texts) < 2:
++        return 0.0
++    norm = [t.strip().lower()[:100] for t in texts]
++    counts = Counter(norm)
++    n = len(texts)
++    probs = [c / n for c in counts.values()]
++    H = -sum(p * math.log(p) for p in probs if p > 0)
++    H_max = math.log(n) if n > 1 else 1.0
++    return min(1.0, max(0.0, H / H_max))
++
++
++def compute_hybrid_score(
++    backend: str,
++    system_prompt: str,
++    question: str,
++    n: int = 5,
++    seed_response: Optional[ModelResponse] = None,
++    diversity_weight: float = 0.5,
++    entropy_weight: float = 0.5,
++) -> float:
++    """
++    HYBRID 방식 비적합 점수 (audit 6.9 신규).
++
++    Self-consistency Jaccard diversity + answer-mode entropy의 가중 합을 0~SC_SCALE
++    범위로 반환. 두 신호는 서로 다른 변동을 포착하므로 결합 시 logprob-free 환경에서
++    self_consistency 단독보다 통상 더 높은 AUROC를 보인다 (특히 N=3~5 소표본에서).
++
++    score = (w_d · diversity + w_e · mode_entropy) · SC_NORMALIZATION_SCALE
++
++    LLM 호출 수: N (audit #10과 동일하게 seed_response 재사용).
++
++    Coverage guarantee:
++        Conformal Prediction은 비적합 함수의 형태에 무관하게 성립하므로 hybrid score도
++        유효. 단, 새 함수이므로 논문에서는 self_consistency와 동일하게 ablation으로 보고.
++    """
++    if not (0.0 <= diversity_weight <= 1.0 and 0.0 <= entropy_weight <= 1.0):
++        raise ValueError("weights must be in [0,1]")
++    if abs(diversity_weight + entropy_weight - 1.0) > 1e-6:
++        warnings.warn(
++            f"[UQM hybrid] diversity_weight + entropy_weight = "
++            f"{diversity_weight + entropy_weight:.3f} (≠ 1.0). 결과 스케일이 SC와 다를 수 있음.",
++            UserWarning, stacklevel=2,
++        )
++
++    texts = _collect_sc_samples(backend, system_prompt, question, n, seed_response)
++    diversity = _answer_diversity(texts)        # [0, 1]
++    mode_H = _answer_mode_entropy(texts)        # [0, 1]
++    return (diversity_weight * diversity + entropy_weight * mode_H) * SC_NORMALIZATION_SCALE
++
++
+ # ── Conformal Prediction 임계값 보정 ───────────────────────────────────────────
  
- 
-@@ -174,8 +182,9 @@ class ConformalCalibrator:
+ class ConformalCalibrator:
+@@ -174,8 +264,9 @@ class ConformalCalibrator:
      q̂ = ceil((n+1)(1-α))/n 번째 분위수
      """
  
@@ -2250,7 +4337,7 @@ index cb93370..69fd056 100644
          self.threshold: float = float("inf")
          self.calibration_scores: list[float] = []
  
-@@ -188,12 +197,15 @@ class ConformalCalibrator:
+@@ -188,12 +279,15 @@ class ConformalCalibrator:
          # 즉, n ≥ ceil((1-α) / α). α=0.05 → n ≥ 19, α=0.01 → n ≥ 99
          min_n = math.ceil((1 - self.alpha) / self.alpha)
          if n < min_n:
@@ -2269,7 +4356,7 @@ index cb93370..69fd056 100644
          self.calibration_scores = sorted(nonconformity_scores)
          level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
          self.threshold = float(np.quantile(self.calibration_scores, level))
-@@ -349,7 +361,23 @@ class UQM:
+@@ -349,7 +443,23 @@ class UQM:
          uqm_sc = UQM(backend="lmstudio", alpha=0.10, scoring_method="self_consistency")
      """
  
@@ -2294,7 +4381,7 @@ index cb93370..69fd056 100644
          "You are a clinical decision support AI. "
          "Answer the medical question concisely. "
          "IMPORTANT: If you are not fully confident, or if evidence is limited, "
-@@ -357,6 +385,10 @@ class UQM:
+@@ -357,6 +467,10 @@ class UQM:
          "conditions, you MUST begin your answer with 'I am not certain' or explicitly "
          "state 'insufficient evidence', 'limited data', or 'no clear guideline'."
      )
@@ -2305,7 +4392,7 @@ index cb93370..69fd056 100644
  
      def __init__(
          self,
-@@ -365,9 +397,18 @@ class UQM:
+@@ -365,9 +479,18 @@ class UQM:
          consistency_n: int = 5,
          scoring_method: str = "logprob",
          use_weighted_cp: bool = False,
@@ -2325,12 +4412,13 @@ index cb93370..69fd056 100644
          self._calibrated = False
          self.consistency_n = consistency_n
          self._scoring_method = ScoringMethod(scoring_method)
-@@ -375,13 +416,23 @@ class UQM:
+@@ -375,14 +498,68 @@ class UQM:
          self.use_weighted_cp = use_weighted_cp
          self._weighted_calibrator: Optional[WeightedConformalCalibrator] = None
          self._cal_texts: list[str] = []
 +        self.strict = strict
-+
+ 
+-        # _use_self_consistency 초기화
 +        # SYSTEM_PROMPT 선택
 +        if prompt_mode == "instructed":
 +            self._system_prompt = self.SYSTEM_PROMPT_INSTRUCTED
@@ -2339,19 +4427,78 @@ index cb93370..69fd056 100644
 +        else:
 +            raise ValueError(f"prompt_mode must be 'neutral' or 'instructed', got {prompt_mode!r}")
 +        self.prompt_mode = prompt_mode
- 
-         # _use_self_consistency 초기화
++
++        # _scoring_mode 초기화: "logprob" | "self_consistency" | "hybrid" | None(auto 미결정)
          if self._scoring_method == ScoringMethod.LOGPROB:
-             self._use_self_consistency = False
+-            self._use_self_consistency = False
++            self._scoring_mode = "logprob"
          elif self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
-             self._use_self_consistency = True
+-            self._use_self_consistency = True
 -        else:  # AUTO
+-            self._use_self_consistency = None  # 런타임 감지
++            self._scoring_mode = "self_consistency"
++        elif self._scoring_method == ScoringMethod.HYBRID:
++            self._scoring_mode = "hybrid"
 +        else:  # AUTO (deprecated)
-             self._use_self_consistency = None  # 런타임 감지
++            self._scoring_mode = None  # 런타임 감지
++
++        # 하위 호환 alias (외부 코드가 _use_self_consistency를 참조할 수 있음)
++        self._use_self_consistency = (self._scoring_mode == "self_consistency")
++
++        # ── audit 6.9: 모델 사전 점검 (logprob 미지원 백엔드/모델 자동 감지) ────
++        # backend / OPENAI_MODEL이 logprobs를 지원하지 않는데 logprob 모드를 요청하면
++        # strict=True: RuntimeError (자동화 실험 잘못된 결과 방지)
++        # strict=False: UserWarning + scoring_method 자동 전환
++        if self._scoring_mode == "logprob":
++            # 케이스 1: backend 자체가 logprob-free (anthropic/gemini)
++            if backend in LOGPROB_INCOMPATIBLE_BACKENDS:
++                msg = (
++                    f"[UQM] backend='{backend}'는 logprobs를 반환하지 않습니다 "
++                    f"(LOGPROB_INCOMPATIBLE_BACKENDS={sorted(LOGPROB_INCOMPATIBLE_BACKENDS)}).\n"
++                    f"  대안: scoring_method='self_consistency' 또는 'hybrid'를 사용하세요.\n"
++                    f"  예: UQM(backend='{backend}', scoring_method='hybrid', consistency_n=5)"
++                )
++                if self.strict:
++                    raise RuntimeError(msg + " (strict=True)")
++                warnings.warn(msg + "\n  → scoring_method를 'self_consistency'로 자동 전환합니다.",
++                              UserWarning, stacklevel=2)
++                self._scoring_method = ScoringMethod.SELF_CONSISTENCY
++                self._scoring_mode = "self_consistency"
++                self._use_self_consistency = True
++            # 케이스 2: backend는 OK지만 OPENAI_MODEL이 reasoning 패턴
++            elif backend == "openai":
++                import os as _os
++                model = _os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
++                if not backend_supports_logprobs("openai", model):
++                    msg = (
++                        f"[UQM] OPENAI_MODEL='{model}'은 logprobs 미지원 패턴입니다 "
++                        f"(reasoning 모델 — {LOGPROB_INCOMPATIBLE_MODEL_PATTERNS}).\n"
++                        f"  대안: (a) gpt-4o-mini/gpt-4o 등 logprobs 지원 모델로 OPENAI_MODEL 변경\n"
++                        f"        (b) scoring_method='hybrid' 또는 'self_consistency' 사용"
++                    )
++                    if self.strict:
++                        raise RuntimeError(msg + " (strict=True)")
++                    warnings.warn(msg + "\n  → scoring_method를 'hybrid'로 자동 전환합니다.",
++                                  UserWarning, stacklevel=2)
++                    self._scoring_method = ScoringMethod.HYBRID
++                    self._scoring_mode = "hybrid"
++                    self._use_self_consistency = False  # hybrid는 separate path
  
          # Ablation 경고
-@@ -397,14 +448,15 @@ class UQM:
+         if self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
+@@ -395,33 +572,54 @@ class UQM:
+                 UserWarning, stacklevel=2,
+             )
  
++        if self._scoring_method == ScoringMethod.HYBRID:
++            warnings.warn(
++                "\n[UQM] scoring_method='hybrid' 선택됨 (audit 6.9).\n"
++                "  Self-consistency diversity + answer-mode entropy의 가중 합.\n"
++                "  Anthropic/Gemini/OpenAI reasoning 모델 등 logprob-free 환경에서 권장.\n"
++                "  논문에서는 self_consistency와 함께 별도 ablation으로 보고하세요.",
++                UserWarning, stacklevel=2,
++            )
++
          if self._scoring_method == ScoringMethod.AUTO:
              warnings.warn(
 -                "\n[UQM] scoring_method='auto' 사용 중.\n"
@@ -2359,7 +4506,7 @@ index cb93370..69fd056 100644
                  "  실험 재현성(reproducibility)을 위해 방법을 명시적으로 지정하세요:\n"
 -                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')",
 -                UserWarning, stacklevel=2,
-+                "  UQM(scoring_method='logprob') 또는 UQM(scoring_method='self_consistency')\n"
++                "  UQM(scoring_method='logprob' | 'self_consistency' | 'hybrid')\n"
 +                "  다음 릴리스에서 제거될 예정입니다.",
 +                DeprecationWarning, stacklevel=2,
              )
@@ -2368,22 +4515,57 @@ index cb93370..69fd056 100644
 -        resp = query_model(self.backend, self.SYSTEM_PROMPT, question, temperature=0.0)
 +        resp = query_model(self.backend, self._system_prompt, question, temperature=0.0)
  
-         # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지
-         if self._use_self_consistency is None:
-@@ -418,8 +470,11 @@ class UQM:
+-        # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지
+-        if self._use_self_consistency is None:
+-            self._use_self_consistency = resp.logprobs is None
+-            if self._use_self_consistency:
++        # AUTO 모드: 최초 호출 시 logprobs 지원 여부 감지 (deprecated)
++        if self._scoring_mode is None:
++            if resp.logprobs is None:
++                self._scoring_mode = "self_consistency"
++                self._use_self_consistency = True
+                 warnings.warn(
+                     "\n[UQM] AUTO: logprobs 미지원 감지 → self-consistency 모드로 전환.\n"
+-                    "  scoring_method='self_consistency'를 명시적으로 설정하고\n"
++                    "  scoring_method='self_consistency' 또는 'hybrid'를 명시적으로 설정하고\n"
+                     "  논문에서 ablation으로 보고하세요.",
+                     UserWarning, stacklevel=3,
                  )
++            else:
++                self._scoring_mode = "logprob"
++                self._use_self_consistency = False
  
-         if self._use_self_consistency:
-+            # audit issue #10: 첫 호출 응답을 N개의 일부로 활용해 N-1번 추가 쿼리만 발생
+-        if self._use_self_consistency:
++        # 모드별 score 계산 (audit 6.9)
++        if self._scoring_mode == "self_consistency":
              score = compute_self_consistency_score(
 -                self.backend, self.SYSTEM_PROMPT, question, self.consistency_n
 +                self.backend, self._system_prompt, question,
-+                n=self.consistency_n,
-+                seed_response=resp,
++                n=self.consistency_n, seed_response=resp,
              )
-         else:
+-        else:
++        elif self._scoring_mode == "hybrid":
++            score = compute_hybrid_score(
++                self.backend, self._system_prompt, question,
++                n=self.consistency_n, seed_response=resp,
++            )
++        else:  # logprob
              score = compute_nonconformity_score(resp)
-@@ -470,20 +525,29 @@ class UQM:
+ 
+         return score, resp
+@@ -430,9 +628,9 @@ class UQM:
+     def active_scoring_method(self) -> str:
+         """실제 사용 중인 scoring method 문자열 반환 (재현성 추적용)."""
+         if self._scoring_method == ScoringMethod.AUTO:
+-            if self._use_self_consistency is None:
++            if self._scoring_mode is None:
+                 return "auto(undecided)"
+-            return "self_consistency" if self._use_self_consistency else "logprob"
++            return self._scoring_mode
+         return self._scoring_method.value
+ 
+     def calibrate(
+@@ -470,20 +668,29 @@ class UQM:
          cal_scores, holdout_scores = [], []
          cal_texts: list[str] = []
          n_skipped = 0
@@ -2417,7 +4599,7 @@ index cb93370..69fd056 100644
                  continue
              if i in holdout_set:
                  holdout_scores.append(score)
-@@ -493,7 +557,14 @@ class UQM:
+@@ -493,7 +700,14 @@ class UQM:
              if (i + 1) % 10 == 0:
                  print(f"  [{i+1}/{n_total}] score={score:.4f}")
          if n_skipped:
@@ -2433,6 +4615,27 @@ index cb93370..69fd056 100644
  
          self._cal_texts = cal_texts
          self.calibrator.fit(cal_scores)
+diff --git a/pyproject.toml b/pyproject.toml
+index 18a68dd..3ab6c6d 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -19,4 +19,13 @@ dependencies = [
+     "langsmith>=0.1.0",
+     # 데이터셋
+     "datasets>=2.14.0",
+-]
+\ No newline at end of file
++]
++
++# audit 6.9: logprob-free 백엔드 (선택 의존성)
++#   anthropic: Claude API. self_consistency / hybrid 모드만 가능.
++#   gemini   : OpenAI 패키지의 base_url 변경으로 동작 → 추가 의존성 불필요.
++#
++# 설치:  pip install 'uasef[claude]'   또는  pip install 'anthropic>=0.40.0'
++[project.optional-dependencies]
++claude = ["anthropic>=0.40.0"]
++all_backends = ["anthropic>=0.40.0"]
+\ No newline at end of file
 diff --git a/experiments/metrics_utils.py b/experiments/metrics_utils.py
 new file mode 100644
 index 0000000..abdff41

@@ -702,9 +702,26 @@ def _preflight_check(args) -> None:
     else:
         os.environ.pop("UASEF_ALLOW_FALLBACK", None)
 
-    # OpenAI key 체크 (sanity)
+    # API key 체크 (sanity)
     if (args.backend in (None, "openai")) and not os.environ.get("OPENAI_API_KEY"):
         print("  ⚠  OPENAI_API_KEY 미설정 — openai backend 단계는 SKIP 됩니다.")
+    if args.backend == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
+        print("  ⚠  ANTHROPIC_API_KEY 미설정 — anthropic backend 호출 시 RuntimeError.")
+    if args.backend == "gemini" and not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+        print("  ⚠  GEMINI_API_KEY/GOOGLE_API_KEY 미설정 — gemini backend 호출 시 RuntimeError.")
+
+    # audit 6.9: logprob-free 백엔드/모델 자동 안내
+    from models.model_interface import backend_supports_logprobs
+    if args.backend in ("anthropic", "gemini"):
+        if args.scoring_method in ("logprob", "auto"):
+            print(f"  ⚠  backend={args.backend}은 logprobs 미지원 → "
+                  f"UQM이 자동으로 'self_consistency'로 전환합니다 "
+                  f"(or `--scoring-method hybrid` 권장).")
+    if args.backend == "openai":
+        m = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        if not backend_supports_logprobs("openai", m):
+            print(f"  ⚠  OPENAI_MODEL='{m}'은 reasoning 계열(logprobs 미지원). "
+                  f"UQM이 'hybrid'로 자동 전환 (또는 --scoring-method 명시 권장).")
 
     print(f"  α effective  : {effective_alpha}  (n_min={min_n})")
     print(f"  prompt_mode  : {args.prompt_mode}")
@@ -720,7 +737,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--backend", type=str, default=None,
-        choices=["lmstudio", "openai"],
+        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
         help="단일 백엔드 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
     # ── 데이터 규모 ────────────────────────────────────────────────────────
@@ -736,7 +753,7 @@ def main() -> None:
     # ── 핵심 알고리즘 옵션 ─────────────────────────────────────────────────
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
-        choices=["logprob", "self_consistency", "auto"],
+        choices=["logprob", "self_consistency", "hybrid", "auto"],
         help="비적합 점수 방식. auto는 deprecated (audit #21).",
     )
     parser.add_argument("--alpha", type=float, default=None,
