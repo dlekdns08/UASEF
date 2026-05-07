@@ -2,7 +2,7 @@
 UASEF — 순차 파이프라인 실험 실행기
 
 실험 구조:
-  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+  [Primary]  OpenAI (GPT-4o) — logprob-based CP
              token-level logprobs로 비적합 점수 계산. 논문 주요 결과.
   [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
              LM Studio의 OpenAI-compatible API를 통해 token-level logprobs 추출.
