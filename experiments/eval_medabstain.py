@@ -244,6 +244,9 @@ def run_medabstain_eval(
 
     # audit issue #8 (2026-05-07): use_weighted_cp 인자를 실제로 반영.
     # 과거엔 인자값과 무관하게 항상 True였음 → CLI --weighted-cp 토글이 무의미했음.
+    # audit 6.10: hybrid weight는 base_config.yaml에서 자동 로드
+    from experiments.config_utils import load_hybrid_weights
+    _hyb_dw, _hyb_ew = load_hybrid_weights()
     uqm = UQM(
         backend=backend,
         alpha=effective_alpha,
@@ -251,6 +254,8 @@ def run_medabstain_eval(
         use_weighted_cp=use_weighted_cp,
         prompt_mode=prompt_mode,   # audit #5
         strict=strict,             # audit #19
+        hybrid_diversity_weight=_hyb_dw,    # audit 6.10
+        hybrid_entropy_weight=_hyb_ew,      # audit 6.10
     )
     try:
         if use_routine_cal:
