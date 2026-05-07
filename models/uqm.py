@@ -11,7 +11,7 @@ Conformal Prediction을 통해 통계적 Coverage 보장이 있는 불확실성�
     s(x) = -mean(token logprobs)
     Coverage guarantee: P(s_test ≤ q̂) ≥ 1-α  (Angelopoulos & Bates, 2021)
     요건: 모델이 token-level logprobs를 지원해야 함
-          지원 모델: GPT-4o, GPT-4o-mini, llama.cpp (--logprobs 플래그)
+          지원 모델: GPT-4o, llama.cpp (--logprobs 플래그)
 
   SELF_CONSISTENCY (Ablation — ablation study 전용):
     s(x) = Jaccard_diversity(responses × N)
@@ -131,7 +131,7 @@ def compute_nonconformity_score(response: ModelResponse) -> float:
         raise ValueError(
             "Backend이 logprobs를 반환하지 않습니다.\n"
             "  옵션 1 (권장): logprobs 지원 백엔드 사용\n"
-            "                 - OpenAI: gpt-4o, gpt-4o-mini (기본 지원)\n"
+            "                 - OpenAI: gpt-4o (기본 지원)\n"
             "                 - LMStudio: llama.cpp 기반 모델 + logprobs=True 설정\n"
             "  옵션 2 (Ablation): UQM(scoring_method='self_consistency')\n"
             "                 논문에서 ablation study로 명시적으로 구분 필요"
@@ -465,7 +465,7 @@ class UQM:
 
     ⚠ LLM 지원 요건:
         LOGPROB (Primary): token-level logprobs 지원 필수.
-            지원: GPT-4o, GPT-4o-mini, llama.cpp 기반 (LMStudio)
+            지원: GPT-4o, llama.cpp 기반 (LMStudio)
             미지원: Claude API, Gemini API, Cohere 등
             → logprobs 없으면 compute_nonconformity_score()가 ValueError 발생.
             → "블랙박스 LLM에 적용 가능" 설명은 SELF_CONSISTENCY 방식에만 해당.
@@ -588,7 +588,7 @@ class UQM:
                 fallback_target = "hybrid"
             elif backend == "openai":
                 import os as _os
-                model = _os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+                model = _os.environ.get("OPENAI_MODEL", "gpt-4o")
                 if not backend_supports_logprobs("openai", model):
                     msg = (
                         f"[UQM] OPENAI_MODEL='{model}'은 logprobs 미지원 패턴입니다 "
