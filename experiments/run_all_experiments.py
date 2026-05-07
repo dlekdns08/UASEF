@@ -108,6 +108,13 @@ def run_experiment_agent(args, cal_questions, agent_scenarios) -> dict:
     t0 = datetime.now()
 
     backends = [args.backend] if args.backend else ["lmstudio", "openai"]
+    # audit 6.10: agent ReAct 루프는 langchain-openai만 지원
+    AGENT_SUPPORTED = {"openai", "lmstudio", "mlx"}
+    skipped_for_agent = [b for b in backends if b not in AGENT_SUPPORTED]
+    if skipped_for_agent:
+        print(f"  ⚠  Agent 실험 SKIP된 backend: {skipped_for_agent} "
+              f"(LangGraph ReAct는 {sorted(AGENT_SUPPORTED)}만 지원)")
+    backends = [b for b in backends if b in AGENT_SUPPORTED]
     all_results: dict = {}
 
     for backend in backends:
