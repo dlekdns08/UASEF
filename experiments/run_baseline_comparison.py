@@ -9,7 +9,7 @@ UASEF 베이스라인 비교 실험.
   3. full_uasef:      T1 + T2 + T3 + 엔트로피 가중치 전체 사용
 
 실험 구조:
-  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+  [Primary]  OpenAI (GPT-4o) — logprob-based CP
   [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
 
 ⚠ 계획서의 Temperature Scaling / MC Dropout은 현재 미구현.
