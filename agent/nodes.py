@@ -111,13 +111,42 @@ def _make_llm(backend: str, bind_tools: bool = True) -> ChatOpenAI:
         요청해도 응답은 무시되고 _extract_model_response가 None을 반환한다. 그러면
         UQM이 별도로 query_model()을 호출해 /v1/responses 엔드포인트로 logprobs를 얻는다.
         성능을 위해 LMStudio backend에서는 logprobs 요청 자체를 생략한다.
+
+    audit 6.10: anthropic/gemini는 ChatOpenAI 호환이 아니므로 명확한 NotImplementedError로
+        차단. agent 실험은 OpenAI/LMStudio/MLX만 지원. UQM 안전 게이트(uasef_check)는
+        모든 backend에 동작하지만, ReAct 추론 루프는 langchain-openai에 의존.
     """
+    if backend == "anthropic":
+        raise NotImplementedError(
+            "[Agent] backend='anthropic'은 LangGraph ReAct 루프에서 아직 미지원입니다.\n"
+            "  이유: langchain-anthropic 어댑터가 본 프로젝트에 통합되지 않았습니다.\n"
+            "  대안:\n"
+            "    1) UQM 단독 평가는 모든 backend에서 동작:\n"
+            "       python experiments/run_baseline_comparison.py --backend anthropic\n"
+            "       python experiments/eval_medabstain.py --backend anthropic\n"
+            "    2) Agent ReAct는 backend in {openai, lmstudio, mlx}로 한정 (audit 6.10)."
+        )
+    if backend == "gemini":
+        raise NotImplementedError(
+            "[Agent] backend='gemini'은 LangGraph ReAct 루프에서 아직 미지원입니다.\n"
+            "  이유: Gemini의 OpenAI-compat 엔드포인트가 tool-calling을 langchain-openai\n"
+            "        스펙대로 반환하지 않을 수 있어 검증 전까지 차단합니다.\n"
+            "  대안: UQM 단독 평가만 사용하거나, --backend openai/lmstudio/mlx 사용."
+        )
     if backend == "lmstudio":
         llm = ChatOpenAI(
             base_url="http://localhost:1234/v1",
             api_key="lm-studio",
             model=os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct"),
             temperature=0.0,
+        )
+    elif backend == "mlx":
+        llm = ChatOpenAI(
+            base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
+            api_key="mlx",
+            model=os.getenv("MLX_MODEL", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"),
+            temperature=0.0,
+            model_kwargs={"logprobs": True, "top_logprobs": 5},
         )
     else:
         # OpenAI 등 logprobs를 지원하는 백엔드에만 요청
