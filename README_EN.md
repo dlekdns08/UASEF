@@ -251,10 +251,25 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 
 | scoring_method | Requires logprobs | Applicable LLMs | Paper Position |
 | -------------- | ----------------- | --------------- | -------------- |
-| `logprob` (Primary) | Required | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | Main contribution |
-| `self_consistency` (Ablation) | Not required | Any LLM | Ablation study |
+| `logprob` (Primary + Ablation) | Required | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | Main contribution |
+| `self_consistency` (Ablation) | Not required | **Any** LLM (Claude, Gemini, OpenAI o-series, etc.) | Ablation / black-box LLMs |
+| `hybrid` (audit 6.9) | Not required | Same as self_consistency, with richer signal | Recommended for logprob-free environments |
 
-> "Black-box LLM applicable" applies only to the `self_consistency` method. The `logprob` method raises `ValueError` on Claude API, Gemini API, Cohere, etc., which do not expose token-level logprobs.
+> **audit 6.9 — automatic fallback**: When `UQM(backend='anthropic'/'gemini')` is constructed, or when `OPENAI_MODEL` matches a reasoning pattern (`o1*/o3*/o4*/gpt-5*`), requesting `scoring_method='logprob'` triggers a static check ([models/uqm.py:512-562](models/uqm.py#L512)):
+>
+> - `strict=False` (default): emit `UserWarning` and auto-switch to `self_consistency` (anthropic/gemini) or `hybrid` (openai reasoning).
+> - `strict=True`: raise `RuntimeError` immediately (recommended for paper-quality automation).
+>
+> Use `backend_supports_logprobs(backend, model_name)` for static checks ([models/model_interface.py:51-78](models/model_interface.py#L51)).
+>
+> | backend | Models | logprobs | Auto fallback |
+> | --- | --- | --- | --- |
+> | `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+> | `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
+> | `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
+> | `mlx` | mlx-lm 0.19+ | ✓ | — |
+> | `anthropic` | All Claude models | ✗ | `self_consistency` |
+> | `gemini` | All Gemini models | ✗ | `self_consistency` |
 
 ---
 
