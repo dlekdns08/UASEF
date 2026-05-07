@@ -152,7 +152,7 @@ def _make_llm(backend: str, bind_tools: bool = True) -> ChatOpenAI:
         # OpenAI 등 logprobs를 지원하는 백엔드에만 요청
         llm = ChatOpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
             temperature=0.0,
             model_kwargs={"logprobs": True, "top_logprobs": 5},
         )
