@@ -67,6 +67,18 @@ open results/all_experiments_report.md
 
 **여러 ablation 비교?** `--run-tag` 옵션으로 분리 후 `python experiments/compare_runs.py base instructed confidence`로 통합 표 생성 (audit 6.10).
 
+**Round 7 + 모든 baseline 한 번에 실행 + 통합 보고서?** (audit 7)
+
+```bash
+# 합성 검증만 (LLM 키 불필요, ~30초)
+SKIP_LLM=1 bash run_full_evaluation.sh
+
+# 전체 (LLM 호출 포함, OpenAI 키 필요)
+BACKEND=openai N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
+```
+
+생성: `results/run_<timestamp>/result.md` (통합 보고서) + `result.json` (구조화) + `table{1,2,3,4}.{md,json}` + `pytest_summary.txt`. pytest 137 tests + Table 1 (per-stratum coverage) + Table 2 (FWER, v1 vs v2) + Table 3 (cost 31× 감소) + Table 4 (TECP/Quach/SE/R6/R7 head-to-head) 모두 자동 실행.
+
 ---
 
 ## 0.5. v2 Framework — Round 7 (이론적 기여 강화)
