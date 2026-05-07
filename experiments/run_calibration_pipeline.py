@@ -36,11 +36,12 @@ load_dotenv(ROOT / ".env")
 
 import math
 
-from models.uqm import UQM
+from models.uqm import UQM, _answer_diversity, _answer_mode_entropy, _collect_sc_samples
 from models.rtc_ede import RTC, EDE, SPECIALTY_RISK_MAP, RiskLevel, EscalationTrigger
 from models.rtc_calibration import sweep_all_risk_levels
 from models.entropy_calibration import find_entropy_threshold
 from models.ede_coefficient_search import grid_search_ede_coefficients
+from models.hybrid_weight_search import grid_search_hybrid_weights   # audit 6.10
 from data.loader import load_calibration_questions, load_scenarios, case_to_experiment_dict
 from experiments.config_utils import load_config
 
