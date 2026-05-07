@@ -94,7 +94,8 @@ BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 **산출물 구조** (`results/run_<timestamp>/`):
 
 ```text
-result.md                         ← 통합 보고서 (사람용)
+result.md                         ← 통합 보고서 (사람용, paper main 표)
+result_supplementary.md           ← Supplementary (paper Appendix B, v1 sub-experiment 정리) ★
 result.json                       ← 구조화 결과
 pytest_summary.txt
 synthetic/
@@ -112,6 +113,12 @@ openai/
 lmstudio/
 └── (동일 구조)
 ```
+
+> **★ Supplementary 자동 생성 조건**: `SKIP_V1=0`(default)으로 실행하면 v1
+> 결과를 paper Appendix B 형식 (B.1 Agent ReAct / B.2 Trigger Ablation /
+> B.3 MedAbstain Variant-Level / B.4 Pareto α / B.5 Cross-Backend) 5개 표로
+> 자동 정리하여 `result_supplementary.md`에 저장한다. v1 데이터가 없으면
+> SKIP되며 보고서에 명시된다.
 
 **제어 환경변수**: `BACKENDS` / `N_CAL` / `N_TEST` / `N_MEDABSTAIN` / `N_PARETO` / `N_TRIALS` / `N_PER_STRATUM` / `ALPHA` / `SEED` / `SKIP_LLM` / `SKIP_TESTS` / `SKIP_V1` / `SKIP_V2_SYN` / `SKIP_V2_LLM`. 자세한 사용은 `bash run_full_evaluation.sh` 헤더 주석.
 
