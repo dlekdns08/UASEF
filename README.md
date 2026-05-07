@@ -38,6 +38,34 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
 
 ---
 
+## 0. Quick Start (5줄)
+
+> **30초 안에 결과 1개 뽑기.** 자세한 설명은 §9.
+
+```bash
+# 1) 의존성 설치 (uv 권장; pip도 가능)
+uv pip install -e .
+
+# 2) OpenAI 키 설정
+echo "OPENAI_API_KEY=sk-..." > .env
+
+# 3) 캘리브레이션 (1회, ~3분)
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 100 --n-labeled 20
+
+# 4) ⭐ 표준 진입점 — 4개 실험 일괄 실행 (~10분)
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 100 --n-test 30 --n-medabstain 30 --skip pareto
+
+# 5) 결과 확인
+open results/all_experiments_report.md
+```
+
+**다른 모델/백엔드?** §9.1 환경변수와 logprob 호환성 매트릭스를 참고하세요. Claude/Gemini/o3/gpt-5 등 logprob-free 모델은 `--backend anthropic` 또는 `--scoring-method hybrid`로 자동 처리됩니다 (audit 6.9·6.10).
+
+**여러 ablation 비교?** `--run-tag` 옵션으로 분리 후 `python experiments/compare_runs.py base instructed confidence`로 통합 표 생성 (audit 6.10).
+
+---
+
 ## 1. 연구 배경 및 동기
 
 ### 문제 정의

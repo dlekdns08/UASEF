@@ -36,6 +36,34 @@ A research framework in which LLM-based medical agents **quantify their own unce
 
 ---
 
+## 0. Quick Start (5 lines)
+
+> **One result in 30 seconds.** See §9 for full details.
+
+```bash
+# 1) Install (uv recommended; pip also works)
+uv pip install -e .
+
+# 2) Set OpenAI key
+echo "OPENAI_API_KEY=sk-..." > .env
+
+# 3) One-time calibration (~3 min)
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 100 --n-labeled 20
+
+# 4) ⭐ Standard entry point — runs all 4 experiments (~10 min)
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 100 --n-test 30 --n-medabstain 30 --skip pareto
+
+# 5) Inspect results
+open results/all_experiments_report.md
+```
+
+**Different model / backend?** See §9.1 for env vars and the logprob compatibility matrix. Claude / Gemini / o3 / gpt-5 (and other logprob-free models) are handled automatically via `--backend anthropic` or `--scoring-method hybrid` (audit 6.9 · 6.10).
+
+**Comparing multiple ablations?** Use `--run-tag` to separate runs, then `python experiments/compare_runs.py base instructed confidence` to produce a unified comparison table (audit 6.10).
+
+---
+
 ## 1. Background and Motivation
 
 ### Problem Statement

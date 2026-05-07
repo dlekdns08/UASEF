@@ -867,3 +867,104 @@ python experiments/run_all_experiments.py --backend openai \
 | 메타 | `pyproject.toml` (optional-dependencies `claude`, `all_backends`) |
 | 문서 | `README.md`, `README_EN.md` |
 
+---
+
+## 6.10 라운드 — 통합 정합성 + 인프라 (2026-05-07)
+
+audit 6.9 직후 코드 전반을 다시 훑은 결과, audit 6.9가 만든 갭 + 6라운드 이전부터 남아있던 인프라 부재를 한 번에 정리. 15개 항목.
+
+### 6.10.1 audit 6.9가 만든 새 갭 (Phase A1·A2·B1)
+
+| ID | 항목 | 변경 |
+| --- | --- | --- |
+| #1 | Agent가 anthropic/gemini에서 크래시 | [agent/nodes.py:_make_llm](../agent/nodes.py)에 명확한 `NotImplementedError` 가드. `run_agent_experiment.py` `--backend` choices에서 anthropic/gemini 제외. `run_all_experiments.py` agent dispatcher가 미지원 backend 자동 SKIP. |
+| #2 | logprob-free fallback 비대칭 (anthropic→SC, openai reasoning→hybrid) | 모두 **hybrid**로 통일 (audit 6.10 정책). 같은 N=5 호출에 신호량 ↑, 일관성 ↑. |
+| #3 | Hybrid weights 0.5/0.5 하드코딩 | 신규 [models/hybrid_weight_search.py](../models/hybrid_weight_search.py) `grid_search_hybrid_weights` (7개 후보 (1,0)/(0.7,0.3)/.../(0,1)). `run_calibration_pipeline.py` Step 4c로 통합 → `base_config.yaml` 신규 `hybrid:` 섹션에 저장. UQM이 `hybrid_diversity_weight`/`hybrid_entropy_weight` 인자로 수신, `compute_hybrid_score`에 전달. |
+
+### 6.10.2 인프라 (Phase A4·A5·A6·A7·B6·C)
+
+| ID | 항목 | 변경 |
+| --- | --- | --- |
+| #4+#6 | pytest 스위트 부재 | 신규 [tests/](../tests/) 5개 파일 — `test_uqm.py` / `test_rtc_ede.py` / `test_metrics.py` / `test_loader.py` / `test_runners_smoke.py` / `test_config_schema.py`. **82개 테스트 모두 통과.** `conftest.py`로 fallback 환경변수 자동 설정. |
+| #5 | 결과 파일이 매번 덮어써짐 | `--run-tag` 옵션 신규. `experiments/metrics_utils.py:results_dir()` 헬퍼 + `UASEF_RESULTS_DIR` 환경변수 — 모든 sub-runner의 save 함수가 자동 사용. `results/<tag>/`로 ablation 결과 분리. |
+| #11 | logging 모듈 | 신규 [utils/logging.py](../utils/logging.py) — `get_logger()` 헬퍼. `UASEF_LOG_LEVEL/FILE/JSON` 환경변수 제어. 기존 `print()`와 공존, 신규 코드부터 단계 마이그레이션. |
+| #12 | base_config.yaml 검증 부재 | 신규 [experiments/config_schema.py](../experiments/config_schema.py) Pydantic 스키마. `_preflight_check`가 strict=True에서 `RuntimeError`, 그 외 경고. 잘못된 키/타입/범위(α>1, weight 합 ≠ 1, scenario_multiplier="0.9" str 등)를 silent miscalibration 전에 차단. |
+| #13 | Dockerfile + CI 부재 | [Dockerfile](../Dockerfile)(slim python:3.11, 비루트 사용자, uv 빌드, volume-mount 권장) + [.dockerignore](../.dockerignore) + [.github/workflows/test.yml](../.github/workflows/test.yml) (matrix py3.11/3.12, pytest + CLI --help + Docker 빌드). |
+| #14 | Quick Start 부재 | `README.md` / `README_EN.md`에 §0 Quick Start 추가 (5줄, 30초 안에 결과 1개). |
+| #15 | 결과 비교 도구 부재 | 신규 [experiments/compare_runs.py](../experiments/compare_runs.py) — 여러 `--run-tag` 결과를 한 markdown 표로 통합 (메타 / 에이전트 / 베이스라인 / MedAbstain). |
+
+### 6.10.3 통계·알고리즘 강화 (Phase B2·B3·B4·B5)
+
+| ID | 항목 | 변경 |
+| --- | --- | --- |
+| #7 | AUROC/F1 신뢰구간 부재 | `metrics_utils.bootstrap_ci(samples, statistic_fn, n_iter=1000)` — percentile bootstrap. `compute_binary_metrics`는 Wilson(Safety Recall/Over-Esc) 그대로, AUROC 등은 호출자가 활용. |
+| #8 | 다중 비교 보정 | `metrics_utils.bonferroni_adjust()`, `holm_bonferroni()` (step-down). 시나리오별 OK 표시에서 활용 가능. |
+| #9 | Embedding-based Weighted CP | [models/_embedding_utils.py](../models/_embedding_utils.py) 신규 (sentence-transformers lazy import, `UASEF_EMBEDDING_MODEL` 환경변수). `WeightedConformalCalibrator._compute_weights`가 `UASEF_WCP_EMBEDDING=1`이면 embedding 코사인 유사도 사용. 실패 시 Jaccard fallback. |
+| #10 | Semantic entropy (Kuhn et al. 2023) | `_embedding_utils.compute_semantic_entropy(texts, similarity_threshold=0.85)` — embedding 클러스터링 기반. `UASEF_HYBRID_SEMANTIC=1`이면 hybrid의 mode_H를 semantic_H로 자동 교체. |
+
+### 6.10.4 검증 결과
+
+```text
+$ .venv/bin/python -m pytest tests/
+============================== 82 passed in 6.13s ==============================
+```
+
+| 영역 | 테스트 수 | 핵심 검증 |
+| --- | --- | --- |
+| `test_uqm.py` (24개) | backend_supports_logprobs 13 cases, hybrid 컴포넌트, strict/auto-switch, ConformalCalibrator strict |
+| `test_rtc_ede.py` (12개) | WeightedCP→EDE 전파, decision_rule 분기, NO_EVIDENCE strong/weak, code blue 강등, scenario_multipliers |
+| `test_metrics.py` (12개) | silent zero → None, Wilson CI, bootstrap CI, Bonferroni, results_dir 환경변수 |
+| `test_loader.py` (8개) | stable_id 결정성, distribution_source 변형 분리, fallback env constant |
+| `test_runners_smoke.py` (13개) | 모든 8개 runner의 --help, audit 6/6.10 신규 옵션 노출, build_summary 메타 |
+| `test_config_schema.py` (8개) | Pydantic 검증 — 잘못된 alpha/scoring_method/decision_rule/scenario_mult/backend |
+
+### 6.10.5 새 환경변수
+
+| 변수 | 기본 | 설명 |
+| --- | --- | --- |
+| `UASEF_RESULTS_DIR` | (자동) | `--run-tag`가 자동 설정. 결과 디렉토리 override. |
+| `UASEF_WCP_EMBEDDING` | `0` | `1`이면 WeightedCP에 embedding 코사인 유사도 사용 (sentence-transformers 필요). |
+| `UASEF_EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | 사용할 sentence-transformers 모델. 의료 도메인은 `pritamdeka/S-PubMedBert-MS-MARCO`. |
+| `UASEF_HYBRID_SEMANTIC` | `0` | `1`이면 hybrid의 mode_H를 semantic entropy(클러스터링)로 교체. |
+| `UASEF_LOG_LEVEL` | `INFO` | 로깅 레벨. |
+| `UASEF_LOG_FILE` | (없음) | 로그 파일 경로. |
+| `UASEF_LOG_JSON` | `0` | JSON Lines 출력. |
+
+### 6.10.6 신규 파일 / 인터페이스
+
+| 항목 | 위치 | 설명 |
+| --- | --- | --- |
+| `compute_hybrid_score(div_w, ent_w)` | `models/uqm.py` | 가중치를 인자로 받음 (audit 6.10) |
+| `_collect_sc_samples`, `_answer_mode_entropy` | `models/uqm.py` | hybrid 컴포넌트 (calibration에서 직접 사용) |
+| `grid_search_hybrid_weights` | `models/hybrid_weight_search.py` (신규) | F1-safety 최대화 가중치 grid |
+| `compute_semantic_entropy` | `models/_embedding_utils.py` (신규) | Kuhn et al. 2023 단순 구현 |
+| `bootstrap_ci`, `bonferroni_adjust`, `holm_bonferroni` | `experiments/metrics_utils.py` | 통계 신뢰구간 + 다중비교 |
+| `results_dir(default)` | `experiments/metrics_utils.py` | UASEF_RESULTS_DIR 인식 |
+| `validate_config_dict`, `BaseConfig` | `experiments/config_schema.py` (신규) | Pydantic v2 스키마 |
+| `load_hybrid_weights()` | `experiments/config_utils.py` | `base_config.yaml` `hybrid:` 섹션 로드 |
+| `compare_runs.py` | `experiments/compare_runs.py` (신규) | 여러 `--run-tag` 결과 통합 표 |
+| `get_logger(name)` | `utils/logging.py` (신규) | 표준 logging 헬퍼 |
+
+### 6.10.7 base_config.yaml 변경
+
+```yaml
+# 신규 섹션
+hybrid:
+  diversity_weight: 0.5    # audit 6.10 — calibration_pipeline이 갱신
+  entropy_weight: 0.5
+```
+
+### 6.10.8 6.10 라운드 변경 파일 일람
+
+| 영역 | 파일 |
+| --- | --- |
+| `models/` | `uqm.py`, `model_interface.py` (audit 6.9 수정 + 6.10), `hybrid_weight_search.py` (신규), `_embedding_utils.py` (신규) |
+| `agent/` | `nodes.py` (anthropic/gemini 가드) |
+| `experiments/` | `metrics_utils.py` (bootstrap/Bonferroni/results_dir), `config_utils.py` (load_hybrid_weights), `config_schema.py` (신규), `compare_runs.py` (신규), `run_calibration_pipeline.py` (hybrid grid 통합), `run_all_experiments.py` (--run-tag, --strict pre-flight, dispatcher 가드), 기타 5개 runner (hybrid weight 전달) |
+| `utils/` | `logging.py` (신규), `__init__.py` (신규) |
+| `tests/` | 6개 파일 신규 (82 tests passing) |
+| 메타 | `pyproject.toml` (optional deps + pytest config), `Dockerfile` (신규), `.dockerignore` (신규), `.github/workflows/test.yml` (신규) |
+| 문서 | `README.md` §0 Quick Start, `README_EN.md` §0 Quick Start, `improvements/README.md` §6.10 |
+
+스냅샷: `improvements/improved/round6_10/`
+

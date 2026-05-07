@@ -1,0 +1,36 @@
+# UASEF — Docker build 컨텍스트 제외 (audit 6.10)
+.git/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 결과/데이터는 볼륨 마운트
+results/*.json
+results/*.csv
+results/*.png
+results/*.pdf
+results/*.md
+data/raw/*
+
+# 이미지·문서
+*.pdf
+*.png
+*.jpg
+README.md
+README_EN.md
+improvements/
+
+# 환경 변수는 -e로 전달
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
