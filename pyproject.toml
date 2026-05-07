@@ -20,3 +20,12 @@ dependencies = [
     # 데이터셋
     "datasets>=2.14.0",
 ]
+
+# audit 6.9: logprob-free 백엔드 (선택 의존성)
+#   anthropic: Claude API. self_consistency / hybrid 모드만 가능.
+#   gemini   : OpenAI 패키지의 base_url 변경으로 동작 → 추가 의존성 불필요.
+#
+# 설치:  pip install 'uasef[claude]'   또는  pip install 'anthropic>=0.40.0'
+[project.optional-dependencies]
+claude = ["anthropic>=0.40.0"]
+all_backends = ["anthropic>=0.40.0"]
