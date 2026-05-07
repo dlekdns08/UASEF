@@ -8,7 +8,7 @@ UASEF 전체 실험 통합 실행기
   4. Pareto Frontier α Sweep       → results/pareto_sweep_results.json
 
 실험 구조:
-  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP  (논문 주요 결과)
+  [Primary]  OpenAI (GPT-4o) — logprob-based CP  (논문 주요 결과)
   [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
              "로컬 GGUF 모델에도 UASEF logprob CP 적용 가능함" 검증용 ablation study.
 
@@ -738,7 +738,7 @@ def _preflight_check(args) -> None:
                   f"UQM이 자동으로 'self_consistency'로 전환합니다 "
                   f"(or `--scoring-method hybrid` 권장).")
     if args.backend == "openai":
-        m = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        m = os.environ.get("OPENAI_MODEL", "gpt-4o")
         if not backend_supports_logprobs("openai", m):
             print(f"  ⚠  OPENAI_MODEL='{m}'은 reasoning 계열(logprobs 미지원). "
                   f"UQM이 'hybrid'로 자동 전환 (또는 --scoring-method 명시 권장).")
