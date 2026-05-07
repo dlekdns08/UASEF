@@ -444,7 +444,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UASEF MedAbstain 분류 정확도 평가")
     parser.add_argument(
         "--backend", type=str, default=None,
-        choices=["lmstudio", "openai"],
+        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
         help="단일 백엔드만 실행 (기본: 양쪽 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=500,
@@ -458,7 +458,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--scoring-method", type=str, default="logprob",
-        choices=["logprob", "self_consistency"],
+        choices=["logprob", "self_consistency", "hybrid"],
     )
     parser.add_argument(
         "--weighted-cp", action="store_true",
