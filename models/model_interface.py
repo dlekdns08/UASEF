@@ -2,7 +2,7 @@
 UASEF — Model Interface Layer
 
 지원 백엔드:
-  - openai    : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
+  - openai    : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o).
   - lmstudio  : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
   - mlx       : Apple MLX 서버. mlx-lm 0.19+ 필요. logprobs 지원.
   - anthropic : Claude API (audit 6.9 추가). logprobs 미지원 → self_consistency/hybrid만 가능.
@@ -66,7 +66,7 @@ def backend_supports_logprobs(backend: str, model_name: Optional[str] = None) ->
         return False
     if backend == "openai":
         # 모델 이름이 reasoning 패턴이면 미지원
-        m = model_name or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        m = model_name or os.environ.get("OPENAI_MODEL", "gpt-4o")
         for pat in LOGPROB_INCOMPATIBLE_MODEL_PATTERNS:
             if re.match(pat, m, re.IGNORECASE):
                 return False
@@ -109,7 +109,7 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
                 "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env`."
             )
         client = OpenAI(api_key=api_key)
-        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
     elif backend == "mlx":
         client = OpenAI(
             base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
@@ -387,7 +387,7 @@ if __name__ == "__main__":
     print(f"\n[자가 점검] backend_supports_logprobs:")
     for b in ["openai", "lmstudio", "mlx", "anthropic", "gemini"]:
         print(f"  {b:12s}: {backend_supports_logprobs(b)}")
-    for m in ["gpt-4o-mini", "o1-preview", "o3-mini", "gpt-5", "gpt-5-mini", "gemini-2.0-flash"]:
+    for m in ["gpt-4o", "o1-preview", "o3-mini", "gpt-5", "gpt-5-mini", "gemini-2.0-flash"]:
         print(f"  openai+{m:18s}: {backend_supports_logprobs('openai', m)}")
     for backend in ["lmstudio", "mlx", "openai", "anthropic", "gemini"]:
         print(f"\n{'='*60}")
