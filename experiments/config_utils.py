@@ -95,3 +95,55 @@ def load_hybrid_weights(config_path: Path = _BASE_CONFIG_PATH) -> tuple[float, f
         float(h.get("diversity_weight", 0.5)),
         float(h.get("entropy_weight", 0.5)),
     )
+
+
+# ── Round 7 (audit 7) loaders ────────────────────────────────────────────────
+
+
+def load_stratified_alphas(config_path: Path = _BASE_CONFIG_PATH) -> dict[str, float] | None:
+    """audit 7 Pivot A: per-stratum CRC alphas. None이면 default 사용."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return None
+    sa = cfg.get("stratified_alphas")
+    if not sa:
+        return None
+    return {k: float(v) for k, v in sa.items()}
+
+
+def load_cost_matrix(config_path: Path = _BASE_CONFIG_PATH) -> dict[str, dict[str, float]] | None:
+    """audit 7 Pivot C: per-stratum 비대칭 cost matrix. None이면 default 사용."""
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return None
+    cm = cfg.get("costs")
+    if not cm:
+        return None
+    return {
+        k: {"miss": float(v["miss"]), "over_esc": float(v["over_esc"])}
+        for k, v in cm.items()
+    }
+
+
+def load_multi_trigger_config(config_path: Path = _BASE_CONFIG_PATH) -> dict | None:
+    """
+    audit 7 Pivot B: multi_trigger 섹션 로드.
+    Returns: {"enabled", "combination", "combined_alpha"} 또는 None.
+    """
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return None
+    mt = cfg.get("multi_trigger")
+    if not mt:
+        return None
+    return {
+        "enabled":        bool(mt.get("enabled", False)),
+        "combination":    str(mt.get("combination", "harmonic")),
+        "combined_alpha": float(mt.get("combined_alpha", 0.05)),
+    }
