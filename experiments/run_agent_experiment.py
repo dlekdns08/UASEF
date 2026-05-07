@@ -335,14 +335,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="UASEF Agent Experiment (LangGraph)")
     parser.add_argument(
         "--backend", type=str, default=None,
-        choices=["lmstudio", "openai"],
+        choices=["openai", "lmstudio", "mlx", "anthropic", "gemini"],
         help="단일 백엔드만 실행 (기본: openai[Primary] + lmstudio[Ablation] 모두)",
     )
     parser.add_argument("--n-cal", type=int, default=500, help="Calibration 질문 수 (권장: 500)")
     parser.add_argument("--n-test", type=int, default=50, help="시나리오별 테스트 케이스 수 (권장: 50)")
     parser.add_argument(
         "--scoring-method", type=str, default="auto",
-        choices=["logprob", "self_consistency", "auto"],
+        choices=["logprob", "self_consistency", "hybrid", "auto"],
         help="비적합 점수 방식 강제 지정. 기본: auto (openai=logprob, lmstudio=logprob)",
     )
     parser.add_argument("--alpha", type=float, default=None, help="Conformal prediction α (기본: base_config.yaml uqm.alpha)")
