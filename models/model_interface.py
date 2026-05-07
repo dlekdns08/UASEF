@@ -2,12 +2,22 @@
 UASEF — Model Interface Layer
 
 지원 백엔드:
-  - openai   : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
-  - lmstudio : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
-  - mlx      : Apple MLX 서버. 보고서엔 미수록된 추가 옵션이며, mlx-lm 0.19+ 필요.
-               OpenAI-compatible /v1/chat/completions 사용. 논문 보고 시에는 ablation으로 명시.
+  - openai    : OpenAI API (Primary). 보고서 주요 결과 (GPT-4o-mini).
+  - lmstudio  : LM Studio 로컬 GGUF (Ablation). /v1/responses 엔드포인트로 logprobs 추출.
+  - mlx       : Apple MLX 서버. mlx-lm 0.19+ 필요. logprobs 지원.
+  - anthropic : Claude API (audit 6.9 추가). logprobs 미지원 → self_consistency/hybrid만 가능.
+  - gemini    : Google Gemini OpenAI-compatible 엔드포인트 (audit 6.9 추가). logprobs 미지원.
 
-세 백엔드 모두 OpenAI-compatible API를 제공하므로 base_url만 바꾸면 됩니다.
+처음 셋(openai/lmstudio/mlx)은 logprob 기반 CP를 지원합니다.
+Anthropic/Gemini는 logprobs를 반환하지 않으므로 UQM이 자동으로 self_consistency/hybrid로
+전환합니다(`backend_supports_logprobs()` 기반 사전 점검 — audit 6.9).
+
+──────────────────────────────────────────────────────────────────────────────
+logprob 미지원 모델 (OpenAI 내에서도 존재):
+  - reasoning 모델: o1*, o3*, o4*, gpt-5* 변종
+  - 위 패턴은 LOGPROB_INCOMPATIBLE_PATTERNS로 자동 감지되며,
+    UQM(scoring_method='logprob') 시 UQM.__init__에서 명확한 에러 또는 경고+자동전환.
+──────────────────────────────────────────────────────────────────────────────
 """
 
 import os
@@ -18,6 +28,52 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 from openai import OpenAI
+
+
+# ── logprob 호환성 감지 (audit 6.9) ──────────────────────────────────────────
+#
+# logprobs를 절대 반환하지 않는 백엔드 / 모델 패턴.
+# UQM.__init__에서 사전 점검하여 (a) strict=True면 RuntimeError로 즉시 중단,
+# (b) strict=False면 UserWarning + scoring_method를 self_consistency로 자동 전환.
+
+LOGPROB_INCOMPATIBLE_BACKENDS: set[str] = {"anthropic", "gemini"}
+
+# OpenAI 모델 중 logprobs를 지원하지 않는 패턴 (reasoning 계열)
+# OpenAI 공식: o1/o3/o4/gpt-5 reasoning 변종은 logprobs 파라미터를 무시하거나 거부함.
+LOGPROB_INCOMPATIBLE_MODEL_PATTERNS: list[str] = [
+    r"^o1(-|$)",      # o1, o1-mini, o1-preview, o1-pro
+    r"^o3(-|$)",      # o3, o3-mini
+    r"^o4(-|$)",      # o4-mini 등
+    r"^gpt-5",        # gpt-5, gpt-5-mini, gpt-5.x — 일반적으로 reasoning 변종은 미지원
+]
+
+
+def backend_supports_logprobs(backend: str, model_name: Optional[str] = None) -> bool:
+    """
+    백엔드/모델이 token-level logprobs를 반환할 수 있는지 정적 판정.
+
+    Args:
+        backend:    "openai" | "lmstudio" | "mlx" | "anthropic" | "gemini"
+        model_name: 모델 이름. None이면 환경변수에서 로드 시도. OpenAI 백엔드일 때만 의미.
+
+    Returns:
+        False = 절대 logprobs를 받을 수 없는 조합
+        True  = 받을 수 있는(또는 받을 수 있을 가능성이 높은) 조합
+
+    audit 6.9: UQM.__init__이 이 함수를 호출하여 사전 점검.
+    """
+    if backend in LOGPROB_INCOMPATIBLE_BACKENDS:
+        return False
+    if backend == "openai":
+        # 모델 이름이 reasoning 패턴이면 미지원
+        m = model_name or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        for pat in LOGPROB_INCOMPATIBLE_MODEL_PATTERNS:
+            if re.match(pat, m, re.IGNORECASE):
+                return False
+        return True
+    if backend in ("lmstudio", "mlx"):
+        return True   # 두 백엔드는 logprobs API 지원
+    return True       # 알 수 없는 백엔드는 일단 True (호출 시 ValueError로 fail)
 
 
 @dataclass
@@ -34,36 +90,54 @@ class ModelResponse:
 
 def get_client(backend: str) -> tuple[OpenAI, str]:
     """
-    backend: "lmstudio" | "openai" | "mlx"
-    반환: (OpenAI client, model_name)
+    backend: "lmstudio" | "openai" | "mlx" | "gemini"
+    반환: (OpenAI-호환 client, model_name)
+
+    audit 6.9: 'anthropic' 백엔드는 별도 함수 _query_anthropic을 사용하므로 여기서 제외.
+    'gemini'는 Google의 OpenAI-compatible 엔드포인트를 OpenAI 클라이언트로 사용.
     """
     if backend == "lmstudio":
         client = OpenAI(
             base_url="http://localhost:1234/v1",
             api_key="lm-studio",           # LMStudio는 키 불필요, 아무 문자열
         )
-        # LMStudio에 로드된 모델명 — 실제 로드된 모델로 수정하세요
         model_name = os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct")
     elif backend == "openai":
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env` "
-                "(note: `NAI_API_KEY` is not used)."
+                "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env`."
             )
         client = OpenAI(api_key=api_key)
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     elif backend == "mlx":
-        # mlx-lm 서버: python -m mlx_lm.server --model <model> --port 8080
-        # logprobs 지원: mlx-lm 0.19+ 필요
         client = OpenAI(
             base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
             api_key="mlx",
         )
-        # mlx-lm 서버는 로드된 모델을 사용 (API 호출 시 모델명은 무시됨)
         model_name = os.getenv("MLX_MODEL", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
+    elif backend == "gemini":
+        # audit 6.9: Google Gemini의 OpenAI-호환 엔드포인트
+        # ref: https://ai.google.dev/gemini-api/docs/openai
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Missing GEMINI_API_KEY (or GOOGLE_API_KEY). "
+                "Get key at https://aistudio.google.com/apikey and set in `.env`."
+            )
+        client = OpenAI(
+            api_key=api_key,
+            base_url=os.getenv(
+                "GEMINI_BASE_URL",
+                "https://generativelanguage.googleapis.com/v1beta/openai/",
+            ),
+        )
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     else:
-        raise ValueError(f"Unknown backend: {backend}. Use 'lmstudio', 'openai', or 'mlx'.")
+        raise ValueError(
+            f"Unknown backend: {backend!r}. "
+            "Use 'lmstudio', 'openai', 'mlx', 'gemini', or 'anthropic'."
+        )
     return client, model_name
 
 
@@ -161,6 +235,62 @@ def _query_lmstudio_responses(
     )
 
 
+def _query_anthropic(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_tokens: int,
+) -> ModelResponse:
+    """
+    audit 6.9: Claude API (logprobs 미지원).
+
+    anthropic SDK가 설치되어 있지 않으면 명확한 ImportError. UQM이 사전에 backend를
+    감지하여 self_consistency/hybrid로 자동 전환되므로, logprobs=True 요청은 도달
+    할 수 없는 경로다. 응답의 logprobs/top_logprobs는 항상 None.
+    """
+    try:
+        import anthropic  # type: ignore
+    except ImportError as e:
+        raise ImportError(
+            "Anthropic backend requires 'anthropic' package.\n"
+            "  Install: pip install 'anthropic>=0.40.0'\n"
+            "  Then set ANTHROPIC_API_KEY in .env."
+        ) from e
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Missing ANTHROPIC_API_KEY. Get key at console.anthropic.com and set in `.env`."
+        )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+
+    t0 = time.perf_counter()
+    msg = client.messages.create(
+        model=model_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    latency_ms = (time.perf_counter() - t0) * 1000
+
+    # Claude는 content가 list[ContentBlock] 구조
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    usage = getattr(msg, "usage", None)
+    return ModelResponse(
+        text=text,
+        logprobs=None,           # Anthropic은 logprobs 미반환
+        top_logprobs=None,
+        latency_ms=latency_ms,
+        model_name=model_name,
+        prompt_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
+        completion_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
+        raw={"anthropic_message_id": getattr(msg, "id", None)},
+    )
+
+
 def query_model(
     backend: str,
     system_prompt: str,
@@ -176,9 +306,17 @@ def query_model(
     LMStudio 주의사항:
     - logprobs 요청 시 /v1/responses 엔드포인트를 사용합니다 (/v1/chat/completions는 미지원).
     - logprobs=False이면 /v1/chat/completions를 사용합니다.
+
+    Anthropic/Gemini (audit 6.9):
+    - logprobs 항상 None. UQM이 사전 감지하여 self_consistency/hybrid 모드로 자동 전환.
+    - 따라서 self_consistency/hybrid를 명시적으로 사용해야 함. logprob 모드면 ValueError.
     """
     system_prompt = _sanitize(system_prompt)
     user_prompt = _sanitize(user_prompt)
+
+    # audit 6.9: Anthropic은 별도 SDK 사용
+    if backend == "anthropic":
+        return _query_anthropic(system_prompt, user_prompt, temperature, max_completion_tokens)
 
     # LMStudio logprobs: /v1/responses 엔드포인트 사용
     if backend == "lmstudio" and logprobs:
@@ -190,8 +328,9 @@ def query_model(
 
     client, model_name = get_client(backend)
 
-    # mlx-lm 서버는 max_tokens 파라미터를 사용 (max_completion_tokens 미지원)
-    token_limit_key = "max_tokens" if backend == "mlx" else "max_completion_tokens"
+    # mlx-lm / gemini는 max_tokens 파라미터 사용 (max_completion_tokens 미지원)
+    # audit 6.9: gemini OpenAI-compat 엔드포인트도 max_tokens 사용
+    token_limit_key = "max_tokens" if backend in ("mlx", "gemini") else "max_completion_tokens"
     kwargs = dict(
         model=model_name,
         messages=[
@@ -203,7 +342,9 @@ def query_model(
     )
 
     # logprobs 요청 (지원 여부는 모델에 따라 다름)
-    if logprobs:
+    # audit 6.9: 사전 감지에서 미지원으로 판정된 backend/model에는 logprobs 파라미터를 보내지 않음.
+    can_request_logprobs = backend_supports_logprobs(backend, model_name)
+    if logprobs and can_request_logprobs:
         kwargs["logprobs"] = True
         kwargs["top_logprobs"] = top_logprobs
 
@@ -243,7 +384,12 @@ if __name__ == "__main__":
     SYSTEM = "You are a clinical AI assistant. Answer the medical question concisely."
     USER = "A 45-year-old presents with crushing chest pain radiating to the left arm. What is the most likely diagnosis?"
 
-    for backend in ["lmstudio", "mlx", "openai"]:
+    print(f"\n[자가 점검] backend_supports_logprobs:")
+    for b in ["openai", "lmstudio", "mlx", "anthropic", "gemini"]:
+        print(f"  {b:12s}: {backend_supports_logprobs(b)}")
+    for m in ["gpt-4o-mini", "o1-preview", "o3-mini", "gpt-5", "gpt-5-mini", "gemini-2.0-flash"]:
+        print(f"  openai+{m:18s}: {backend_supports_logprobs('openai', m)}")
+    for backend in ["lmstudio", "mlx", "openai", "anthropic", "gemini"]:
         print(f"\n{'='*60}")
         print(f"Backend: {backend.upper()}")
         try:
