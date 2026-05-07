@@ -38,6 +38,8 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
 12. [참고문헌](#12-참고문헌)
 
 > 코드 변경 / 개선 이력 전체는 [improvements/README.md](improvements/README.md)에서 라운드별로 관리합니다.
+>
+> **📄 논문 draft**: [paper/UASEF_Round7.md](paper/UASEF_Round7.md) — Round 7 framework의 학술 논문 형식 정리 (Abstract / Related Work / Method / Experiments / Discussion / Limitations / References / Appendix). ML4H 2026 / AISTATS 2026 / NeurIPS 2026 target.
 
 ---
 
@@ -399,7 +401,7 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 
 | scoring_method | logprobs 필요 | 적용 가능 LLM | 논문 위치 |
 | --- | --- | --- | --- |
-| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | 주요 기여 + Ablation |
+| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4.1, LMStudio (llama.cpp), MLX | 주요 기여 + Ablation |
 | `self_consistency` (대안) | 불필요 | **모든** LLM (Claude, Gemini, OpenAI o-시리즈 포함) | 블랙박스 LLM 호환용 |
 | `hybrid` (audit 6.9) | 불필요 | 위 self_consistency와 동일. 신호량이 더 많음. | logprob-free 환경 권장 |
 
@@ -837,7 +839,7 @@ LangGraph 에이전트 없이 UQM → RTC → EDE를 순서대로 실행하는 *
 
 | 구분 | 백엔드 | Scoring Method | 논문 위치 |
 | ---- | ------ | -------------- | --------- |
-| **[Primary]** | OpenAI (GPT-4o-mini) | `logprob` — token-level logprobs 기반 CP | 주요 결과 |
+| **[Primary]** | OpenAI (GPT-4o) | `logprob` — token-level logprobs 기반 CP | 주요 결과 |
 | **[Ablation]** | LMStudio (로컬, meta-llama-3.1-8b-instruct) | `logprob` — LM Studio OpenAI-compatible API로 token-level logprobs 추출 | "로컬 GGUF 모델에도 logprob CP 적용 가능" 검증 |
 
 > 두 백엔드 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, **LM Studio의 OpenAI-compatible API를 통해 로컬 GGUF 모델에서도 token-level logprobs를 추출할 수 있음**을 검증하는 것입니다.
@@ -1148,7 +1150,7 @@ LANGCHAIN_PROJECT=UASEF-agent
 OPENAI_API_KEY=sk-...
 
 # 선택: 모델 변경
-OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* 등 reasoning 모델은
+OPENAI_MODEL=gpt-4o            # default. ⚠ o1/o3/o4/gpt-5* 등 reasoning 모델은
                                     #          logprobs 미지원 → audit 6.9에서 자동으로
                                     #          scoring_method='hybrid'로 전환됨
 LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
@@ -1172,7 +1174,7 @@ LANGCHAIN_PROJECT=UASEF-agent
 
 | backend | 모델 | logprob | 자동 fallback |
 | --- | --- | --- | --- |
-| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+| `openai` | `gpt-4o`, `gpt-4o`, `gpt-4.1*` | ✓ | — |
 | `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
 | `lmstudio` | llama.cpp 기반 GGUF 전부 | ✓ | — |
 | `mlx` | mlx-lm 0.19+ | ✓ | — |
@@ -1490,7 +1492,7 @@ print('OK')
 | LMStudio agent latency가 너무 길다 | audit #17 이후 fix됨 — 1.x 버전이면 코드 갱신 필요 | `git pull` 후 `agent/nodes.py`의 `_make_llm` 확인 |
 | 결과 표에 `N/A`가 자주 보임 | audit #16 — emergency=positives only / routine=negatives only 시 정상 동작. silent zero 회피용. | 그대로 보고. CI 컬럼이 같이 비어있으면 분모=0이라는 신호 |
 | `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API는 원래 logprobs 미지원 | `--scoring-method hybrid` 또는 `self_consistency` 명시. `--strict` 미사용 시 자동 전환. |
-| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning 모델은 logprobs 미반환 | `gpt-4o-mini`로 모델 변경, 또는 hybrid 모드 사용 |
+| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning 모델은 logprobs 미반환 | `gpt-4o`로 모델 변경, 또는 hybrid 모드 사용 |
 | `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK 미설치 | `pip install 'anthropic>=0.40.0'` 또는 `pip install 'uasef[claude]'` |
 | `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio 키 미설정 | <https://aistudio.google.com/apikey>에서 키 발급 후 `.env`에 추가 |
 
@@ -1570,7 +1572,7 @@ ede:
 
 ### 논문 서술 주의사항
 
-- Primary와 Ablation 모두 동일한 `logprob` 비적합 함수를 사용하므로 수치를 같은 테이블에서 비교할 수 있습니다. 단, 모델(GPT-4o-mini vs 로컬 GGUF)이 다르므로 nonconformity score의 절대값 스케일 차이는 존재합니다.
+- Primary와 Ablation 모두 동일한 `logprob` 비적합 함수를 사용하므로 수치를 같은 테이블에서 비교할 수 있습니다. 단, 모델(GPT-4o vs 로컬 GGUF)이 다르므로 nonconformity score의 절대값 스케일 차이는 존재합니다.
 - Ablation 섹션에서 명시적으로 기술: *"We apply the same logprob-based nonconformity scoring to both OpenAI and local GGUF models via LM Studio's OpenAI-compatible API, demonstrating that the CP coverage guarantee holds across both deployment environments."*
 - Primary 결과가 논문 주요 주장의 근거가 됩니다. Ablation은 "로컬 GGUF 모델에서도 동일한 logprob CP 적용 가능"을 보이는 보조 증거입니다.
 
