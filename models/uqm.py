@@ -481,6 +481,8 @@ class UQM:
         use_weighted_cp: bool = False,
         prompt_mode: str = "neutral",
         strict: bool = False,
+        hybrid_diversity_weight: float = 0.5,    # audit 6.10
+        hybrid_entropy_weight: float = 0.5,      # audit 6.10
     ):
         """
         Args:
@@ -488,6 +490,9 @@ class UQM:
                          neutral이 권장(circular evaluation 회피, audit issue #5).
             strict:      True이면 calibration n이 CP 보장 최소값 미만일 때 RuntimeError.
                          False(default)이면 UserWarning만 발생.
+            hybrid_diversity_weight, hybrid_entropy_weight: audit 6.10 — hybrid score의
+                두 신호 가중치. base_config.yaml의 `hybrid` 섹션에서 데이터 기반 값을
+                load_calibration_config()가 자동 로드. 기본 0.5/0.5 (audit 6.9 default).
         """
         self.backend = backend
         self.calibrator = ConformalCalibrator(alpha=alpha, strict=strict)
@@ -499,6 +504,9 @@ class UQM:
         self._weighted_calibrator: Optional[WeightedConformalCalibrator] = None
         self._cal_texts: list[str] = []
         self.strict = strict
+        # audit 6.10: hybrid 가중치
+        self.hybrid_diversity_weight = hybrid_diversity_weight
+        self.hybrid_entropy_weight = hybrid_entropy_weight
 
         # SYSTEM_PROMPT 선택
         if prompt_mode == "instructed":
@@ -522,44 +530,49 @@ class UQM:
         # 하위 호환 alias (외부 코드가 _use_self_consistency를 참조할 수 있음)
         self._use_self_consistency = (self._scoring_mode == "self_consistency")
 
-        # ── audit 6.9: 모델 사전 점검 (logprob 미지원 백엔드/모델 자동 감지) ────
+        # ── audit 6.9 / 6.10: 모델 사전 점검 (logprob 미지원 백엔드/모델 자동 감지) ──
         # backend / OPENAI_MODEL이 logprobs를 지원하지 않는데 logprob 모드를 요청하면
         # strict=True: RuntimeError (자동화 실험 잘못된 결과 방지)
         # strict=False: UserWarning + scoring_method 자동 전환
+        #
+        # audit 6.10 정책 통일: logprob-free 환경에서는 무조건 'hybrid'로 전환.
+        #   이유: 같은 N=5 호출로 self_consistency보다 신호량이 풍부하고
+        #         backend별로 다른 fallback을 쓰던 비대칭이 사라짐 (anthropic/gemini도 동일).
         if self._scoring_mode == "logprob":
-            # 케이스 1: backend 자체가 logprob-free (anthropic/gemini)
+            fallback_target: Optional[str] = None
+            msg: Optional[str] = None
+
             if backend in LOGPROB_INCOMPATIBLE_BACKENDS:
                 msg = (
                     f"[UQM] backend='{backend}'는 logprobs를 반환하지 않습니다 "
-                    f"(LOGPROB_INCOMPATIBLE_BACKENDS={sorted(LOGPROB_INCOMPATIBLE_BACKENDS)}).\n"
-                    f"  대안: scoring_method='self_consistency' 또는 'hybrid'를 사용하세요.\n"
-                    f"  예: UQM(backend='{backend}', scoring_method='hybrid', consistency_n=5)"
+                    f"(LOGPROB_INCOMPATIBLE_BACKENDS={sorted(LOGPROB_INCOMPATIBLE_BACKENDS)})."
                 )
-                if self.strict:
-                    raise RuntimeError(msg + " (strict=True)")
-                warnings.warn(msg + "\n  → scoring_method를 'self_consistency'로 자동 전환합니다.",
-                              UserWarning, stacklevel=2)
-                self._scoring_method = ScoringMethod.SELF_CONSISTENCY
-                self._scoring_mode = "self_consistency"
-                self._use_self_consistency = True
-            # 케이스 2: backend는 OK지만 OPENAI_MODEL이 reasoning 패턴
+                fallback_target = "hybrid"
             elif backend == "openai":
                 import os as _os
                 model = _os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
                 if not backend_supports_logprobs("openai", model):
                     msg = (
                         f"[UQM] OPENAI_MODEL='{model}'은 logprobs 미지원 패턴입니다 "
-                        f"(reasoning 모델 — {LOGPROB_INCOMPATIBLE_MODEL_PATTERNS}).\n"
-                        f"  대안: (a) gpt-4o-mini/gpt-4o 등 logprobs 지원 모델로 OPENAI_MODEL 변경\n"
-                        f"        (b) scoring_method='hybrid' 또는 'self_consistency' 사용"
+                        f"(reasoning 모델 — {LOGPROB_INCOMPATIBLE_MODEL_PATTERNS})."
                     )
-                    if self.strict:
-                        raise RuntimeError(msg + " (strict=True)")
-                    warnings.warn(msg + "\n  → scoring_method를 'hybrid'로 자동 전환합니다.",
-                                  UserWarning, stacklevel=2)
-                    self._scoring_method = ScoringMethod.HYBRID
-                    self._scoring_mode = "hybrid"
-                    self._use_self_consistency = False  # hybrid는 separate path
+                    fallback_target = "hybrid"
+
+            if fallback_target is not None:
+                full_msg = (
+                    f"{msg}\n"
+                    f"  대안: scoring_method='hybrid' 또는 'self_consistency'를 명시.\n"
+                    f"  예: UQM(backend='{backend}', scoring_method='hybrid', consistency_n=5)"
+                )
+                if self.strict:
+                    raise RuntimeError(full_msg + " (strict=True)")
+                warnings.warn(
+                    full_msg + f"\n  → audit 6.10 정책: scoring_method를 '{fallback_target}'로 자동 전환합니다.",
+                    UserWarning, stacklevel=2,
+                )
+                self._scoring_method = ScoringMethod.HYBRID
+                self._scoring_mode = "hybrid"
+                self._use_self_consistency = False
 
         # Ablation 경고
         if self._scoring_method == ScoringMethod.SELF_CONSISTENCY:
@@ -615,9 +628,12 @@ class UQM:
                 n=self.consistency_n, seed_response=resp,
             )
         elif self._scoring_mode == "hybrid":
+            # audit 6.10: 데이터 기반 가중치 사용
             score = compute_hybrid_score(
                 self.backend, self._system_prompt, question,
                 n=self.consistency_n, seed_response=resp,
+                diversity_weight=self.hybrid_diversity_weight,
+                entropy_weight=self.hybrid_entropy_weight,
             )
         else:  # logprob
             score = compute_nonconformity_score(resp)
