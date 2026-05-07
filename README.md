@@ -66,6 +66,46 @@ open results/all_experiments_report.md
 
 ---
 
+## 0.5. v2 Framework — Round 7 (이론적 기여 강화)
+
+> **2026-05 audit 6.10에서 코드 품질이 회복된 이후, 학술적 contribution을 명확히 하기 위해 도입된 v2 (Round 7) 프레임워크.** 자세한 구현 계획은 [improvements/round7_PLAN.md](improvements/round7_PLAN.md) 참고.
+
+기존 v1 (Round 1~6.10)은 logprob CP + heuristic risk multiplier + ad-hoc trigger OR로 구성되어, 다음 선행 연구와 충분히 차별화되지 않았다:
+
+- **TECP** (Xu & Lu, 2025) — token-entropy nonconformity CP
+- **Conformal Language Modeling** (Quach et al., ICLR 2024) — NLL nonconformity + dynamic stopping
+- **MedAbstain** (EACL 2026) — CP를 이미 통합한 평가 데이터셋
+- **Conformal Risk Control** (Angelopoulos & Bates, ICLR 2024) — 더 일반적인 risk control
+
+v2 (Round 7)는 **3가지 이론적 contribution을 결합**해 명확한 차별화를 만든다:
+
+| Contribution | 핵심 | 코드 위치 (계획) |
+| --- | --- | --- |
+| **A. Stratified Conformal Risk Control** | 위험도 stratum별 (CRITICAL/HIGH/MODERATE/LOW) 별도 calibration + Conformal Risk Control 알고리즘 적용. 각 stratum에 대해 `E[ℓ_stratum] ≤ α_stratum` 보장. | `models/stratified_crc.py` (신규) |
+| **B. Multi-Trigger Conformal Combination** | T1/T2/T3 trigger를 별도 nonconformity score로 calibrate한 뒤 harmonic / e-value combination으로 결합. **FWER ≤ α 보장 (under arbitrary dependence)** — 기존 `len(triggers) > 0`은 보장 위반. | `models/conformal_combination.py` (신규) |
+| **C. Cost-Aware Threshold Optimization** | 임상 현실의 비대칭 cost (CRITICAL miss = 1000× over-esc) 명시화. F1-symmetric grid search를 cost-weighted constrained optimization으로 교체. | `models/cost_aware_calibration.py` (신규) |
+
+세 contribution은 서로 결합 — **C의 cost matrix가 A의 α_stratum 결정**, **A의 stratified score가 B의 입력**, **B의 결합 p-value가 C의 최적화 대상**.
+
+### v1 vs v2 한 눈에 비교
+
+| | v1 (Round 1~6.10) | v2 (Round 7) |
+| --- | --- | --- |
+| Threshold | `q̂_global × heuristic_multiplier` | `λ_stratum (Conformal Risk Control)` |
+| Trigger 결합 | `len(triggers) > 0` (ad-hoc OR) | conformal p-value combination (harmonic/e-value) |
+| Coverage 보장 | 단일 global α | per-stratum α with risk control |
+| Cost 모델 | F1-symmetric (FN==FP) | 비대칭 cost matrix per stratum |
+| 비교 baseline | (없음) | TECP, Quach 2024 CLM, Semantic Entropy |
+| Target venue | (코드 reference) | ML4H Spotlight / AISTATS / NeurIPS |
+
+### 작업 상태
+
+- v1 (Round 1~6.10): **완료** (코드 + 82 tests passing)
+- v2 (Round 7): **계획 단계** — [improvements/round7_PLAN.md](improvements/round7_PLAN.md) 참고. 4~6주 작업 예상.
+- v2 미구현 시에도 v1 코드는 reference implementation으로 동작.
+
+---
+
 ## 1. 연구 배경 및 동기
 
 ### 문제 정의
@@ -117,6 +157,20 @@ s(x) = -mean(log P(t_i | context, t_1, ..., t_{i-1}))
 - 모델이 생성한 각 토큰의 확률을 그대로 반영 → 답변 생성 과정 자체의 불확실성
 - Temperature = 0일 때도 의미 있음 (greedy decoding이지만 logprob은 여전히 분포를 반영)
 - API 추가 호출 불필요 (generate 한 번으로 score와 답변을 동시에 얻음)
+
+### 왜 Round 7에서 Stratified CRC + Multi-Trigger Combination + Cost-Aware Calibration인가?
+
+v1 (Round 1~6.10)의 세 가지 약점:
+
+1. **단일 global α**가 모든 specialty에 동일 적용 → 응급의학과 일반외래에 같은 임계값을 쓰는 셈. 임상 현실과 불일치.
+2. **`len(triggers) > 0` 결합**은 통계적 보장 없음 — 3개 trigger 모두 α=0.10이면 결합 false-positive ~0.27 가능 (FWER 위반).
+3. **F1-symmetric optimization**은 FN과 FP를 동등하게 다룸. 응급에서 놓침은 사망, 일반외래에서 과에스컬레이션은 시간 낭비 — 비대칭이 정상.
+
+v2 (Round 7)의 세 답변:
+
+1. **Stratified Conformal Risk Control** (Angelopoulos & Bates ICLR 2024 + Romano et al. 2020 class-conditional CP의 결합) → 각 stratum에 대해 `E[loss_stratum] ≤ α_stratum` 형식 보장. CRITICAL은 α=0.001 (0.1% 미스 한계), LOW는 α=0.10 (10% 허용).
+2. **Multi-Trigger Conformal Combination** (Vovk & Wang 2019 harmonic mean / Wang & Ramdas 2022 e-value) → 임의 의존 구조에서도 FWER 보장. T2(키워드)와 T3(근거 부재)도 nonconformity score로 frame.
+3. **Cost-Aware Optimization** → `c_FN(stratum) × FN + c_FP × FP` 최소화, CRC 제약 보존. cost matrix는 `base_config.yaml`에 명시 (sensitivity analysis 가능).
 
 ### 왜 세 모듈로 분리했는가?
 
