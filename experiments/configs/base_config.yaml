@@ -46,3 +46,30 @@ ede:
 hybrid:
   diversity_weight: 0.5
   entropy_weight: 0.5
+
+# ── Round 7 (audit 7) — Stratified Conformal Risk Control + Multi-Trigger
+# Combination + Cost-Aware Calibration. v1과 공존하며 ede.decision_rule로 선택.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Pivot A: stratum별 CRC 보장 수준 (CRITICAL이 가장 엄격, LOW가 가장 관대).
+#   각 stratum에 대해 E[ℓ_s] ≤ α_s 보장 (Angelopoulos & Bates ICLR 2024).
+stratified_alphas:
+  CRITICAL: 0.001
+  HIGH:     0.010
+  MODERATE: 0.050
+  LOW:      0.100
+
+# Pivot C: 비대칭 cost matrix (임상 부담 추정).
+#   sensitivity analysis로 ratio 변경 가능 — paper Table 3 참고.
+costs:
+  CRITICAL: {miss: 1000.0, over_esc: 1.0}
+  HIGH:     {miss:  100.0, over_esc: 1.0}
+  MODERATE: {miss:   10.0, over_esc: 1.0}
+  LOW:      {miss:    1.0, over_esc: 1.0}
+
+# Pivot B: multi-trigger conformal combination 활성화 옵션.
+multi_trigger:
+  enabled: false           # default: v1 동작 유지. true이면 EDE.decision_rule을
+                           # 'conformal_combined'로 자동 설정 권장.
+  combination: harmonic    # "harmonic" | "bonferroni" | "e_value"
+  combined_alpha: 0.05     # 결합 p-value의 임계값 (FWER 제어)
