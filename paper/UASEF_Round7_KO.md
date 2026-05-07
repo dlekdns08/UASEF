@@ -775,7 +775,55 @@ OpenAI에서 35분 + LMStudio에서 22분이었다.
 
 ---
 
-## 부록 B. 영문 논문과의 관계
+## 부록 B. Supplementary Materials (v1 sub-experiments)
+
+UASEF v1의 4개 sub-experiment (`run_all_experiments.py`)는 main paper의
+일부가 아닌 **supplementary materials**로 공개된다. 그 역할은 다음과 같다.
+
+- 세 pivot의 동기 (G1/G2/G3)를 구체 수치로 **강화** — 예를 들어,
+  `len(triggers)>0`의 경험적 FWER 위반이 실제 임상-style 데이터에서 §B.2에
+  보고된다.
+- 8 page limit 내에서 불가능한 **강건성 점검** (cross-backend, cross-variant,
+  cross-α) 제공.
+- v1의 도구 호출 분포와 abstention-recall 측정을 활용해 한계 (§7.4 mock 도구,
+  §8 L1 heuristic 라벨)를 **명시적으로 정량화**.
+
+전체 template은 [`paper/UASEF_Round7_Supplementary.md`](UASEF_Round7_Supplementary.md)
+(English) 및 [`paper/UASEF_Round7_Supplementary_KO.md`](UASEF_Round7_Supplementary_KO.md)
+(한국어)에 있다. 구체값은 `run_full_evaluation.sh`로 실행 시 자동으로 채워지며,
+`results/run_<timestamp>/result_supplementary.md`에 동일한 5개 표
+(B.1 Agent ReAct / B.2 Trigger Ablation / B.3 MedAbstain Variant-Level /
+B.4 Pareto α Recommendation / B.5 Cross-Backend Aggregate)가 생성된다.
+
+### B.0 v1이 측정하지만 v2가 측정하지 않는 것
+
+| 질문                                                              | v1 sub-experiment | 위치    |
+| ----------------------------------------------------------------- | ----------------- | ------- |
+| 도구 호출 패턴과 ReAct iteration 수                               | `agent`           | §B.1    |
+| 각 trigger의 한계 기여 (T1만 vs T1∨T2∨T3)                          | `baseline`        | §B.2    |
+| AP / NAP / A / NA 변형별 전체 breakdown + Abstention Recall        | `medabstain`      | §B.3    |
+| α ∈ {0.01, …, 0.30}에 대한 coverage-vs-escalation Pareto 곡선     | `pareto`          | §B.4    |
+| Cross-backend (OpenAI gpt-4o vs LLaMA-3.1-8B) 일관성              | 4개 모두          | §B.5    |
+
+### B.1 재현
+
+```bash
+# Supplementary만 (v2 Round 7 SKIP)
+SKIP_V2_SYN=1 SKIP_V2_LLM=1 BACKENDS="openai lmstudio" \
+    bash run_full_evaluation.sh
+
+# main paper + supplementary 동시 실행
+BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 \
+    bash run_full_evaluation.sh
+```
+
+Supplementary 파일은 `results/run_<timestamp>/result_supplementary.md`에 있다.
+매 실행마다 backend별 `all_experiments_summary.json`로부터 자동 재생성되므로,
+항상 최신 v1 측정값을 반영한다.
+
+---
+
+## 부록 C. 영문 논문과의 관계
 
 본 한국어 버전은 [paper/UASEF_Round7.md](UASEF_Round7.md)의 정확한
 번역이다. 두 버전은 동일한 표·식·실험 결과를 보고하며, 어느 한 쪽도 다른

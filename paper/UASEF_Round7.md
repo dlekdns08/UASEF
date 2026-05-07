@@ -826,3 +826,54 @@ hook in `run_all_experiments.py`.
 All OpenAI experiments were performed via API. LMStudio experiments used a
 single Apple M3 Max (64 GB RAM, no discrete GPU). Total wall-clock for the
 "논문 quality" run was 35 min on OpenAI + 22 min on LMStudio.
+
+---
+
+## Appendix B. Supplementary Materials (v1 sub-experiments)
+
+The four sub-experiments of UASEF v1 (`run_all_experiments.py`) are released
+as **supplementary materials** rather than as part of the main paper. Their
+function is to:
+
+- **Reinforce the motivation** for the three pivots G1/G2/G3 with concrete
+  numerical evidence (e.g. the empirical FWER violation of `len(triggers)>0`
+  on real clinical-style data is shown in §B.2).
+- **Provide robustness checks** (cross-backend, cross-variant, cross-α)
+  that are not feasible inside the 8-page limit.
+- **Quantify limitations** explicitly (§7.4 mock-tools, §8 L1 heuristic
+  labels) using v1's agent-tool-call distribution and abstention-recall
+  measurements.
+
+The full template is at [`paper/UASEF_Round7_Supplementary.md`](UASEF_Round7_Supplementary.md)
+(English) and [`paper/UASEF_Round7_Supplementary_KO.md`](UASEF_Round7_Supplementary_KO.md)
+(한국어). Concrete values are filled at run time by `run_full_evaluation.sh`,
+which generates `results/run_<timestamp>/result_supplementary.md` containing
+the same five tables (B.1 Agent ReAct, B.2 Trigger Ablation, B.3 MedAbstain
+Variant-Level, B.4 Pareto α Recommendation, B.5 Cross-Backend Aggregate).
+
+### B.0 What v1 measures that v2 does not
+
+| Question                                                          | v1 sub-experiment     | Source       |
+| ----------------------------------------------------------------- | --------------------- | ------------ |
+| Tool-call patterns and ReAct iteration counts                     | `agent`               | §B.1         |
+| Marginal contribution of each trigger (T1 only vs T1∨T2∨T3)        | `baseline`            | §B.2         |
+| AP / NAP / A / NA full breakdown + Abstention Recall              | `medabstain`          | §B.3         |
+| Coverage-vs-escalation Pareto curve over α ∈ {0.01, …, 0.30}      | `pareto`              | §B.4         |
+| Cross-backend (OpenAI gpt-4o vs LLaMA-3.1-8B) consistency         | all four              | §B.5         |
+
+### B.1 Reproduction
+
+```bash
+# Supplementary only (skip v2 Round 7)
+SKIP_V2_SYN=1 SKIP_V2_LLM=1 BACKENDS="openai lmstudio" \
+    bash run_full_evaluation.sh
+
+# Main paper + supplementary together
+BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 \
+    bash run_full_evaluation.sh
+```
+
+The supplementary file is at
+`results/run_<timestamp>/result_supplementary.md`. It is regenerated
+automatically each run from the per-backend `all_experiments_summary.json`,
+so it always reflects the latest v1 measurements.

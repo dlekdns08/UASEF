@@ -574,6 +574,189 @@ md.append(f"_생성: `run_full_evaluation.sh` ({datetime.now().isoformat(timespe
 (run_dir / "result.md").write_text("\n".join(md) + "\n", encoding="utf-8")
 print(f"  ✓ result.md ({len(chr(10).join(md).encode('utf-8'))} bytes)")
 print(f"  ✓ result.json")
+
+
+# ════════════════════════════════════════════════════════════════════
+# Supplementary 렌더링 (v1 4 sub-experiment 결과를 paper appendix 형식으로)
+# v1이 한 번이라도 실행됐으면 supplementary 자동 생성
+# ════════════════════════════════════════════════════════════════════
+
+def _has_v1_data():
+    return any(
+        per_backend.get(b, {}).get("v1_summary") is not None
+        for b in backends
+    )
+
+if _has_v1_data():
+    sup = []
+    sup.append(f"# Supplementary Materials — UASEF v1 sub-experiments")
+    sup.append(f"")
+    sup.append(f"**Run timestamp:** `{ts}`  ·  **Backends:** "
+                f"{', '.join(f'`{b}`' for b in backends)}")
+    sup.append(f"**Source paper:** [UASEF_Round7.md](../../paper/UASEF_Round7.md) "
+                f"(English) · [UASEF_Round7_KO.md](../../paper/UASEF_Round7_KO.md) (한국어)")
+    sup.append(f"**Template:** [UASEF_Round7_Supplementary.md](../../paper/UASEF_Round7_Supplementary.md) "
+                f"· [UASEF_Round7_Supplementary_KO.md](../../paper/UASEF_Round7_Supplementary_KO.md)")
+    sup.append(f"")
+
+    # ── B.1 Agent ReAct ────────────────────────────────────────────
+    sup.append(f"## B.1 Agent ReAct Behavior")
+    sup.append(f"")
+    sup.append(f"| Backend | Accuracy | Safety Recall | Over-Esc | "
+                f"Avg Tool Calls | Avg ReAct Iters | Coverage |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            sup.append(f"| `{B}` | _v1 SKIP_ |  |  |  |  |  |")
+            continue
+        a = v1.get("agent", {}).get(B, {})
+        sup.append(
+            f"| `{B}` | {a.get('accuracy')} | {a.get('safety_recall')} | "
+            f"{a.get('over_escalation_rate')} | {a.get('avg_tool_calls')} | "
+            f"{a.get('avg_react_iterations')} | "
+            f"{a.get('conformal_coverage')} |"
+        )
+    sup.append(f"")
+
+    # ── B.2 Trigger Contribution Ablation (3-strategy) ─────────────
+    sup.append(f"## B.2 Trigger Contribution Ablation (Pivot B 동기 강화)")
+    sup.append(f"")
+    sup.append(f"| Backend | Strategy | Safety Recall | 95% CI | "
+                f"Over-Esc Rate | TP/FN/FP/TN | OK (≥0.95)? |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            continue
+        baseline = v1.get("baseline", {}).get(B, {})
+        for strat, m in baseline.items():
+            if "error" in m:
+                sup.append(f"| `{B}` | {strat} | error |  |  |  |  |")
+                continue
+            ci = m.get("safety_recall_ci")
+            ci_s = f"[{ci[0]:.3f},{ci[1]:.3f}]" if ci else ""
+            sup.append(
+                f"| `{B}` | {strat} | {m.get('safety_recall')} | {ci_s} | "
+                f"{m.get('over_escalation_rate')} | "
+                f"{m.get('tp')}/{m.get('fn')}/{m.get('fp')}/{m.get('tn')} | "
+                f"{'✓' if m.get('safety_recall_ok') else '✗'} |"
+            )
+    sup.append(f"")
+    sup.append(f"**해석.** `threshold_only` (T1만, 순수 CP) → `full_uasef` (T1 ∨ T2 ∨ T3)")
+    sup.append(f"의 Safety Recall 격차가 keyword/no-evidence trigger의 한계 기여이며,")
+    sup.append(f"`full_uasef`의 over-escalation 증가가 main paper §6.2 Table 2의 FWER 위반")
+    sup.append(f"으로 이어진다 — 이것이 Pivot B (조화평균 결합)의 동기다.")
+    sup.append(f"")
+
+    # ── B.3 MedAbstain Variant-level ───────────────────────────────
+    sup.append(f"## B.3 MedAbstain 변형별 분석")
+    sup.append(f"")
+    sup.append(f"### B.3.1 Per-Variant Metrics")
+    sup.append(f"")
+    sup.append(f"| Backend | Variant | n | Recall | Precision | F1 | AUROC | OK (≥0.95)? |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            continue
+        medab = v1.get("medabstain", {}).get(B, {})
+        per_v = medab.get("per_variant", {}) if medab else {}
+        for variant, m in per_v.items():
+            if "error" in m:
+                sup.append(f"| `{B}` | {variant} | error |  |  |  |  |  |")
+                continue
+            sup.append(
+                f"| `{B}` | {variant} | {m.get('n')} | "
+                f"{m.get('recall')} | {m.get('precision')} | "
+                f"{m.get('f1')} | {m.get('auroc')} | "
+                f"{'✓' if m.get('safety_recall_ok') else '✗'} |"
+            )
+    sup.append(f"")
+
+    # B.3.2 Abstention Accuracy
+    sup.append(f"### B.3.2 Abstention Accuracy (LLM 자체 abstention 능력)")
+    sup.append(f"")
+    sup.append(f"| Backend | TA | FA | TR | MA | Abstention P | Abstention R | F1 |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            continue
+        medab = v1.get("medabstain", {}).get(B, {})
+        ab = medab.get("abstention_accuracy", {}) if medab else {}
+        if not ab or "error" in ab:
+            continue
+        sup.append(
+            f"| `{B}` | {ab.get('ta')} | {ab.get('fa')} | "
+            f"{ab.get('tr')} | {ab.get('ma')} | "
+            f"{ab.get('abstention_precision')} | "
+            f"{ab.get('abstention_recall')} | "
+            f"{ab.get('abstention_f1')} |"
+        )
+    sup.append(f"")
+    sup.append(f"**논의.** Abstention Recall (LLM이 스스로 불확실성을 표현하는 능력)이")
+    sup.append(f"낮을수록 UASEF의 CP 기반 결정이 더 큰 가치를 가진다 — 모델이 과신할 때")
+    sup.append(f"외부 안전 게이트가 가장 필요하다.")
+    sup.append(f"")
+
+    # ── B.4 Pareto α Recommendation ────────────────────────────────
+    sup.append(f"## B.4 Pareto Frontier — Specialty별 권고 α")
+    sup.append(f"")
+    sup.append(f"| Backend | Specialty | Recommended α | Coverage | Esc Rate | Utility |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            continue
+        pareto = v1.get("pareto", {}).get(B, {})
+        recs = pareto.get("recommendations", {}) if pareto else {}
+        for specialty, rec in recs.items():
+            if rec.get("alpha") is None:
+                sup.append(f"| `{B}` | {specialty} | — | — | — | — |")
+                continue
+            sup.append(
+                f"| `{B}` | {specialty} | {rec.get('alpha')} | "
+                f"{rec.get('actual_coverage')} | "
+                f"{rec.get('escalation_rate')} | {rec.get('utility')} |"
+            )
+    sup.append(f"")
+    sup.append(f"**main paper Pivot A와의 연결.** Pareto sweep은 단일 전역 α를 specialty")
+    sup.append(f"조건부로 측정. main paper Pivot A는 단일 CRC 절차 안에서 stratum별 $\\alpha_s$를")
+    sup.append(f"부여하여 한 단계 더 진행. 여기서의 권고 α는 기관 배포 시 ")
+    sup.append(f"$\\alpha_{{\\text{{CRITICAL}}}}, \\ldots, \\alpha_{{\\text{{LOW}}}}$ 선택 정보가 된다.")
+    sup.append(f"")
+
+    # ── B.5 Cross-backend summary ─────────────────────────────────
+    sup.append(f"## B.5 Cross-Backend MedAbstain 종합")
+    sup.append(f"")
+    sup.append(f"| Backend | Recall | Precision | F1 | AUROC | Safety Recall ≥ 0.95? |")
+    sup.append(f"| --- | --- | --- | --- | --- | --- |")
+    for B in backends:
+        v1 = per_backend[B].get("v1_summary")
+        if not v1:
+            continue
+        medab = v1.get("medabstain", {}).get(B, {})
+        ov = medab.get("overall", {}) if medab else {}
+        if "error" in ov or not ov:
+            continue
+        sup.append(
+            f"| `{B}` | {ov.get('recall')} | {ov.get('precision')} | "
+            f"{ov.get('f1')} | {ov.get('auroc')} | "
+            f"{'✓' if ov.get('safety_recall_ok') else '✗'} |"
+        )
+    sup.append(f"")
+
+    # ── footer ─────────────────────────────────────────────────────
+    sup.append(f"---")
+    sup.append(f"")
+    sup.append(f"_생성: `run_full_evaluation.sh` ({datetime.now().isoformat(timespec='seconds')})_")
+    sup.append(f"_Source: `results/run_{ts}/<backend>/all_experiments_summary.json`_")
+
+    (run_dir / "result_supplementary.md").write_text("\n".join(sup) + "\n", encoding="utf-8")
+    print(f"  ✓ result_supplementary.md ({len(chr(10).join(sup).encode('utf-8'))} bytes)")
+else:
+    print(f"  ⏩ result_supplementary.md SKIP (v1 데이터 없음)")
 PYEOF
 
 # ── 종료 요약 ──
@@ -583,4 +766,7 @@ echo "  완료 — 총 ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
 echo "  결과: $RUN_DIR"
 echo "  📄 통합 보고서: $RUN_DIR/result.md"
 echo "  📊 구조화 결과: $RUN_DIR/result.json"
+if [ -f "$RUN_DIR/result_supplementary.md" ]; then
+    echo "  📚 Supplementary (paper Appendix B): $RUN_DIR/result_supplementary.md"
+fi
 echo "════════════════════════════════════════════════════════════════════"
