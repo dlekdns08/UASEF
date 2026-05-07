@@ -925,24 +925,42 @@ LANGCHAIN_PROJECT=UASEF-agent
 #### (a) 환경변수 (`.env`)
 
 ```bash
-
 # 필수: OpenAI API 키 (Primary 백엔드)
-
 OPENAI_API_KEY=sk-...
 
 # 선택: 모델 변경
-
-OPENAI_MODEL=gpt-4o-mini            # default
+OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* 등 reasoning 모델은
+                                    #          logprobs 미지원 → audit 6.9에서 자동으로
+                                    #          scoring_method='hybrid'로 전환됨
 LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
 LMSTUDIO_BASE_URL=http://localhost:1234
 
-# 선택: LangSmith 트레이싱
+# audit 6.9: logprob-free 백엔드 (모두 self_consistency / hybrid 자동 사용)
+ANTHROPIC_API_KEY=sk-ant-...        # Claude API (pip install 'anthropic>=0.40.0' 필요)
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 
+GEMINI_API_KEY=AIza...              # Google AI Studio 키 (https://aistudio.google.com/apikey)
+GEMINI_MODEL=gemini-2.0-flash       # default
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+
+# 선택: LangSmith 트레이싱
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=lsv2_pt_...
 LANGCHAIN_PROJECT=UASEF-agent
-
 ```
+
+**logprob 호환성 매트릭스 (audit 6.9):**
+
+| backend | 모델 | logprob | 자동 fallback |
+| --- | --- | --- | --- |
+| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+| `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
+| `lmstudio` | llama.cpp 기반 GGUF 전부 | ✓ | — |
+| `mlx` | mlx-lm 0.19+ | ✓ | — |
+| `anthropic` | Claude 전체 | ✗ | `self_consistency` |
+| `gemini` | Gemini 전체 | ✗ | `self_consistency` |
+
+자동 fallback은 `--strict` 미지정 시 동작. `--strict`이면 `RuntimeError`로 즉시 중단된다.
 
 #### (b) 데이터셋 확보 (audit #3 이후 fallback 차단)
 
