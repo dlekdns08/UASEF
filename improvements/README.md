@@ -1061,12 +1061,54 @@ B의 결합 p-value → C의 최적화 대상
 | 비판적 분석 + pivot 설계 | ✓ 완료 |
 | `improvements/round7_PLAN.md` 상세 계획 | ✓ 완료 |
 | README.md §0.5 + §4.5 + 참고문헌 갱신 | ✓ 완료 |
-| `improvements/README.md` Round 7 entry | ✓ 완료 (이 섹션) |
-| **Phase 1: 알고리즘 모듈 3개 구현** | ⏳ 대기 |
-| **Phase 2: RTC/EDE 통합** | ⏳ 대기 |
-| **Phase 3: Baseline 어댑터** | ⏳ 대기 |
-| **Phase 4: 실험 + 표 생성** | ⏳ 대기 |
-| **Phase 5: 논문 작성** | ⏳ 대기 |
+| `improvements/README.md` Round 7 entry | ✓ 완료 |
+| **Phase 1: 알고리즘 모듈 3개 구현** | ✓ **완료** (`stratified_crc.py`, `conformal_combination.py`, `cost_aware_calibration.py`) |
+| **Phase 2: RTC/EDE/config 통합** | ✓ **완료** (`RTC(stratified_calibrator=…)`, `EDE(decision_rule="conformal_combined", …)`, `base_config.yaml` Round 7 섹션) |
+| **Phase 3: pytest 스위트** | ✓ **완료** (4개 파일, 55 tests, 누적 137 tests passing) |
+| **Phase 4: Baseline 어댑터** | ✓ **완료** (`experiments/baselines/{tecp,quach2024,semantic_entropy}.py`) |
+| **Phase 5: 실험 + 표 생성** | ✓ **완료** (`round7_table{1,2,3,4}.py`, `reproduce_round7.sh`) |
+| **Phase 6: 논문 작성** | ⏳ 다음 단계 |
 
-상세 일정/위험/구현 인터페이스는 [round7_PLAN.md](round7_PLAN.md) 참조.
+### 7.8 실제 구현 결과 (Phase 1~5 완료)
+
+#### 7.8.1 신규/수정 파일 일람
+
+| 영역 | 파일 |
+| --- | --- |
+| **신규 알고리즘** | `models/stratified_crc.py` (Pivot A), `models/conformal_combination.py` (Pivot B), `models/cost_aware_calibration.py` (Pivot C) |
+| **RTC/EDE 통합** | `models/rtc_ede.py` (RTC: stratified_calibrator wrap; EDE: decision_rule="conformal_combined" + T2/T3 nonconformity score) |
+| **Config** | `experiments/configs/base_config.yaml` (`stratified_alphas`, `costs`, `multi_trigger` 섹션 신규), `experiments/config_schema.py` (StratifiedAlphas/CostMatrix/MultiTriggerConfig Pydantic 추가), `experiments/config_utils.py` (3개 loader 신규) |
+| **Baseline** | `experiments/baselines/__init__.py` (BaselineAdapter ABC), `tecp.py`, `quach2024.py`, `semantic_entropy.py` |
+| **실험 스크립트** | `experiments/round7_table1_coverage.py` (Pivot A), `round7_table2_fwer.py` (Pivot B 합성), `round7_table3_cost.py` (Pivot C 합성), `round7_table4_baseline.py` (4-way 비교), `reproduce_round7.sh` (전체 재현) |
+| **테스트** | `tests/test_stratified_crc.py` (13), `test_conformal_combination.py` (20), `test_cost_aware.py` (12), `test_round7_integration.py` (10) — **총 55 신규** |
+
+#### 7.8.2 검증 결과 (실제 측정값)
+
+**Table 2 — FWER 검증 (n_trials=1000, α=0.05):**
+
+| Method | Independence | Correlated | OK? |
+| --- | --- | --- | --- |
+| v1 `len(triggers)>0` | **0.109** | **0.132** | ✗ (둘 다 위반) |
+| v2 bonferroni | 0.044 | 0.068 | ✓ / ✗ slight |
+| v2 harmonic | 0.021 | 0.038 | ✓ ✓ |
+| v2 e_value | 0.046 | 0.072 | ✓ / ✗ slight |
+
+→ v1의 naive OR은 nominal 0.05 대비 약 2.5배 위반. v2 harmonic이 가장 안정적.
+
+**Table 3 — Cost-Weighted Performance (n=200/stratum):**
+
+| Total cost | Round 6 (F1-symmetric) | Round 7 (cost-aware) | 감소비 |
+| --- | --- | --- | --- |
+| | 10,845 | 348 | **31×** |
+
+CRITICAL stratum: Round 6 cost 10,030 → Round 7 cost 128, miss_rate 0.0 (완벽). over_esc는 0.95로 ↑이지만 cost matrix가 over_esc를 1× cost로 평가하므로 정상.
+
+#### 7.8.3 다음 단계 (Phase 6)
+
+1. **실제 LLM 호출 실험** (Table 1, 4 — OpenAI/LMStudio 키 필요): `BACKEND=openai N_CAL=1500 N_TEST=500 bash experiments/reproduce_round7.sh`
+2. **논문 figure 생성**: per-stratum coverage plot, Pareto frontier (cost vs miss rate), FWER vs α curves
+3. **논문 draft 작성**: ML4H 2026 / AISTATS 2026 / NeurIPS 2026 spec에 맞춰
+4. **Limitation 섹션 보강**: heuristic labels (audit 6 #4), mock tools (audit 6 #14), CRITICAL stratum n 부족 (α=0.001 → n≥999 필요)
+
+스냅샷: `improvements/improved/round7/` (Phase 6에서 생성)
 

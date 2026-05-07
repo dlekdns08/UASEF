@@ -1,0 +1,139 @@
+"""
+Round 7 Table 3 — Cost-Weighted Performance (Pivot C).
+
+비대칭 cost matrix를 적용했을 때 total cost / Safety Recall / Over-Esc rate가
+어떻게 바뀌는지 확인. F1-symmetric (Round 6) vs cost-aware (Round 7) 비교.
+
+실행:
+    python experiments/round7_table3_cost.py
+
+LLM 호출 없이 합성 데이터로 동작.
+
+산출:
+    results/round7/table3_cost.json
+    results/round7/table3_cost.md
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+from pathlib import Path
+from datetime import datetime
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+
+from models.cost_aware_calibration import (
+    find_cost_optimal_threshold, sweep_cost_aware_per_stratum,
+    cost_ratio_sweep, DEFAULT_COST_MATRIX,
+)
+
+
+def f1_symmetric_threshold(scores, labels) -> float:
+    """Round 6 baseline: F1-safety = harmonic_mean(recall, 1-over_esc) 최대화."""
+    candidates = sorted(set(scores))
+    best_thr, best_f1 = candidates[0], -1.0
+    for thr in candidates:
+        preds = [s > thr for s in scores]
+        tp = sum(p and l for p, l in zip(preds, labels))
+        fn = sum(not p and l for p, l in zip(preds, labels))
+        fp = sum(p and not l for p, l in zip(preds, labels))
+        tn = sum(not p and not l for p, l in zip(preds, labels))
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        over = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        f1 = 2 * recall * (1 - over) / (recall + (1 - over) + 1e-9)
+        if f1 > best_f1:
+            best_f1, best_thr = f1, thr
+    return best_thr
+
+
+def total_cost(scores, labels, threshold, c_miss, c_over):
+    fn = sum(1 for s, l in zip(scores, labels) if l and s <= threshold)
+    fp = sum(1 for s, l in zip(scores, labels) if (not l) and s > threshold)
+    return c_miss * fn + c_over * fp
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Round 7 Table 3 — Cost-Weighted Performance")
+    parser.add_argument("--n-per-stratum", type=int, default=300)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    out_dir = ROOT / "results" / "round7"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 합성 데이터: 4 stratum × n_per
+    random.seed(args.seed)
+    sb, lb = {}, {}
+    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
+                          ("MODERATE", 0.10), ("LOW", 0.05)]:
+        sb[stratum], lb[stratum] = [], []
+        for _ in range(args.n_per_stratum):
+            l = random.random() < base
+            s = random.gauss(2.0 if l else 0.0, 1.0)
+            sb[stratum].append(s); lb[stratum].append(l)
+
+    # ── Round 6: F1-symmetric per stratum ────────────────────────────────
+    round6_rows = []
+    round6_total_cost = 0.0
+    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+        thr = f1_symmetric_threshold(sb[stratum], lb[stratum])
+        cm = DEFAULT_COST_MATRIX[stratum]
+        c = total_cost(sb[stratum], lb[stratum], thr, cm["miss"], cm["over_esc"])
+        round6_total_cost += c
+        round6_rows.append({"stratum": stratum, "threshold": round(thr, 3), "cost": c})
+
+    # ── Round 7: cost-aware per stratum ──────────────────────────────────
+    alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
+    out = sweep_cost_aware_per_stratum(sb, lb, DEFAULT_COST_MATRIX, alphas)
+    round7_rows = []
+    round7_total_cost = 0.0
+    for stratum, r in out.items():
+        round7_total_cost += r.cost
+        round7_rows.append({
+            "stratum": stratum, "threshold": round(r.threshold, 3),
+            "cost": r.cost, "miss_rate": r.miss_rate,
+            "over_esc_rate": r.over_esc_rate,
+        })
+
+    payload = {
+        "timestamp": datetime.now().isoformat(),
+        "n_per_stratum": args.n_per_stratum,
+        "cost_matrix": DEFAULT_COST_MATRIX,
+        "round6_total_cost": round6_total_cost,
+        "round7_total_cost": round7_total_cost,
+        "cost_reduction_ratio": round(round6_total_cost / round7_total_cost, 2)
+                                 if round7_total_cost > 0 else None,
+        "round6_per_stratum": round6_rows,
+        "round7_per_stratum": round7_rows,
+    }
+    (out_dir / "table3_cost.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    md = [
+        "# Round 7 Table 3 — Cost-Weighted Performance\n",
+        f"- n_per_stratum={args.n_per_stratum}, default cost matrix\n",
+        f"- **Round 6 total cost**: {round6_total_cost:.1f}",
+        f"- **Round 7 total cost**: {round7_total_cost:.1f}",
+        f"- **Reduction**: {payload['cost_reduction_ratio']}× (Round 6 / Round 7)\n",
+        "## Per-stratum",
+        "| Stratum | R6 thr | R6 cost | R7 thr | R7 cost | R7 miss | R7 over |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for r6, r7 in zip(round6_rows, round7_rows):
+        md.append(
+            f"| {r6['stratum']} | {r6['threshold']} | {r6['cost']:.1f} | "
+            f"{r7['threshold']} | {r7['cost']:.1f} | "
+            f"{r7['miss_rate']} | {r7['over_esc_rate']} |"
+        )
+    (out_dir / "table3_cost.md").write_text("\n".join(md), encoding="utf-8")
+    print("\n".join(md))
+    print(f"\n✅ saved: {out_dir}/table3_cost.{{json,md}}")
+
+
+if __name__ == "__main__":
+    main()

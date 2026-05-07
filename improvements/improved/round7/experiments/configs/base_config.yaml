@@ -1,0 +1,75 @@
+# UASEF base configuration (audit 2026-05-07)
+# 변경 내역은 CHANGELOG.md 참고.
+uqm:
+  alpha: 0.10
+  scoring_method: logprob
+  consistency_n: 5
+  holdout_fraction: 0.2
+  prompt_mode: neutral        # audit issue #5: "neutral" / "instructed" (레거시)
+  strict: false               # audit issue #19: true이면 n<min_n 시 RuntimeError
+data:
+  n_calibration: 500
+  n_test_per_scenario: 200    # audit issue #11: 50 → 200 (Wilson 95% CI ±0.03 수준)
+  calibration_split: train
+  test_split: test
+  seed: 42
+  distribution_source: medqa
+  include_pubmedqa: false
+backends:
+- lmstudio
+- openai
+output:
+  results_dir: results
+rtc:
+  CRITICAL: 0.60
+  HIGH: 0.75
+  MODERATE: 1.00
+  LOW: 1.30
+# audit issue #20: 시나리오별 추가 배율도 데이터화 (과거엔 코드 하드코딩 0.90)
+scenario_multipliers:
+  emergency:      0.90
+  rare_disease:   0.90
+  multimorbidity: 1.00
+  routine:        1.00
+entropy_threshold: 0.6045
+ede:
+  t1_weight: 0.4
+  entropy_boost: 0.15
+  # audit issue #2: decision_rule + confidence_threshold 신규.
+  # "trigger_count"(default, back-compat) — len(triggers)>0
+  # "confidence" — confidence > confidence_threshold (grid search와 정합)
+  decision_rule: trigger_count
+  confidence_threshold: 0.5
+# audit 6.10: hybrid scoring의 두 신호 가중치 (calibration 결과로 갱신됨).
+# Jaccard diversity와 normalized mode entropy의 convex combination.
+# run_calibration_pipeline.py가 grid_search_hybrid_weights로 자동 산출.
+hybrid:
+  diversity_weight: 0.5
+  entropy_weight: 0.5
+
+# ── Round 7 (audit 7) — Stratified Conformal Risk Control + Multi-Trigger
+# Combination + Cost-Aware Calibration. v1과 공존하며 ede.decision_rule로 선택.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Pivot A: stratum별 CRC 보장 수준 (CRITICAL이 가장 엄격, LOW가 가장 관대).
+#   각 stratum에 대해 E[ℓ_s] ≤ α_s 보장 (Angelopoulos & Bates ICLR 2024).
+stratified_alphas:
+  CRITICAL: 0.001
+  HIGH:     0.010
+  MODERATE: 0.050
+  LOW:      0.100
+
+# Pivot C: 비대칭 cost matrix (임상 부담 추정).
+#   sensitivity analysis로 ratio 변경 가능 — paper Table 3 참고.
+costs:
+  CRITICAL: {miss: 1000.0, over_esc: 1.0}
+  HIGH:     {miss:  100.0, over_esc: 1.0}
+  MODERATE: {miss:   10.0, over_esc: 1.0}
+  LOW:      {miss:    1.0, over_esc: 1.0}
+
+# Pivot B: multi-trigger conformal combination 활성화 옵션.
+multi_trigger:
+  enabled: false           # default: v1 동작 유지. true이면 EDE.decision_rule을
+                           # 'conformal_combined'로 자동 설정 권장.
+  combination: harmonic    # "harmonic" | "bonferroni" | "e_value"
+  combined_alpha: 0.05     # 결합 p-value의 임계값 (FWER 제어)
