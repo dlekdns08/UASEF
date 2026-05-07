@@ -196,9 +196,12 @@ In practice, `numpy.quantile` is used with level `min(1.0, ⌈(n+1)(1-α)⌉/n)`
 | ------ | ------- | --------------- | -------------- |
 | **logprob** (Primary) | `s = -mean(token logprobs)` | CP guarantee ✓, single query | Main contribution |
 | **self_consistency** (Ablation) | `s = Jaccard_diversity × 5` | CP guarantee ✓, N queries | Ablation study |
-| **auto** | Runtime detection | Risk of reproducibility issues | Not recommended |
+| **hybrid** (audit 6.9, new) | `s = (0.5·diversity + 0.5·H_mode) × 5` | CP guarantee ✓, N queries; SC + answer-mode entropy | Recommended for logprob-free environments |
+| **auto** (deprecated) | Runtime detection | Risk of reproducibility issues | Not recommended |
 
 > **Why logprob is Primary**: Model-internal probability distributions satisfy the CP exchangeability assumption better than natural language diversity, and obtaining the score and response in a single query cuts cost and latency in half.
+>
+> **`hybrid` (audit 6.9)** is the recommended fallback for logprob-free environments (Claude / Gemini / OpenAI reasoning models such as o1/o3/o4/gpt-5). With the same N=5 queries it combines token-level Jaccard diversity with the **answer-mode entropy** of normalized N samples — useful for detecting bimodal answer distributions (e.g., 3/5 say "A", 2/5 say "B") that pure Jaccard misses. UQM auto-switches to `hybrid` when the configured backend/model cannot produce logprobs.
 
 #### Entropy Computation
 
