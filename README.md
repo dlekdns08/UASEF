@@ -206,10 +206,13 @@ q̂ = s_{(⌈(n+1)(1-α)⌉)}  ← n번째 순위 점수
 | ---- | ---- | ---- | --------- |
 | **logprob** (Primary + Ablation) | `s = -mean(token logprobs)` | CP 보장 ✓, 단일 쿼리 | 주요 기여 + Ablation |
 | **self_consistency** (대안) | `s = Jaccard_diversity × 5` | CP 보장 ✓, N회 쿼리, logprobs 불필요 | 블랙박스 LLM 호환용 |
-| **auto** | 런타임 감지 | 재현성 저하 위험 | 비권장 |
+| **hybrid** (audit 6.9 신규) | `s = (0.5·diversity + 0.5·H_mode) × 5` | CP 보장 ✓, N회 쿼리, SC + answer-mode entropy | logprob-free 환경 권장 |
+| **auto** (deprecated) | 런타임 감지 | 재현성 저하 위험 | 비권장 |
 
 > **왜 logprob이 Primary이고 Ablation 모두인가?**
-> LM Studio의 OpenAI-compatible API는 token-level logprobs를 지원하므로, OpenAI와 로컬 GGUF 모델 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, 로컬 환경에서도 CP coverage 보장이 성립함을 검증하는 것입니다. `self_consistency`는 logprobs를 지원하지 않는 Claude API, Gemini API 등에 적용할 수 있는 대안입니다.
+> LM Studio의 OpenAI-compatible API는 token-level logprobs를 지원하므로, OpenAI와 로컬 GGUF 모델 모두 동일한 `logprob` 비적합 함수를 사용합니다. Ablation의 목적은 scoring method 차이가 아니라, 로컬 환경에서도 CP coverage 보장이 성립함을 검증하는 것입니다.
+>
+> **`hybrid` (audit 6.9)** 는 logprob-free 환경(Claude/Gemini/OpenAI reasoning) 전용입니다. 같은 N=5 쿼리로 self_consistency보다 풍부한 신호 (token-level diversity + answer-mode clustering entropy)를 사용합니다. UQM이 backend/모델 사전 점검 후 자동으로 전환합니다.
 
 #### 엔트로피 계산
 
@@ -267,10 +270,16 @@ q̂_w = inf{q : Σ_{s_i ≤ q} w_i / (Σ w_i + w_{n+1}) ≥ 1-α}
 
 | scoring_method | logprobs 필요 | 적용 가능 LLM | 논문 위치 |
 | --- | --- | --- | --- |
-| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, LMStudio (llama.cpp) | 주요 기여 + Ablation |
-| `self_consistency` (대안) | 불필요 | 모든 LLM | 블랙박스 LLM 호환용 |
+| `logprob` (Primary + Ablation) | 필수 | GPT-4o, GPT-4o-mini, GPT-4.1, LMStudio (llama.cpp), MLX | 주요 기여 + Ablation |
+| `self_consistency` (대안) | 불필요 | **모든** LLM (Claude, Gemini, OpenAI o-시리즈 포함) | 블랙박스 LLM 호환용 |
+| `hybrid` (audit 6.9) | 불필요 | 위 self_consistency와 동일. 신호량이 더 많음. | logprob-free 환경 권장 |
 
-> `logprob` 방식은 token-level logprobs를 지원하지 않는 Claude API, Gemini API, Cohere 등에서 `ValueError`가 발생합니다. 이런 환경에서는 `self_consistency`를 사용하세요. LM Studio는 OpenAI-compatible API로 logprobs를 지원하므로 Primary와 동일한 방식을 사용합니다.
+> **audit 6.9 자동 감지**: `UQM(backend='anthropic'/'gemini')` 또는 `OPENAI_MODEL`이 reasoning 패턴(`o1*/o3*/o4*/gpt-5*`)일 때 `scoring_method='logprob'`을 요청하면, [models/uqm.py:512-562](models/uqm.py#L512)의 사전 점검이 발동합니다.
+>
+> - `strict=False` (default): UserWarning 후 자동으로 `self_consistency`(anthropic/gemini) 또는 `hybrid`(openai reasoning)로 전환
+> - `strict=True`: `RuntimeError`로 즉시 중단 (논문 자동화에 권장)
+>
+> `backend_supports_logprobs(backend, model_name)` 함수로 정적 판정 가능 ([models/model_interface.py:51-78](models/model_interface.py#L51)).
 
 #### Calibration 견고성
 
@@ -1085,11 +1094,29 @@ python experiments/run_all_experiments.py --backend openai --strict \
     --n-cal 500 --n-test 200 --n-medabstain 100
 
 # 4) Ablation C — Weighted CP on/off (분포 이동 케이스 한정)
-
 python experiments/run_all_experiments.py --backend openai --weighted-cp --strict \
     --n-cal 500 --n-medabstain 100 --skip agent baseline pareto
 
+# 5) [audit 6.9] Anthropic Claude (logprob-free) — self_consistency 자동 사용
+pip install 'anthropic>=0.40.0'
+ANTHROPIC_API_KEY=sk-ant-... \
+python experiments/run_all_experiments.py --backend anthropic \
+    --n-cal 200 --n-test 100 --n-medabstain 50 --skip pareto
+#   pareto는 비용이 N=5배 → 가급적 skip 권장
+
+# 6) [audit 6.9] Gemini — hybrid 명시
+GEMINI_API_KEY=AIza... \
+python experiments/run_all_experiments.py --backend gemini \
+    --scoring-method hybrid --n-cal 200 --n-test 100
+
+# 7) [audit 6.9] OpenAI o3-mini (reasoning 모델) — 자동으로 hybrid 전환
+OPENAI_MODEL=o3-mini \
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 200 --n-test 100 --n-medabstain 50
+#   warning: "OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴 → hybrid 자동 전환"
 ```
+
+> **logprob-free 백엔드 비용 안내**: `self_consistency` / `hybrid`는 케이스당 N(default 5)회 LLM 호출이 발생합니다. `--n-test 200` × N=5 = 1,000회/시나리오. Pareto sweep은 캐싱(audit #9) 후에도 (cal_n + test_n) × N 호출이 필요하므로 큰 비용 → `--skip pareto` 권장.
 
 #### 9.2.4 산출 파일
 
@@ -1252,6 +1279,10 @@ print('OK')
 | OpenAI step에서 SKIP 됨 | `OPENAI_API_KEY` 미설정 | `.env`에 키 추가 또는 `--backend lmstudio`로 한정 |
 | LMStudio agent latency가 너무 길다 | audit #17 이후 fix됨 — 1.x 버전이면 코드 갱신 필요 | `git pull` 후 `agent/nodes.py`의 `_make_llm` 확인 |
 | 결과 표에 `N/A`가 자주 보임 | audit #16 — emergency=positives only / routine=negatives only 시 정상 동작. silent zero 회피용. | 그대로 보고. CI 컬럼이 같이 비어있으면 분모=0이라는 신호 |
+| `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API는 원래 logprobs 미지원 | `--scoring-method hybrid` 또는 `self_consistency` 명시. `--strict` 미사용 시 자동 전환. |
+| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning 모델은 logprobs 미반환 | `gpt-4o-mini`로 모델 변경, 또는 hybrid 모드 사용 |
+| `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK 미설치 | `pip install 'anthropic>=0.40.0'` 또는 `pip install 'uasef[claude]'` |
+| `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio 키 미설정 | <https://aistudio.google.com/apikey>에서 키 발급 후 `.env`에 추가 |
 
 ---
 
