@@ -29,7 +29,7 @@ from models.model_interface import (
 
 
 @pytest.mark.parametrize("backend,model,expected", [
-    ("openai", "gpt-4o-mini", True),
+    ("openai", "gpt-4o", True),
     ("openai", "gpt-4o", True),
     ("openai", "gpt-4.1", True),
     ("openai", "o1-preview", False),
