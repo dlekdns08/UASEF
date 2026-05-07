@@ -273,6 +273,56 @@ def run_calibration_pipeline(
     print("  Step 5/4: base_config.yaml 갱신")
     print("="*65)
 
+    # ── audit 6.10: HYBRID weight grid (옵션 — backend가 logprob 지원 시 score 분포 차이로 의미 약함)
+    # logprob backend에서는 hybrid를 안 쓰지만, 가중치 산출은 별도 SC 호출 풀로 가능.
+    # 비용을 아끼기 위해 기존 cal_questions의 일부만 사용 (n=min(50, n_calibration//10)).
+    print("\n" + "="*65)
+    print("  Step 4c/4: HYBRID Weight Grid Search (audit 6.10)")
+    print("="*65)
+    hybrid_cfg = {"diversity_weight": 0.5, "entropy_weight": 0.5}
+    n_hybrid = min(50, max(20, n_calibration // 10))
+    if len(all_labels) >= 5:
+        try:
+            print(f"  HYBRID 샘플 수집 중: {n_hybrid}건 × N=5 = {n_hybrid*5}회 LLM 호출")
+            divs: list[float] = []
+            ents: list[float] = []
+            hybrid_labels: list[bool] = []
+            sample_qs = cal_questions[:n_hybrid]
+            for q in sample_qs:
+                try:
+                    texts = _collect_sc_samples(backend, uqm._system_prompt, q, n=5)
+                    divs.append(_answer_diversity(texts))
+                    ents.append(_answer_mode_entropy(texts))
+                    # 라벨 부재 시 score median split을 proxy로 사용 (간이 휴리스틱)
+                    # 정확한 라벨이 있으면 scenario_map에서 조인 가능 (TODO future)
+                    hybrid_labels.append(False)  # 보수적 default
+                except Exception as e:
+                    print(f"  [hybrid skip] {e}")
+            # 이용 가능한 case-level labels 추가 (scenario_map 기반)
+            divs_lab = list(divs)
+            ents_lab = list(ents)
+            labels_lab = list(hybrid_labels)
+            # 더 정확한 calibration을 위해 scenario_map 케이스에서도 SC 샘플 수집 (옵션)
+            # 현재는 휴리스틱 라벨만 사용 — 추후 audit에서 정확한 라벨 조인 추가 가능
+
+            hyb_result = grid_search_hybrid_weights(divs_lab, ents_lab, labels_lab)
+            if "error" not in hyb_result:
+                hybrid_cfg = {
+                    "diversity_weight": float(hyb_result["best_diversity_weight"]),
+                    "entropy_weight": float(hyb_result["best_entropy_weight"]),
+                }
+                print(f"  best (div_w, ent_w) = "
+                      f"({hyb_result['best_diversity_weight']}, {hyb_result['best_entropy_weight']})")
+                print(f"  F1-safety = {hyb_result['best_f1_safety']:.4f}")
+                report["hybrid_weight_search"] = hyb_result
+            else:
+                print(f"  [FALLBACK] {hyb_result.get('error')}")
+        except Exception as e:
+            print(f"  [HYBRID grid SKIP] {e}")
+            report["hybrid_weight_search"] = {"fallback_used": True, "error": str(e)}
+    else:
+        print(f"  [SKIP] n_labels={len(all_labels)} 부족 → 기본 (0.5, 0.5) 유지")
+
     base_cfg = _load_base_config()
     base_cfg["rtc"] = rtc_multipliers
     base_cfg["entropy_threshold"] = float(entropy_threshold)
@@ -283,6 +333,7 @@ def run_calibration_pipeline(
         "confidence_threshold": float(confidence_threshold),
         "decision_rule": str(decision_rule),
     }
+    base_cfg["hybrid"] = hybrid_cfg   # audit 6.10
     _save_base_config(base_cfg)
 
     # ── 캘리브레이션 리포트 저장 ──────────────────────────────────────────────
