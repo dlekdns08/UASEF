@@ -525,9 +525,10 @@ class UQM:
         # ── audit 6.9: 모델 사전 점검 (logprob 미지원 백엔드/모델 자동 감지) ────
         # backend / OPENAI_MODEL이 logprobs를 지원하지 않는데 logprob 모드를 요청하면
         # strict=True: RuntimeError (자동화 실험 잘못된 결과 방지)
-        # strict=False: UserWarning + scoring_method를 self_consistency로 자동 전환
+        # strict=False: UserWarning + scoring_method 자동 전환
         if self._scoring_mode == "logprob":
-            if not backend_supports_logprobs(backend):
+            # 케이스 1: backend 자체가 logprob-free (anthropic/gemini)
+            if backend in LOGPROB_INCOMPATIBLE_BACKENDS:
                 msg = (
                     f"[UQM] backend='{backend}'는 logprobs를 반환하지 않습니다 "
                     f"(LOGPROB_INCOMPATIBLE_BACKENDS={sorted(LOGPROB_INCOMPATIBLE_BACKENDS)}).\n"
@@ -541,8 +542,8 @@ class UQM:
                 self._scoring_method = ScoringMethod.SELF_CONSISTENCY
                 self._scoring_mode = "self_consistency"
                 self._use_self_consistency = True
+            # 케이스 2: backend는 OK지만 OPENAI_MODEL이 reasoning 패턴
             elif backend == "openai":
-                # OpenAI지만 reasoning 모델(o1/o3/o4/gpt-5*)이면 미지원
                 import os as _os
                 model = _os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
                 if not backend_supports_logprobs("openai", model):
