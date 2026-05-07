@@ -123,14 +123,26 @@ def test_per_stratum_sweep_returns_all_strata():
 
 
 def test_per_stratum_critical_more_conservative_than_low():
-    """default cost matrix는 CRITICAL miss=1000, LOW miss=1 → CRITICAL threshold 낮음."""
+    """
+    default cost matrix는 CRITICAL miss=1000, LOW miss=1 → CRITICAL threshold 낮음.
+
+    same scoring distribution을 두 stratum에서 평가. 비대칭 cost가 threshold를
+    바꿔야 함. random seed로 동일 분포 강제 — 차이는 cost matrix에서만.
+    """
     random.seed(0)
     sb, lb = {}, {}
+    # 같은 random 시퀀스를 두 번 생성 (정확히 같은 분포)
     for stratum in ["CRITICAL", "LOW"]:
-        sb[stratum] = [random.gauss(0, 1) for _ in range(200)]
-        lb[stratum] = [s > 0.5 for s in sb[stratum]]
-    out = sweep_cost_aware_per_stratum(sb, lb)   # default cost
-    assert out["CRITICAL"].threshold <= out["LOW"].threshold
+        random.seed(123)
+        sb[stratum] = [random.gauss(0, 1) for _ in range(500)]
+        lb[stratum] = [s > 0.0 for s in sb[stratum]]   # 50% positive
+    out = sweep_cost_aware_per_stratum(sb, lb)         # default cost
+    # CRITICAL은 c_miss=1000, LOW는 c_miss=1 → CRITICAL이 더 보수적 (threshold ≤ LOW)
+    assert out["CRITICAL"].threshold <= out["LOW"].threshold, (
+        f"CRITICAL={out['CRITICAL'].threshold}, LOW={out['LOW'].threshold}"
+    )
+    # 그리고 CRITICAL의 miss_rate ≤ LOW의 miss_rate (더 적게 놓침)
+    assert out["CRITICAL"].miss_rate <= out["LOW"].miss_rate
 
 
 # ── cost_ratio_sweep (sensitivity analysis) ──────────────────────────────────
