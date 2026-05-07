@@ -1,0 +1,19 @@
+
+=== FWER 검증 (n_trials=1000, α=0.05) ===
+
+# Round 7 Table 2 — Multi-Trigger Combination FWER
+
+- n_trials=1000, n_cal=200, target α=0.05
+
+| Method | Dependence | Empirical FWER | OK (≤α+0.02)? |
+| --- | --- | --- | --- |
+| v1: len(triggers) > 0 (naive OR) | independent | 0.109 | ✗ |
+| v2: bonferroni | independent | 0.044 | ✓ |
+| v2: harmonic | independent | 0.021 | ✓ |
+| v2: e_value | independent | 0.046 | ✓ |
+| v1: len(triggers) > 0 (naive OR) | correlated | 0.132 | ✗ |
+| v2: bonferroni | correlated | 0.068 | ✓ |
+| v2: harmonic | correlated | 0.038 | ✓ |
+| v2: e_value | correlated | 0.072 | ✗ |
+
+✅ saved: /Users/idaun/PoC/UASEF/results/round7/table2_fwer.{json,md}
