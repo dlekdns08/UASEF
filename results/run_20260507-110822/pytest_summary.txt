@@ -12,4 +12,8 @@ tests/test_loader.py ........                                            [ 35%]
 tests/test_metrics.py .............                                      [ 45%]
 tests/test_round7_integration.py .........                               [ 51%]
 tests/test_rtc_ede.py .............                                      [ 61%]
-tests/test_runners_smoke.py ...........
+tests/test_runners_smoke.py .............                                [ 70%]
+tests/test_stratified_crc.py .............                               [ 80%]
+tests/test_uqm.py ...........................                            [100%]
+
+============================= 137 passed in 5.86s ==============================

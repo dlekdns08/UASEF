@@ -1,3 +1,6 @@
+
+=== FWER 검증 (n_trials=300, α=0.05) ===
+
 # Round 7 Table 2 — Multi-Trigger Combination FWER
 
 - n_trials=300, n_cal=200, target α=0.05
@@ -12,3 +15,5 @@
 | v2: bonferroni | correlated | 0.0567 | ✓ |
 | v2: harmonic | correlated | 0.0333 | ✓ |
 | v2: e_value | correlated | 0.0667 | ✓ |
+
+✅ saved: /Users/idaun/PoC/UASEF/results/round7/table2_fwer.{json,md}
