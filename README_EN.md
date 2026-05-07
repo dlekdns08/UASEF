@@ -840,125 +840,332 @@ LANGCHAIN_PROJECT=UASEF-agent
 
 ## 9. Running Experiments
 
-### Step 0: Calibration Pipeline (once, on first run)
+> **This section reflects the audit 6.9 (2026-05-07) baseline.** New options, defaults, and environment variables are documented in detail in `improvements/README.md` §6.
+
+### 9.0 Entry Points at a Glance
+
+| Command | Purpose | When to Use |
+| --- | --- | --- |
+| `run_calibration_pipeline.py` | Derive CP base threshold q̂ + RTC multipliers + entropy threshold + EDE coefficients from data and persist to `base_config.yaml` | **First run** + whenever model / data / α changes |
+| `run_all_experiments.py` ⭐ | Run all 4 experiments (agent / baseline / MedAbstain / Pareto) sequentially and emit a unified report | **Standard entry point for paper-quality runs** |
+| `run_experiment.py` | Sequential pipeline only — Safety Recall / Over-Esc table per scenario | Quick scenario-level check |
+| `run_agent_experiment.py` | LangGraph ReAct agent only (with tool-use stats) | Agent-behavior analysis |
+| `run_baseline_comparison.py` | Compare 3 strategies: no_escalation / threshold_only / full_uasef | Isolate each trigger's contribution |
+| `eval_medabstain.py` | MedAbstain AP/NAP/A/NA classification + Abstention Recall | Detailed abstention evaluation |
+| `pareto_sweep.py` | α sweep → recommended α per specialty | Operational α tuning |
+| `visualize_results.py` | Plot existing JSON results | Refresh figures |
+
+### 9.1 Prerequisites (one-time)
+
+#### (a) Environment Variables (`.env`)
 
 ```bash
-# Development test
-python experiments/run_calibration_pipeline.py --backend openai
+# Required: OpenAI API key (Primary backend)
+OPENAI_API_KEY=sk-...
 
-# Publication quality (recommended)
+# Optional: change models
+OPENAI_MODEL=gpt-4o-mini            # default. ⚠ o1/o3/o4/gpt-5* reasoning models
+                                    #          do NOT return logprobs → audit 6.9
+                                    #          auto-switches to scoring_method='hybrid'
+LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct
+LMSTUDIO_BASE_URL=http://localhost:1234
+
+# audit 6.9: logprob-free backends (always use self_consistency / hybrid)
+ANTHROPIC_API_KEY=sk-ant-...        # Claude API (requires `pip install 'anthropic>=0.40.0'`)
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+
+GEMINI_API_KEY=AIza...              # Google AI Studio key (https://aistudio.google.com/apikey)
+GEMINI_MODEL=gemini-2.0-flash       # default
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+
+# Optional: LangSmith tracing
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=UASEF-agent
+```
+
+**logprob compatibility matrix (audit 6.9):**
+
+| backend | Models | logprob | Auto fallback |
+| --- | --- | --- | --- |
+| `openai` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1*` | ✓ | — |
+| `openai` | `o1*`, `o3*`, `o4*`, `gpt-5*` (reasoning) | ✗ | `hybrid` |
+| `lmstudio` | All llama.cpp-based GGUF | ✓ | — |
+| `mlx` | mlx-lm 0.19+ | ✓ | — |
+| `anthropic` | All Claude models | ✗ | `self_consistency` |
+| `gemini` | All Gemini models | ✗ | `self_consistency` |
+
+Auto fallback is active when `--strict` is not set; with `--strict` UASEF raises `RuntimeError` immediately.
+
+#### (b) Datasets (audit #3 blocks fallback)
+
+HuggingFace `GBaker/MedQA-USMLE-4-options` is auto-downloaded, but MedAbstain must be placed manually:
+
+```text
+data/raw/
+├── medqa_train.jsonl      # (optional) HF auto-download covers this
+├── medqa_test.jsonl       # (optional)
+├── medabstain_AP.jsonl    # required (eval_medabstain)
+├── medabstain_NAP.jsonl   # required
+├── medabstain_A.jsonl     # recommended
+└── medabstain_NA.jsonl    # recommended (normal cases)
+```
+
+> **Fallback behavior**: If none of the above are available, audit #3 raises `RuntimeError`. To allow fallback temporarily (unit tests only), set `UASEF_ALLOW_FALLBACK=1` or pass `--allow-fallback`.
+
+#### (c) Calibration (Step 0)
+
+`run_calibration_pipeline.py` **derives the hard-coded RTC multipliers / entropy threshold / EDE coefficients from real data** and saves them to `base_config.yaml`. All subsequent experiments use these values automatically.
+
+```bash
+# Development (quick check)
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 100 --n-labeled 20
+
+# Publication quality (Step 0 standard)
 python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
+
+# Recalibrate with a different α
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50 --alpha 0.05
 ```
 
-After this step, the `rtc` / `entropy_threshold` / `ede` sections of `base_config.yaml` are automatically updated, and all subsequent experiments use data-driven parameters.
+Outputs:
+
+- `experiments/configs/base_config.yaml` (rtc / scenario_multipliers / entropy_threshold / ede updated)
+- `results/calibration_report.json` (full sweep — for paper appendix)
+
+> Re-run calibration whenever you change the model, data, or α. Otherwise EDE coefficients drift away from the actual distribution and Safety Recall becomes artificially high or low.
 
 ---
 
-### Run All Experiments at Once (Recommended)
+### 9.2 ⭐ Standard Entry Point — `run_all_experiments.py`
+
+**This single command fills paper Tables 1–4.** It runs all 4 experiments sequentially and produces `results/all_experiments_report.md`.
+
+#### 9.2.1 Four most common invocations
 
 ```bash
-# [Primary] OpenAI only — quick smoke test
-python experiments/run_all_experiments.py --backend openai
-
-# [Primary] OpenAI, publication quality
+# [A] Quick smoke (~5 min)
 python experiments/run_all_experiments.py --backend openai \
-    --n-cal 500 --n-test 50 --n-medabstain 100 --n-pareto-test 100
+    --n-cal 100 --n-test 20 --n-medabstain 20 --n-pareto-test 20
 
-# [Primary + Ablation] Final paper run (openai=logprob, lmstudio=logprob auto-selected)
-python experiments/run_all_experiments.py --n-cal 500 --n-test 50
+# [B] Primary only (OpenAI, paper quality, audit defaults)
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
 
-# Skip specific experiments
-python experiments/run_all_experiments.py --backend openai --skip pareto
+# [C] Primary + Ablation (final paper run — openai then lmstudio)
+python experiments/run_all_experiments.py \
+    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
+
+# [D] Re-run only fast experiments — skip costly Pareto / MedAbstain
+python experiments/run_all_experiments.py --backend openai --skip pareto medabstain
 ```
 
-After running, check `results/all_experiments_report.md` for results with explicit **[Primary] / [Ablation]** labels.
+#### 9.2.2 Full Option Matrix
+
+| CLI option | Default | Description |
+| --- | --- | --- |
+| `--backend {openai,lmstudio,mlx,anthropic,gemini}` | both (openai+lmstudio) | audit 6.9 adds anthropic/gemini. logprob-free backends auto-fallback. |
+| `--n-cal N` | `500` | UQM CP calibration question count (with `--strict`, audit #19 stops if below CP minimum for α) |
+| `--n-test N` | `200` | Per-scenario test cases for agent/baseline (audit #11: 50→200) |
+| `--n-medabstain N` | `100` | Cases per MedAbstain variant |
+| `--n-pareto-test N` | `100` | Per-scenario test cases for Pareto sweep |
+| `--scoring-method {logprob,self_consistency,hybrid,auto}` | `auto` | audit 6.9: **`hybrid`** added (SC diversity + answer-mode entropy, recommended for logprob-free). `auto` is `DeprecationWarning`. |
+| `--alpha FLOAT` | (config `0.10`) | CP α. Smaller → higher q̂ → fewer escalations / higher coverage |
+| `--variants AP NAP A NA ...` | all four | MedAbstain evaluation variants |
+| `--weighted-cp` | off | Tibshirani et al. (2019) WeightedCP (audit #8: arg now actually honored) |
+| `--include-pubmedqa` | off | Add PubMedQA `maybe` cases to agent experiments |
+| **`--prompt-mode {neutral,instructed}`** | `neutral` | audit #5. `neutral` measures genuine abstention; `instructed` is the legacy ablation. |
+| **`--decision-rule {trigger_count,confidence}`** | (config) | audit #2. `trigger_count` (back-compat) / `confidence` (uses grid-searched coefficients). |
+| **`--strict`** | off | audit #19. Raise `RuntimeError` on n<min_n / missing data / unsupported logprob combos. Recommended for CI. |
+| **`--allow-fallback`** | off | audit #3. Explicitly allow fallback data (unit-test only, otherwise blocks). |
+| `--seed N` | `42` | Data sampling seed |
+| `--skip {agent,baseline,medabstain,pareto} ...` | none | Skip specific experiments |
+
+> The four bold options are audit 6.9 additions. Every sub-runner (`run_baseline_comparison.py`, `run_agent_experiment.py`, `eval_medabstain.py`, `pareto_sweep.py`) accepts the same flags.
+
+#### 9.2.3 Recommended Experiment Scenarios (paper standard)
+
+```bash
+# 0) Calibration — α=0.10 (default)
+python experiments/run_calibration_pipeline.py --backend openai --n-cal 500 --n-labeled 50
+
+# 1) Standard run: Primary + Ablation, neutral prompt, 200 cases/scenario
+python experiments/run_all_experiments.py --strict \
+    --n-cal 500 --n-test 200 --n-medabstain 100 --n-pareto-test 100
+
+# 2) Ablation A — prompt-induced abstention effect
+python experiments/run_all_experiments.py --backend openai --strict \
+    --prompt-mode instructed \
+    --n-cal 500 --n-test 200 --n-medabstain 100
+#   Save report as results/all_experiments_report_instructed.md for comparison
+
+# 3) Ablation B — confidence rule
+python experiments/run_all_experiments.py --backend openai --strict \
+    --decision-rule confidence \
+    --n-cal 500 --n-test 200 --n-medabstain 100
+
+# 4) Ablation C — Weighted CP on/off (distribution shift cases only)
+python experiments/run_all_experiments.py --backend openai --weighted-cp --strict \
+    --n-cal 500 --n-medabstain 100 --skip agent baseline pareto
+
+# 5) [audit 6.9] Anthropic Claude (logprob-free) — auto self_consistency
+pip install 'anthropic>=0.40.0'
+ANTHROPIC_API_KEY=sk-ant-... \
+python experiments/run_all_experiments.py --backend anthropic \
+    --n-cal 200 --n-test 100 --n-medabstain 50 --skip pareto
+#   Pareto cost is N=5×, prefer --skip pareto
+
+# 6) [audit 6.9] Gemini — explicit hybrid
+GEMINI_API_KEY=AIza... \
+python experiments/run_all_experiments.py --backend gemini \
+    --scoring-method hybrid --n-cal 200 --n-test 100
+
+# 7) [audit 6.9] OpenAI o3-mini (reasoning) — auto-switch to hybrid
+OPENAI_MODEL=o3-mini \
+python experiments/run_all_experiments.py --backend openai \
+    --n-cal 200 --n-test 100 --n-medabstain 50
+#   warning: "OPENAI_MODEL='o3-mini' is in the logprobs-incompatible pattern → auto-switching to hybrid"
+```
+
+> **Cost notice for logprob-free backends**: `self_consistency` / `hybrid` issue N (default 5) LLM calls per case. `--n-test 200` × N=5 = 1,000 calls/scenario. Pareto sweep, even with audit #9 caching, requires `(cal_n + test_n) × N` calls — high cost. Prefer `--skip pareto`.
+
+#### 9.2.4 Output Artifacts
+
+| File | Contents |
+| --- | --- |
+| `results/all_experiments_report.md` | **Paper-ready unified report** (Primary/Ablation labels, Wilson 95% CI columns, prompt_mode/RTC mults/EDE config and all reproduction metadata) |
+| `results/all_experiments_summary.json` | Structured version of the above (for post-hoc analysis) |
+| `results/agent_results.json` + `agent_comparison_table.csv` | Agent experiment raw + table |
+| `results/baseline_comparison.json` + `.csv` | Baseline raw + table |
+| `results/medabstain_eval.json` + `medabstain_eval_summary.csv` | Per-variant metrics |
+| `results/pareto_sweep_results.json` + `pareto_frontier.png` | α sweep |
+| `results/alpha_recommendations.json` | Recommended α per specialty |
 
 ---
 
-### Sequential Pipeline Experiment
+### 9.3 Individual Experiment Scripts
+
+Use these when calling experiments independently (debugging, repeated measurements, CI integration).
+
+#### 9.3.1 Sequential pipeline (`run_experiment.py`)
 
 ```bash
-# [Primary + Ablation] Full experiment (auto-select scoring method)
-python experiments/run_experiment.py --n-cal 500 --n-test 50
+# Simplest call — uses base_config.yaml as-is
+python experiments/run_experiment.py
 
-# [Primary] OpenAI only (logprob)
-python experiments/run_experiment.py --backend openai --n-cal 500 --n-test 50
+# Override sample sizes
+python experiments/run_experiment.py --n-cal 500 --n-test 200
 
-# [Ablation] Local only (logprob)
-python experiments/run_experiment.py --backend lmstudio --n-cal 500 --n-test 50
-
-# Apply scenario-specific config
+# Single scenario only
 python experiments/run_experiment.py --config experiments/configs/scenario_emergency.yaml
+python experiments/run_experiment.py --scenario rare_disease
 
-# Visualize results
+# Visualize (regenerate plots from existing JSON)
 python experiments/visualize_results.py
 ```
 
-### LangGraph Agent Experiment
+#### 9.3.2 LangGraph agent (`run_agent_experiment.py`)
 
 ```bash
-# [Primary + Ablation] Full experiment
-python experiments/run_agent_experiment.py --n-cal 500 --n-test 50
+# Primary only
+python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 200
 
-# [Primary] OpenAI only
-python experiments/run_agent_experiment.py --backend openai --n-cal 500 --n-test 50
+# Combined ablation: instructed prompt + confidence rule
+python experiments/run_agent_experiment.py --backend openai \
+    --prompt-mode instructed --decision-rule confidence \
+    --n-cal 500 --n-test 200
 
-# [Ablation] Local only
-python experiments/run_agent_experiment.py --backend lmstudio --n-cal 500 --n-test 50
-
-# Include PubMedQA
+# Add PubMedQA `maybe` cases
 python experiments/run_agent_experiment.py --backend openai --include-pubmedqa
 ```
 
-### Baseline Comparison
+LangSmith tracing auto-activates if `.env` has `LANGCHAIN_TRACING_V2=true`. No code changes needed.
+
+#### 9.3.3 Baseline 3-strategy comparison (`run_baseline_comparison.py`)
+
+3 strategies: `no_escalation` (always autonomous), `threshold_only` (CP T1 only), `full_uasef` (T1+T2+T3+entropy)
 
 ```bash
-# [Primary + Ablation] Full comparison
-python experiments/run_baseline_comparison.py --n-cal 500 --n-test 50
+python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 200
 
-# [Primary] OpenAI only
-python experiments/run_baseline_comparison.py --backend openai --n-cal 500 --n-test 50
+# Decision-rule ablation — re-run with confidence rule
+python experiments/run_baseline_comparison.py --backend openai \
+    --decision-rule confidence --n-cal 500 --n-test 200
 ```
 
-### MedAbstain Classification Accuracy
+#### 9.3.4 MedAbstain per-variant (`eval_medabstain.py`)
 
 ```bash
-# All variants (AP, NAP, A, NA)
-python experiments/eval_medabstain.py --backend openai
+# All variants (AP/NAP/A/NA)
+python experiments/eval_medabstain.py --backend openai --n-cal 500 --n 100
 
 # Core safety cases only (AP/NAP)
 python experiments/eval_medabstain.py --backend openai --variants AP NAP --n 100
 
-# Weighted CP comparison
-python experiments/eval_medabstain.py --backend openai --weighted-cp
+# Weighted CP — distribution shift compensation (audit #8: arg honored)
+python experiments/eval_medabstain.py --backend openai --weighted-cp --n 100
+
+# Disable routine-only calibration (use the entire MedQA — legacy behavior)
+python experiments/eval_medabstain.py --backend openai --no-routine-cal --n 100
 ```
 
-### Pareto Frontier + α Recommendation
+#### 9.3.5 Pareto Frontier α sweep (`pareto_sweep.py`)
+
+audit #9 caching cuts LLM calls 6×.
 
 ```bash
-# Run α sweep
-python experiments/pareto_sweep.py --backend openai --n-cal 500
+# Standard sweep (α ∈ {0.01, 0.05, 0.10, 0.15, 0.20, 0.30})
+python experiments/pareto_sweep.py --backend openai --n-cal 500 --n-test 100
 
-# Recompute recommendation only from existing sweep results
+# Recompute recommendation only from existing sweep (no LLM calls)
 python -c "
 from experiments.pareto_sweep import recommend_alpha, print_recommendations
-recs = recommend_alpha()
+recs = recommend_alpha()  # auto-loads results/pareto_sweep_results.json
 print_recommendations(recs)
 "
 ```
 
-### Individual Module Tests
+---
+
+### 9.4 Unit / Smoke Tests (development)
 
 ```bash
-# Verify model connection (including logprobs support)
+# Verify model connection (logprobs support included)
 python models/model_interface.py
 
-# UQM standalone (logprob vs self_consistency comparison)
+# UQM standalone (logprob, self_consistency, hybrid comparison)
 python models/uqm.py
 
-# RTC + EDE standalone (trigger verification with synthetic UncertaintyResult)
+# RTC + EDE standalone (synthetic UncertaintyResult triggers)
 python models/rtc_ede.py
+
+# Quick import check
+python -c "
+import sys; sys.path.insert(0, '.')
+from experiments.run_all_experiments import build_summary, build_markdown_report
+from models.uqm import UQM
+from models.rtc_ede import RTC, EDE, detect_no_evidence
+print('OK')
+"
 ```
+
+---
+
+### 9.5 Common Issues
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `RuntimeError: fallback 데이터 사용 차단` | `data/raw/medqa_*.jsonl` missing and HF download failed | Restore HF and retry, or `--allow-fallback` (tests only) |
+| `RuntimeError: Calibration n=… < CP 최소 …` | `--strict` mode and `--n-cal` below CP minimum for α | Increase `--n-cal` or `--alpha` (e.g., 0.05→0.10) |
+| `DeprecationWarning: scoring_method='auto'` | audit #21 | Specify explicitly: `--scoring-method logprob` |
+| MedAbstain variant shows `— 케이스 없음` | `data/raw/medabstain_*.jsonl` missing | See `data/README.md` for placement |
+| OpenAI step is SKIP'd | `OPENAI_API_KEY` not set | Add to `.env` or restrict with `--backend lmstudio` |
+| LMStudio agent latency too high | Fixed in audit #17 — older versions need code refresh | `git pull`; verify `agent/nodes.py:_make_llm` |
+| Many `N/A` in result tables | audit #16 — expected for emergency=positives only / routine=negatives only | Report as-is. If CI columns are also empty, denominator was zero. |
+| `[UQM] backend='anthropic'는 logprobs를 반환하지 않습니다` | audit 6.9 — Claude API never returns logprobs | Set `--scoring-method hybrid` or `self_consistency` explicitly. Without `--strict`, UASEF auto-switches. |
+| `[UQM] OPENAI_MODEL='o3-mini'은 logprobs 미지원 패턴` | audit 6.9 — reasoning models do not return logprobs | Switch to `gpt-4o-mini`, or use hybrid mode |
+| `ImportError: anthropic backend requires 'anthropic' package` | audit 6.9 — Anthropic SDK not installed | `pip install 'anthropic>=0.40.0'` or `pip install 'uasef[claude]'` |
+| `Missing GEMINI_API_KEY` | audit 6.9 — Google AI Studio key missing | Get key at <https://aistudio.google.com/apikey> and add to `.env` |
 
 ---
 
