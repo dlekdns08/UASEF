@@ -5,7 +5,7 @@ UASEF Agent Experiment — LangGraph 에이전트 실험 실행기
 결과에 tool_call_count, react_iterations, 도구 사용 내역이 추가됩니다.
 
 실험 구조:
-  [Primary]  OpenAI (GPT-4o-mini) — logprob-based CP
+  [Primary]  OpenAI (GPT-4o) — logprob-based CP
   [Ablation] 로컬 (LMStudio GGUF) — logprob-based CP
   (--scoring-method으로 강제 지정 가능)
 
