@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-05-08T14:38:50.387580",
+  "calib_specialty": "emergency_medicine",
+  "alphas": {
+    "CRITICAL": 0.05,
+    "HIGH": 0.1,
+    "MODERATE": 0.15,
+    "LOW": 0.2
+  },
+  "n_cal": 300,
+  "n_test": 200,
+  "seed": 42,
+  "prevalence": 0.3,
+  "rows": [
+    {
+      "test_specialty": "internal_medicine",
+      "test_stratum": "MODERATE",
+      "calib_specialty": "emergency_medicine",
+      "calib_stratum": "CRITICAL",
+      "lambda": 1.374572009300586,
+      "n_test": 200,
+      "n_pos": 61,
+      "miss_count": 17,
+      "miss_rate": 0.2787,
+      "target_alpha": 0.05,
+      "violation": 0.2287,
+      "ratio_over_target": 5.574
+    },
+    {
+      "test_specialty": "pediatrics",
+      "test_stratum": "HIGH",
+      "calib_specialty": "emergency_medicine",
+      "calib_stratum": "CRITICAL",
+      "lambda": 1.374572009300586,
+      "n_test": 200,
+      "n_pos": 61,
+      "miss_count": 13,
+      "miss_rate": 0.2131,
+      "target_alpha": 0.05,
+      "violation": 0.1631,
+      "ratio_over_target": 4.262
+    },
+    {
+      "test_specialty": "neurology",
+      "test_stratum": "HIGH",
+      "calib_specialty": "emergency_medicine",
+      "calib_stratum": "CRITICAL",
+      "lambda": 1.374572009300586,
+      "n_test": 200,
+      "n_pos": 61,
+      "miss_count": 27,
+      "miss_rate": 0.4426,
+      "target_alpha": 0.05,
+      "violation": 0.3926,
+      "ratio_over_target": 8.852
+    },
+    {
+      "test_specialty": "general_practice",
+      "test_stratum": "LOW",
+      "calib_specialty": "emergency_medicine",
+      "calib_stratum": "CRITICAL",
+      "lambda": 1.374572009300586,
+      "n_test": 200,
+      "n_pos": 61,
+      "miss_count": 32,
+      "miss_rate": 0.5246,
+      "target_alpha": 0.05,
+      "violation": 0.4746,
+      "ratio_over_target": 10.492
+    }
+  ]
+}
