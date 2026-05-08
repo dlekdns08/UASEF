@@ -27,7 +27,12 @@
 #   N_TRIALS         Table 2 FWER simulation (default 5000)
 #   N_PER_STRATUM    Table 3 합성 (default 300)
 #   ALPHA            global α (default 0.10)
-#   SEED             random seed (default 42)
+#   SEED             random seed (default 42; single-run mode)
+#   SEEDS            space-separated multi-seed list for bootstrap (default empty;
+#                    if set, e.g. SEEDS="42 43 44 45 46", the script runs every
+#                    seed in turn and emits results/run_<ts>/aggregate_seeds.{json,md}
+#                    with mean ± std and 95% bootstrap CI per metric. Single-seed
+#                    mode is unaffected when SEEDS is empty.)
 #   SKIP_LLM         1이면 LLM 호출 단계 모두 SKIP (Table 2/3 + pytest만)
 #   SKIP_TESTS       1이면 pytest SKIP
 #   SKIP_V1          1이면 v1 (run_all_experiments) SKIP
@@ -66,6 +71,7 @@ N_TRIALS="${N_TRIALS:-5000}"
 N_PER_STRATUM="${N_PER_STRATUM:-300}"
 ALPHA="${ALPHA:-0.10}"
 SEED="${SEED:-42}"
+SEEDS="${SEEDS:-}"
 SKIP_LLM="${SKIP_LLM:-0}"
 SKIP_TESTS="${SKIP_TESTS:-0}"
 SKIP_V1="${SKIP_V1:-0}"
