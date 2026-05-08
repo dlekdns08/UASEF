@@ -1,0 +1,916 @@
+{
+  "timestamp": "2026-05-08T13:47:57.531775",
+  "mode": "4d",
+  "n_per_stratum": 100,
+  "seed": 42,
+  "ratios": [
+    10,
+    100,
+    1000
+  ],
+  "combinations": [
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 130.0,
+      "round7_total_cost": 106.0,
+      "reduction_ratio": 1.23
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 130.0,
+      "round7_total_cost": 106.0,
+      "reduction_ratio": 1.23
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 130.0,
+      "round7_total_cost": 106.0,
+      "reduction_ratio": 1.23
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 1.83
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 1.83
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 1.83
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 9.33
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 9.33
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 120.0,
+      "reduction_ratio": 9.33
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 1.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 1.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 220.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 1.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 310.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 1.86
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 310.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 1.86
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 310.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 1.86
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 7.32
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 7.32
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1120.0,
+      "round7_total_cost": 153.0,
+      "reduction_ratio": 7.32
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1210.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 7.25
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 2110.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 12.63
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 2110.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 12.63
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 2110.0,
+      "round7_total_cost": 167.0,
+      "reduction_ratio": 12.63
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 580.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 5.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 580.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 5.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 580.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 5.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 5.4
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 5.4
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 5.4
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 12.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 12.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 12.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 4.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 4.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 670.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 4.27
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 760.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 4.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 760.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 4.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 760.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 4.44
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 10.0
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 10.0
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1570.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 10.0
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 1660.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 9.71
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 2560.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 14.97
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 2560.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 14.97
+    },
+    {
+      "ratios": {
+        "CRITICAL": 100,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 2560.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 14.97
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 5080.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 46.18
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 5080.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 46.18
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 5080.0,
+      "round7_total_cost": 110.0,
+      "reduction_ratio": 46.18
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 41.69
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 41.69
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 41.69
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 48.95
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 48.95
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 10,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 124.0,
+      "reduction_ratio": 48.95
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 32.93
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 32.93
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 5170.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 32.93
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 5260.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 30.76
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 5260.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 30.76
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 5260.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 30.76
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 100,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 38.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 38.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 6070.0,
+      "round7_total_cost": 157.0,
+      "reduction_ratio": 38.66
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 100
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 1000
+      },
+      "round6_total_cost": 6160.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 36.02
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 7060.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 41.29
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 100
+      },
+      "round6_total_cost": 7060.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 41.29
+    },
+    {
+      "ratios": {
+        "CRITICAL": 1000,
+        "HIGH": 1000,
+        "MODERATE": 1000,
+        "LOW": 1000
+      },
+      "round6_total_cost": 7060.0,
+      "round7_total_cost": 171.0,
+      "reduction_ratio": 41.29
+    }
+  ],
+  "summary": {
+    "n_combinations": 81,
+    "ratio_grid": [
+      10,
+      100,
+      1000
+    ],
+    "min_reduction": 1.23,
+    "max_reduction": 48.95,
+    "median_reduction": 9.71,
+    "mean_reduction": 17.74
+  }
+}
