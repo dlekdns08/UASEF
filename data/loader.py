@@ -906,6 +906,184 @@ def load_pubmedqa(
     return cases
 
 
+def load_medmcqa(
+    n: int = 100,
+    split: str = "validation",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    MedMCQA 로드 (Indian medical entrance exam, ~194k items).
+
+    HuggingFace: openlifescienceai/medmcqa
+    Has subject_name field (e.g., "Anatomy", "Pediatrics", "Surgery") which
+    we map to specialty → stratum in MEDMCQA_SUBJECT_TO_SPECIALTY below.
+
+    expected_escalate: True for cases marked as exp != 0 (has explanation;
+    proxy for "complex enough to warrant abstention discussion") OR for
+    surgical/emergency-mapped subjects. This is a heuristic ground truth
+    consistent with our MedQA labelling philosophy (cf. §8 L1 of paper).
+    """
+    try:
+        from datasets import load_dataset  # type: ignore
+        ds = load_dataset("openlifescienceai/medmcqa", split=split)
+    except ImportError:
+        if verbose:
+            print("[DataLoader] MedMCQA: datasets 미설치 → pip install datasets")
+        return []
+    except Exception as e:
+        if verbose:
+            print(f"[DataLoader] MedMCQA 로드 실패: {e}")
+        return []
+
+    rng = random.Random(seed)
+    indices = list(range(len(ds)))
+    rng.shuffle(indices)
+
+    cases: list[MedQACase] = []
+    for idx in indices[: min(n, len(indices))]:
+        row = ds[idx]
+        question = row.get("question", "")
+        opts = {
+            "A": row.get("opa", ""),
+            "B": row.get("opb", ""),
+            "C": row.get("opc", ""),
+            "D": row.get("opd", ""),
+        }
+        cop = int(row.get("cop", 0))  # 0..3
+        answer_idx = "ABCD"[cop] if 0 <= cop < 4 else "A"
+        subject = str(row.get("subject_name", "") or "").strip()
+        topic = str(row.get("topic_name", "") or "").strip()
+
+        specialty = MEDMCQA_SUBJECT_TO_SPECIALTY.get(subject, "internal_medicine")
+        # MedMCQA does not carry a meta-info Step1/Step2 field, so we use
+        # specialty alone for stratum derivation. expected_escalate uses the
+        # same keyword-based labeller for consistency with MedQA.
+        _, scenario_type, expected_escalate = _classify_case(question, subject + " " + topic)
+        cases.append(MedQACase(
+            question=question,
+            options=opts,
+            answer_idx=answer_idx,
+            answer=opts.get(answer_idx, ""),
+            meta_info=f"medmcqa/{subject}",
+            expected_escalate=expected_escalate,
+            source="medmcqa",
+            specialty=specialty,
+            scenario_type=scenario_type,
+        ))
+
+    if verbose:
+        esc = sum(1 for c in cases if c.expected_escalate)
+        print(f"[DataLoader] MedMCQA 로드: {len(cases)}개 (escalate={esc})")
+    return cases
+
+
+# Subject (MedMCQA) → specialty mapping. Based on the dataset's subject_name
+# distribution; conservative coverage mapping that funnels surgical & emergency
+# subjects to higher-risk strata.
+MEDMCQA_SUBJECT_TO_SPECIALTY: dict[str, str] = {
+    "Anaesthesia": "emergency_medicine",
+    "Surgery": "surgery",
+    "ENT": "surgery",
+    "Ophthalmology": "surgery",
+    "Orthopaedics": "surgery",
+    "Radiology": "internal_medicine",
+    "Medicine": "internal_medicine",
+    "Pharmacology": "internal_medicine",
+    "Microbiology": "internal_medicine",
+    "Pathology": "internal_medicine",
+    "Pediatrics": "pediatrics",
+    "Gynaecology & Obstetrics": "obstetrics",
+    "Obstetrics & Gynaecology": "obstetrics",
+    "Psychiatry": "psychiatry",
+    "Skin": "dermatology",
+    "Dental": "dermatology",
+    "Forensic Medicine": "preventive_medicine",
+    "Social & Preventive Medicine": "preventive_medicine",
+    "Anatomy": "general_practice",
+    "Physiology": "general_practice",
+    "Biochemistry": "general_practice",
+    "Unknown": "internal_medicine",
+}
+
+
+def load_medqa_usmle_full(
+    split: str = "test",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    Full GBaker/MedQA-USMLE-4-options (no sub-sampling).
+
+    Wraps `_load_from_huggingface(split, n=10**9, seed=seed)` to load every
+    available case in the split. The HF test split is ~1273 cases; the train
+    split is ~10178. Used by Round 7 multi-dataset evaluation when a larger,
+    full-USMLE result is desired.
+    """
+    return _load_from_huggingface(split=split, n=10**9, seed=seed)
+
+
+# ── Unified dataset dispatcher (Round 7) ─────────────────────────────────────
+
+def load_dataset_for_stratification(
+    name: str,
+    n: int,
+    split: str = "test",
+    seed: int = 42,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    Round 7 multi-dataset entry point. Returns a list of MedQACase from one
+    of the supported datasets, **without** filtering by stratum (the caller
+    is responsible for applying SPECIALTY_TO_STRATUM). This decouples
+    dataset choice from the stratum-mapping policy.
+
+    Supported `name`:
+      - "medabstain"        → load_scenarios → MedAbstain variants + MedQA fill
+      - "medqa_usmle"       → MedQA USMLE 4-opt subsample of size `n`
+      - "medqa_usmle_full"  → full MedQA USMLE (split-defined)
+      - "pubmedqa"          → PubMedQA pqa_labeled
+      - "medmcqa"           → MedMCQA
+      - "mimic3"            → guarded MIMIC-III loader (requires authorized data)
+
+    Returns: flat list of MedQACase. Empty list = dataset unavailable.
+    """
+    name = name.lower()
+    if name == "medabstain":
+        # load_scenarios already collects MedAbstain variants + MedQA filler.
+        scenarios = load_scenarios(n_per_scenario=max(1, n // 4), split=split, seed=seed, verbose=verbose)
+        flat: list[MedQACase] = []
+        for cases in scenarios.values():
+            flat.extend(cases)
+        return flat
+    if name == "medqa_usmle":
+        return load_calibration_questions(n=n, split=split, seed=seed)
+    if name == "medqa_usmle_full":
+        return load_medqa_usmle_full(split=split, seed=seed, verbose=verbose)
+    if name == "pubmedqa":
+        return load_pubmedqa(n=n, split=split, seed=seed, verbose=verbose)
+    if name == "medmcqa":
+        return load_medmcqa(n=n, split="validation", seed=seed, verbose=verbose)
+    if name == "mimic3":
+        try:
+            return load_mimic_calibration(n=n, seed=seed)
+        except Exception as e:
+            if verbose:
+                print(f"[DataLoader] MIMIC-III 로드 실패 (PHIRR/credentialed access 필요): {e}")
+            return []
+    raise ValueError(f"알 수 없는 dataset: {name!r}")
+
+
+# Bundle name used by run_full_evaluation.sh for the DATASETS= env var.
+SUPPORTED_DATASETS = (
+    "medabstain",
+    "medqa_usmle",
+    "medqa_usmle_full",
+    "pubmedqa",
+    "medmcqa",
+)
+
+
 def _distribution_source_for(case: MedQACase) -> str:
     """
     audit issue #13: dataset 출처를 더 잘게 표시해 distribution shift를 명확화.
@@ -915,8 +1093,12 @@ def _distribution_source_for(case: MedQACase) -> str:
         return case.source         # medabstain_AP 등 그대로 사용
     if case.source == "pubmedqa":
         return "pubmedqa"
+    if case.source == "medmcqa":
+        return "medmcqa"
     if case.source == "mimic3":
         return "mimic3"
+    if case.source.startswith("medqa"):
+        return "medqa"
     return "medqa"
 
 
