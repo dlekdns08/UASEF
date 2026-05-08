@@ -4,7 +4,7 @@
 # ════════════════════════════════════════════════════════════════════════════
 #
 # 한 번 실행으로:
-#   [1] pytest 137 tests (회귀 안전망)
+#   [1] pytest 140 tests (회귀 안전망)
 #   [2] v1 평가: run_all_experiments.py × {각 backend} (1회 호출 = agent + baseline
 #                                                       + medabstain + pareto 4개 sub 자동 포함)
 #   [3] v2 Round 7 합성 검증: Table 2 (FWER) + Table 3 (cost) — backend 무관, 1회
@@ -86,6 +86,21 @@ SKIP_TESTS="${SKIP_TESTS:-0}"
 SKIP_V1="${SKIP_V1:-0}"
 SKIP_V2_SYN="${SKIP_V2_SYN:-0}"
 SKIP_V2_LLM="${SKIP_V2_LLM:-0}"
+
+# Round 8 P0-2: paper 재현 모드는 fallback 데이터를 절대 허용하지 않는다.
+# UASEF_PAPER_REPRODUCTION=1로 호출하면 data/loader가 fallback 사용 시 즉시 RuntimeError.
+PAPER_REPRO="${UASEF_PAPER_REPRODUCTION:-0}"
+if [ "$PAPER_REPRO" = "1" ]; then
+    export UASEF_PAPER_REPRODUCTION=1
+    # 단위 테스트 외에는 fallback 사용 자체가 의미 없으므로 ALLOW_FALLBACK도 비활성.
+    unset UASEF_ALLOW_FALLBACK || true
+    # data/raw 부재 시 즉시 fail (의도한 동작).
+    if [ ! -f "$ROOT/data/raw/medabstain_AP.jsonl" ] || [ ! -f "$ROOT/data/raw/medabstain_NAP.jsonl" ]; then
+        echo "[error] UASEF_PAPER_REPRODUCTION=1 활성화 — MedAbstain raw JSONL 누락." >&2
+        echo "        bash data/download_datasets.sh 실행 후 다시 시도하세요." >&2
+        exit 1
+    fi
+fi
 
 # ── 환경 ──
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -257,8 +272,15 @@ if [ "$SKIP_V2_LLM" != "1" ]; then
                 > "$RUN_DIR/$B/table1${SUF}_stdout.txt" 2>&1 \
                 && echo "      ✓ Table 1 ($B/$D)" \
                 || echo "      ✗ Table 1 ($B/$D) 실패"
-            [ -f "results/round7/table1_coverage${SUF}.json" ] \
-                && mv "results/round7/table1_coverage${SUF}.json" "results/round7/table1_coverage${SUF}.md" "$RUN_DIR/$B/"
+            # Round 8 P0-1: per-seed copy goes to RUN_DIR; latest backend-named
+            # copy stays in results/round7/ for paper-reproducibility audit
+            # (overwritten on each seed; multi-seed users should use the
+            # aggregate produced by run_multiseed_evaluation.sh).
+            if [ -f "results/round7/table1_coverage${SUF}.json" ]; then
+                cp "results/round7/table1_coverage${SUF}.json" "results/round7/table1_coverage${SUF}_${B}.json"
+                cp "results/round7/table1_coverage${SUF}.md"   "results/round7/table1_coverage${SUF}_${B}.md"
+                mv "results/round7/table1_coverage${SUF}.json" "results/round7/table1_coverage${SUF}.md" "$RUN_DIR/$B/"
+            fi
 
             # Table 4 — head-to-head baseline
             "$PYTHON" experiments/round7_table4_baseline.py \
@@ -268,8 +290,11 @@ if [ "$SKIP_V2_LLM" != "1" ]; then
                 > "$RUN_DIR/$B/table4${SUF}_stdout.txt" 2>&1 \
                 && echo "      ✓ Table 4 ($B/$D)" \
                 || echo "      ✗ Table 4 ($B/$D) 실패"
-            [ -f "results/round7/table4_baseline${SUF}.json" ] \
-                && mv "results/round7/table4_baseline${SUF}.json" "results/round7/table4_baseline${SUF}.md" "$RUN_DIR/$B/"
+            if [ -f "results/round7/table4_baseline${SUF}.json" ]; then
+                cp "results/round7/table4_baseline${SUF}.json" "results/round7/table4_baseline${SUF}_${B}.json"
+                cp "results/round7/table4_baseline${SUF}.md"   "results/round7/table4_baseline${SUF}_${B}.md"
+                mv "results/round7/table4_baseline${SUF}.json" "results/round7/table4_baseline${SUF}.md" "$RUN_DIR/$B/"
+            fi
         done
     done
 else
@@ -394,7 +419,7 @@ for k, v in config.items():
 md.append(f"")
 
 # §0 pytest
-md.append(f"## 0. 회귀 검증 (pytest 137 tests)")
+md.append(f"## 0. 회귀 검증 (pytest 140 tests)")
 md.append(f"")
 if pytest_summary:
     md.append("```")
