@@ -80,6 +80,12 @@ def mcnemar_pvalue(pred_a: list[bool], pred_b: list[bool], labels: list[bool]) -
     H0: methods have equal accuracy.
     Discordant pair = exactly one of (A,B) is correct on a given example.
     """
+    info = mcnemar_info(pred_a, pred_b, labels)
+    return info["p_value"] if info else None
+
+
+def mcnemar_info(pred_a: list[bool], pred_b: list[bool], labels: list[bool]) -> dict | None:
+    """Same as mcnemar_pvalue but returns {b, c, n, p_value} for seed pooling."""
     correct_a = [pa == y for pa, y in zip(pred_a, labels)]
     correct_b = [pb == y for pb, y in zip(pred_b, labels)]
     b = sum(1 for ca, cb in zip(correct_a, correct_b) if ca and not cb)
@@ -87,11 +93,10 @@ def mcnemar_pvalue(pred_a: list[bool], pred_b: list[bool], labels: list[bool]) -
     n = b + c
     if n == 0:
         return None
-    # exact binomial two-sided p-value (Sachs 1984): P(X<=min(b,c)) under Bin(n, 0.5)
     from math import comb
     k = min(b, c)
     tail = sum(comb(n, i) * 0.5**n for i in range(k + 1))
-    return min(1.0, 2.0 * tail)
+    return {"b": int(b), "c": int(c), "n": int(n), "p_value": min(1.0, 2.0 * tail)}
 
 
 def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
@@ -350,12 +355,15 @@ def main():
 
     v2_preds = _preds_for("UASEF Round 7")
     pairwise_pvalues: dict[str, float | None] = {}
+    pairwise_mcnemar_info: dict[str, dict | None] = {}
     for m in methods_results:
         if m["name"].startswith("UASEF Round 7"):
             continue
         other_preds = _preds_for(m["name"])
         if other_preds:
-            pairwise_pvalues[m["name"]] = mcnemar_pvalue(v2_preds, other_preds, test_labels)
+            info = mcnemar_info(v2_preds, other_preds, test_labels)
+            pairwise_pvalues[m["name"]] = info["p_value"] if info else None
+            pairwise_mcnemar_info[m["name"]] = info
 
     # Sanity check #1: identical-confusion-matrix detector across methods.
     # Two distinct methods producing identical (TP, FN, FP, TN) on the
@@ -380,6 +388,10 @@ def main():
         "alpha": args.alpha, "crc_alphas": crc_alphas,
         "methods": methods_results,
         "pairwise_mcnemar_vs_v2": pairwise_pvalues,
+        # Round 8: seed-poolable McNemar info {b, c, n, p_value} per pair.
+        "mcnemar": {
+            f"v2_vs_{name}": info for name, info in pairwise_mcnemar_info.items() if info
+        },
         "sanity_alerts": sanity_alerts,
     }
     suffix = "" if args.dataset == "medabstain" else f"_{args.dataset}"
