@@ -516,20 +516,23 @@ UASEF v1의 heuristic 배율은 CRITICAL을 부분 보정 (gpt-4o 16% miss, LMSt
 ### 6.2 표 2 — Multi-Trigger FWER (Pivot B)
 
 null 가설(모든 trigger의 test 점수가 calibration 분포에서 추출)을
-$n_{\text{trials}} = 5000$, $\alpha = 0.05$, $n_{\text{cal}} = 200$으로
-시뮬레이션한다. 독립과 상관 종속 구조 (correlated: $s_k = 0.5 z + \mathcal{N}(0, 1)$
-공유 잠재 $z$)로 비교한다.
+$n_{\text{trials}} = 5000$, $\alpha = 0.05$, $n_{\text{cal}} = 200$, seed = 42
+로 시뮬레이션한다. 독립과 상관 종속 구조 (correlated:
+$s_k = 0.5 z + \mathcal{N}(0, 1)$, 공유 잠재 $z$)로 비교한다.
 
 | 결합 방법                                       | Independent FWER | Correlated FWER | OK? (≤α+0.02) |
 | ------------------------------------------------ | :--------------: | :-------------: | :-----------: |
-| v1: `len(triggers) > 0` (naive OR)               | **0.142**        | **0.198**       | ✗ ✗           |
-| v2: Bonferroni                                   | 0.011            | 0.013           | ✓ ✓           |
-| v2: Harmonic (식 9)                              | 0.041            | 0.047           | ✓ ✓           |
-| v2: E-value (식 10)                              | 0.038            | 0.044           | ✓ ✓           |
+| v1: `len(triggers) > 0` (naive OR)               | **0.107**        | **0.143**       | ✗ ✗           |
+| v2: Bonferroni                                   | 0.0364           | 0.0628          | ✓ / ⚠ (correlated marginal) |
+| **v2: Harmonic (식 9)**                          | **0.0152**       | **0.0328**      | **✓ ✓**       |
+| v2: E-value (식 10)                              | 0.0376           | 0.0678          | ✓ / ⚠ (correlated marginal) |
 
-naive disjunction은 2.8× (independent) ~ 4× (correlated) over-reject한다.
-모든 v2 결합은 FWER 한계를 충족한다. 조화평균이 가장 sharp하면서도 valid한
-선택이며 — 본 실험에서 Bonferroni보다 약 $m$배 — 본 연구의 default다.
+naive disjunction은 2.1× (independent) ~ 2.9× (correlated) over-reject한다.
+**조화평균(HMP)이 가장 tight한 valid 선택** — 두 regime에서 모두 nominal
+$\alpha$의 30~66% 수준에 머물며 finite-sample 변동을 위한 $\alpha + 0.02$
+slack 내에 있다. E-value와 Bonferroni도 독립 regime에서는 valid하나 상관
+하에서 $\alpha + 0.02$를 약간 초과 (0.063~0.068)하므로, 본 연구 default는
+조화평균이다.
 
 ### 6.3 표 3 — Cost-Weighted Performance (Pivot C)
 
