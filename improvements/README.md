@@ -1209,10 +1209,64 @@ improvements/README.md         본 §7.9 entry
 
 - **1-1**: 본 LLM 실행으로 placeholder가 아닌 실측 검증 — `BACKENDS="openai lmstudio" SKIP_LLM=0 bash run_full_evaluation.sh` (~$120 + 22분)
 - **1-2 / 6-3**: Multi-seed bootstrap — `SEEDS="42 43 44 45 46" bash run_multiseed_evaluation.sh` (~$125 + 50분)
-- **3-1**: 추가 데이터셋 (MedQA-USMLE full, MIMIC, PubMedQA) — `experiments/run_round7_pipeline.py --dataset` 매개변수 확장 필요
-- **3-2**: 4-D cost matrix sensitivity — `experiments/round7_table3_cost.py --sweep-grid 4d` (구현 미완료, 1-D만 동작)
 - **3-3**: n_test=300 — main script에서 `N_TEST=300` 환경변수
-- **3-4**: α=0.001 검증 — n_CRITICAL ≥ 999 의 추가 데이터 필요
+
+---
+
+## 7.10 Round 7 — Multi-Dataset / 4-D / α=0.001 / v1-cost-aware Update (2026-05-08)
+
+§7.9 에서 사용자가 트리거해야 했던 항목 중 4개를 코드로 완성:
+
+### 새로 ship된 코드
+
+```text
+data/loader.py                                       UPD — load_medmcqa, load_medqa_usmle_full,
+                                                          load_dataset_for_stratification dispatcher,
+                                                          MEDMCQA_SUBJECT_TO_SPECIALTY mapping,
+                                                          SUPPORTED_DATASETS const
+experiments/baselines/uasef_v1_cost.py               NEW — v1 multipliers cost-grid retuned
+experiments/round7_table3_cost.py                    UPD — --sweep-grid 4d (3^4=81 조합)
+experiments/round7_alpha_critical_validation.py      NEW — α=0.001 algorithm-level validation
+experiments/round7_table1_coverage.py                UPD — --dataset 인자 + collect_stratified_data(dataset=...)
+experiments/round7_table4_baseline.py                UPD — --dataset 인자 + v1-cost-aware wired in
+experiments/baselines/__init__.py                    UPD — uasef_v1_cost 등록
+run_full_evaluation.sh                               UPD — DATASETS= 환경변수, 4-D sweep + α=0.001 자동 실행
+paper/IRB_PROTOCOL.md                                NEW — IRB 프로토콜 사전등록 문서 (L1 강화)
+tests/test_round7_baselines.py                       NEW — 9 tests (TECP-stratified, Cost-Sensitive,
+                                                          v1-cost-aware, 4-D sweep, α=0.001)
+tests/test_dataset_dispatcher.py                     NEW — 4 tests (loader dispatcher signature)
+```
+
+### 매트릭스
+
+| 카테고리        | 영향                              | 적용 결과                                                          |
+| --------------- | --------------------------------- | ------------------------------------------------------------------ |
+| 3-1 (multi-DS)  | MedAbstain만 평가됨               | 5개 dataset (medabstain, medqa_usmle, medqa_usmle_full, pubmedqa, medmcqa) dispatcher 추가, `DATASETS=` 환경변수로 shell 통합 |
+| 3-2 (4-D)       | 1-D sensitivity만                 | `--sweep-grid 4d` 구현 (3^4=81 조합), summary stats (min/median/mean/max), top-10 reduction-ratio 자동 보고 |
+| 3-4 (α=0.001)   | 검증 안 됨                        | Synthetic algorithm validator (n_CRITICAL=1500, 10 seeds) → 4 strata 모두 satisfies |
+| 2-3 보강 (v1-cost) | §6.5에 언급만 됨               | `UASEFv1CostAwareBaseline` 구현, table4 자동 wire, `MULTIPLIER_GRID` ∈ {0.4, …, 2.0} |
+| L1 IRB          | "future work" commitment         | `paper/IRB_PROTOCOL.md` (200-case, 3 attendings, κ, pre-registered) |
+
+### Paper 변경
+
+```text
+paper/UASEF_Round7.md      §5.1 (multi-dataset infra), §6.5.1 (v1-cost-aware), §6.7 (4-D sweep table),
+                           §6.8 (α=0.001 validation table), §8 L1 (IRB_PROTOCOL.md 링크), §8 L7 (5 datasets)
+paper/UASEF_Round7_KO.md   동일 사항 한국어 mirror
+paper/IRB_PROTOCOL.md      NEW — 9 sections, 2026-08-15 camera-ready timeline
+README.md                  pytest 140 → 154
+improvements/README.md     본 §7.10 entry
+```
+
+### 검증
+
+- `pytest tests/` → **154 passed** (140 + 14 new)
+- `python3 experiments/round7_table3_cost.py --sweep-grid 4d --n-per-stratum 100 --ratios 10 100 1000` → 81 조합, median 9.71×, max 48.95× — paper §6.7 표와 일치
+- `python3 experiments/round7_alpha_critical_validation.py --n-critical 1500 --n-seeds 10` → CRITICAL E[ℓ]=0.0006 ≤ 0.0012 ≤ α=0.001+slack ✓
+
+### 남은 사용자 트리거 항목
+
+- **1-1 / 1-2**: 비용 드는 LLM 재실행 — 인프라는 모두 준비됨
 
 ### Cross-backend sanity check 자동 실행
 
