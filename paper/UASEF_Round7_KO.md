@@ -833,13 +833,21 @@ log-probability에만 의존한다 (Pivot A/B/C 모두 그 신호만 소비) —
 **L1 — Heuristic ground-truth 라벨.** MedQA의 `expected_escalate` 라벨은
 키워드 기반 분류기(cf. `_classify_case`)로 계산되었으며 expert 주석이 아니다.
 보정이 키워드 정렬된 case에 편향될 수 있다. MedAbstain 라벨 (변형 A, AP, NA,
-NAP)은 벤치마크 자체 프로토콜에서 오며 이 문제와 무관하다. *완화책:* 향후
-작업에서 $\ge$ 3명의 attending physician 주석 라벨을 포함하고 inter-rater
-agreement를 보고할 예정이다.
+NAP)은 벤치마크 자체 프로토콜에서 오며 이 문제와 무관하다. *완화책:*
+CRITICAL stratum 200-case sub-sample을 3명의 board-certified 응급의학과
+attending이 재라벨링하는 IRB 신청을 준비 중이며, Cohen's $\kappa$ inter-rater
+agreement를 보고하고 expert 라벨 하의 v2 vs single-α 격차를 재계산할
+예정이다. camera-ready 버전 포함을 commit하며, 목표 제출 시점은 2026년 8월,
+relabeled subset에서 표 1 / 표 4 재실행 — IRB timeline이 늦어지면 named
+follow-up paper로 이월한다.
 
-**L2 — Mock 의료 도구.** 위 §7.4 참조.
+**L2 — Mock 의료 도구.** 위 §7.4 참조. agent 프레임워크는 미래 배포를 위한
+인프라이며, 현재 평가는 LLM의 single-shot 출력만 사용하므로 이 한계와 무관.
 
-**L3 — CRITICAL stratum 표본 크기.** 위 §7.2 참조.
+**L3 — CRITICAL stratum 표본 크기.** 위 §7.2 참조. §3.3에서 언급된
+$\alpha_{\text{CRITICAL}} = 0.001$ 약속은 *aspirational* 보장이며,
+$n_{\text{CRITICAL}} \ge 999$ 를 요구하므로 본 논문에서 검증되지 않는다.
+실증 평가는 $\alpha_s \in [0.05, 0.20]$ 범위로 제한된다.
 
 **L4 — 단일 언어 평가.** 모든 실험은 영어로 수행되었다 — 임상 환경은 종종
 비영어 노트를 포함한다.
@@ -849,7 +857,32 @@ prospective 다중 site 평가가 계획되어 있다.
 
 **L6 — Well-specified 비용 행렬 가정.** 비용 행렬 (11)은 진정한 임상 비용의
 plausible-but-not-validated 대리변수다. §6.3의 sensitivity analysis로 완화하지만
-의존성을 제거하지는 못한다.
+의존성을 제거하지는 못한다. 현재 sensitivity sweep은 1-D (CRITICAL miss-cost
+비율) 이며, 모든 (CRITICAL, HIGH, MODERATE, LOW) miss-cost 비율 조합에 대한
+4-D sweep은 향후 작업으로 — sweep 인프라는
+`experiments/round7_table3_cost.py --sweep-grid 4d` 로 함께 공개.
+
+**L7 — 단일 데이터셋 평가.** 실증 평가는 MedAbstain (n=50/variant) 과
+분포-매칭 합성 데이터 (표 2, 표 3) 로 제한된다. 다른 임상 NLP 벤치마크
+(MIMIC, PubMedQA, MedMCQA, full-MedQA-USMLE) 로의 일반화는 주장하지 않는다.
+`run_full_evaluation.sh` 는 `DATASETS=medabstain,medqa_usmle` 을 받아 자연스러운
+후속 평가를 facilitate한다 — 본 논문은 scope 제어를 위해 MedAbstain만
+보고하며, 20–21× 비용 절감 headline 수치가 MedAbstain 결과이지 임상 NLP
+전반의 주장이 아님을 명시한다.
+
+**L8 — Calibration distribution shift.** 기본 `medqa_routine` calibration
+source (audit 6 issue P18) 는 테스트 케이스가 non-escalation MedQA 케이스와
+stratum-conditioned shift까지의 동일 분포를 공유한다고 가정한다. 심한
+distribution shift — 예: 성인 내과로 calibration한 후 소아 ED 노트에 배포 —
+는 재보정을 요구한다. 프레임워크는 이 재보정을 지원하지만 *언제 필요한지*
+자동 검출하지는 *않는다* — 프로덕션 배포는 UASEF v2를 drift detection
+layer와 결합해야 한다 (`improvements/README.md` issue P-future-1 참조).
+
+**L9 — Single-seed 보고.** 표 1 과 표 4 는 backend별 single seed (42) 로
+보고된다. 표 2 와 표 3 은 내부적으로 5,000 trial을 사용해 이미 경험적 CI를
+가지지만 LLM 호출 기반 표는 그렇지 않다. multi-seed bootstrap 인프라
+(`SEEDS="42 43 44 45 46" run_full_evaluation.sh`) 가 본 제출과 함께 공개되며,
+camera-ready 시점에 5–10 seed bootstrap interval로 재발행할 것을 commit한다.
 
 ---
 
