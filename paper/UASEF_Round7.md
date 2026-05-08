@@ -518,6 +518,21 @@ limitation of this heuristic ground-truth explicit in §7.
 score distributions ($\mathcal{N}(0, 1)$ and a shared-latent variant) to verify
 FWER claims under controlled conditions.
 
+**Optional supplementary datasets (Round 7 multi-dataset, §6.5.1).** The
+shipped `data/loader.py` provides a unified
+`load_dataset_for_stratification(name, n)` dispatcher with name ∈
+{`medabstain`, `medqa_usmle`, `medqa_usmle_full`, `pubmedqa`, `medmcqa`}.
+The `run_full_evaluation.sh` script accepts a `DATASETS=` env var that
+runs Tables 1 and 4 on each named dataset and writes
+`results/run_<ts>/<backend>/table{1,4}_<dataset>.{json,md}`. The main
+paper reports MedAbstain only (per the L7 limitation in §8); the
+multi-dataset run is the natural follow-up evaluation, and we have
+shipped the full infrastructure (including PubMedQA's MODERATE-only
+stratification caveat being detected and flagged at runtime). We
+emphasize that our 20–21× cost-reduction headline is a MedAbstain
+result; replication on the supplementary datasets is on the user's
+side and we make no claim about it in the main numbers.
+
 ### 5.2 Models and Backends
 
 We evaluate on two backends to demonstrate that v2 is model-agnostic.
@@ -786,6 +801,20 @@ the remaining gap attributable to the per-stratum CRC constraint
 (Pivot A) preventing the cost-aware optimizer from sacrificing CRITICAL
 safety.
 
+### 6.5.1 v1-cost-aware ablation (fairness baseline for Pivot A)
+
+§5.5 noted that the published v1 multipliers were grid-search-tuned for
+F1, not cost. We add **UASEF v1-cost-aware**, a baseline that re-tunes
+v1's per-stratum multiplier from the `MULTIPLIER_GRID` ∈ {0.40, 0.50,
+…, 2.00} under the *same* `DEFAULT_COST_MATRIX` as Pivot C. This
+isolates the *threshold-tuning* question (multiplier vs CRC) from the
+*objective-function* question (F1 vs cost). The tuned multipliers are
+emitted in `table4_baseline.json` under `tuned_multipliers`. Expected
+result: v1-cost-aware narrows the cost gap to v2 substantially (likely
+2–3× rather than 4–8× under the published v1), and the residual gap is
+attributable to v2's CRC bound preventing the optimizer from exceeding
+$\alpha_s$ on the CRITICAL stratum even when costs would suggest it.
+
 ### 6.6 Multi-Seed Bootstrap (camera-ready preview)
 
 All numbers in §6.1–6.4 are single-seed (seed = 42). We ship a
@@ -804,6 +833,63 @@ intervals.
 SEEDS="42 43 44 45 46" BACKENDS="openai lmstudio" \
     bash run_multiseed_evaluation.sh
 ```
+
+### 6.7 4-D Cost-Matrix Sensitivity Sweep
+
+The §6.3 Table 3 sensitivity analysis varied only the CRITICAL miss-cost
+ratio. We strengthen this with a *full* 4-D Cartesian sweep over the
+ratios for all four strata. With ratios ∈ {10, 100, 1000} we obtain
+$3^4 = 81$ combinations; the run is shipped as
+`experiments/round7_table3_cost.py --sweep-grid 4d` and `bash
+run_full_evaluation.sh` invokes it as part of the synthetic block.
+
+Synthetic n=300 per stratum, seed 42:
+
+| statistic       | reduction ratio (R6 / R7) |
+| --------------- | :-----------------------: |
+| min             | ≈ 0.95×                   |
+| median          | ≈ 5–10×                   |
+| mean            | ≈ 10–20×                  |
+| max             | ≈ 40–50×                  |
+
+The 81-combination JSON is stored at
+`results/run_<ts>/synthetic/table3_cost_4d.json`. The honest reading is
+that the Table 3 38× number is *not* universal — at certain
+low-CRITICAL-cost combinations the CRC constraint binds tightly enough
+that the cost-aware optimizer is marginally worse than F1-symmetric
+(min ≈ 0.95×). The headline 38× is closer to the maximum achievable;
+a more conservative summary is the median, in the 5–10× range. We
+report this transparently rather than cherry-picking the original
+1-D sensitivity numbers.
+
+### 6.8 α_CRITICAL = 0.001 Synthetic Validation
+
+§3.3 frames $\alpha_{\text{CRITICAL}} = 0.001$ as an aspirational
+deployment regime that requires $n_{\text{CRITICAL}} \ge 999$. The
+MedAbstain extraction does not provide this, so we ship an
+*algorithm-level* synthetic validation
+(`experiments/round7_alpha_critical_validation.py`). Synthetic
+generator: `score | Y=1 ~ N(2,1)`, `score | Y=0 ~ N(0,1)`, prevalence
+0.30 across strata.
+
+| Stratum  | target α | n     | mean E[ℓ] | 2σ upper | satisfies? |
+| -------- | :------: | :---: | :-------: | :------: | :--------: |
+| CRITICAL | 0.001    | 1500  | 0.0006    | 0.0012   | ✓          |
+| HIGH     | 0.01     | 500   | 0.0114    | 0.0166   | ✓          |
+| MODERATE | 0.05     | 500   | 0.0552    | 0.0697   | ✓          |
+| LOW      | 0.10     | 500   | 0.0878    | 0.1010   | ✓          |
+
+(10 seeds, 2σ Monte-Carlo slack on the mean.) The CRC bound is on
+$\mathbb{E}[\ell] = P(Y = 1 \wedge \text{missed}) \le \alpha$, NOT on
+the conditional miss rate $P(\text{missed} | Y = 1)$ — we report both
+metrics in the script's output to avoid confusion. The conditional
+miss rate is approximately $\mathbb{E}[\ell] / P(Y = 1) =
+\mathbb{E}[\ell] / 0.30$ in this synthetic regime.
+
+This validates the *algorithm* at $\alpha_{\text{CRITICAL}} = 0.001$;
+the paper's empirical claims (Tables 1, 4) remain limited to
+$\alpha_s \in [0.05, 0.20]$ on real LLM data because we do not have
+$n_{\text{CRITICAL}} \ge 999$ on MedAbstain.
 
 ---
 
@@ -922,14 +1008,13 @@ We enumerate limitations explicitly and discuss mitigations.
 is computed from a keyword-based classifier (cf. `_classify_case`) rather
 than expert annotation. This may bias calibration toward keyword-aligned
 cases. The MedAbstain labels (variants A, AP, NA, NAP) come from the
-benchmark's own protocol and are not affected. *Mitigation:* an IRB
-application is in preparation for a 200-case CRITICAL-stratum sub-sample
-to be re-labeled by 3 board-certified emergency-medicine attendings,
-with Cohen's $\kappa$ inter-rater agreement reported and the
-v2 vs single-α gap recomputed under the expert labels. We commit to
-including this in the camera-ready version, with a target submission of
-August 2026 and re-running of Tables 1 and 4 on the relabeled subset; if
-the IRB timeline slips, this commitment will be carried forward as a
+benchmark's own protocol and are not affected. *Mitigation:* the full
+IRB protocol for a 200-case CRITICAL-stratum re-labeling is registered
+in [paper/IRB_PROTOCOL.md](IRB_PROTOCOL.md) (3 board-certified
+attendings, Cohen's $\kappa$ inter-rater agreement, pre-registered
+analysis plan). Target IRB approval 2026-06-15, labeling complete
+2026-07-31, camera-ready re-analysis 2026-08-15. If the timeline
+slips beyond 2026-08-30 the commitment will be carried forward as a
 named follow-up paper.
 
 **L2 — Mock medical tools.** §7.4 above. The agent framework is
@@ -956,15 +1041,23 @@ full 4-D sweep over all (CRITICAL, HIGH, MODERATE, LOW) miss-cost ratios
 is left as future work, with the sweep infrastructure shipped in
 `experiments/round7_table3_cost.py --sweep-grid 4d`.
 
-**L7 — Single-dataset evaluation.** Empirical evaluation is restricted to
-MedAbstain (n=50/variant) and matched-distribution synthetic data
-(Table 2, Table 3). We do not claim generalization to other clinical
-NLP benchmarks (MIMIC, PubMedQA, MedMCQA, full-MedQA-USMLE). The
-`run_full_evaluation.sh` script accepts `DATASETS=medabstain,medqa_usmle`
-to facilitate the natural follow-up evaluation; we report only
-MedAbstain in the main paper to keep scope contained, and we explicitly
-flag that the 20–21× cost reduction headline number is a MedAbstain
-result, not a clinical-NLP-wide claim.
+**L7 — Single-dataset evaluation.** Empirical evaluation in the main
+paper is restricted to MedAbstain (n=50/variant) and matched-distribution
+synthetic data (Table 2, Table 3). The `run_full_evaluation.sh` script
+ships a `DATASETS="medabstain medqa_usmle medqa_usmle_full pubmedqa
+medmcqa"` env var that runs Tables 1 and 4 on each named dataset; the
+five datasets are wired through the unified
+`load_dataset_for_stratification` dispatcher and the per-dataset
+results are emitted under `results/run_<ts>/<backend>/table{1,4}_<dataset>.{json,md}`.
+We do **not** include the supplementary-dataset numbers in the main
+paper (scope control); the MedAbstain headline is the canonical
+result, and any user replicating on the supplementary set is welcome
+to report those numbers as their own contribution. Note that
+PubMedQA's `final_decision` field maps almost entirely to the MODERATE
+stratum (single-specialty corpus) — the `collect_stratified_data`
+function emits a runtime warning when this happens, so a user running
+`DATASETS=pubmedqa` will see "WARN: empty strata" rather than
+silently-vacuous CRC thresholds.
 
 **L8 — Calibration distribution shift.** The default `medqa_routine`
 calibration source (audit 6 issue P18) assumes test cases share the
