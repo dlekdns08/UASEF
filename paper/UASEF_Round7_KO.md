@@ -317,11 +317,16 @@ $$\mathbb{E}\big[\ell(\hat \lambda_s, X_{\text{test}}, Y_{\text{test}}) \,\big|\
 적용한다. $\sigma$가 결정적이고 calibration과 test 점 모두에 적용되므로
 교환가능성이 보존된다. □
 
-**실용적 고려사항.** CRC가 비-자명한 보장을 갖기 위해서는 stratum별로
-$n_s \ge \lceil (1-\alpha_s)/\alpha_s \rceil$ 표본이 필요하다.
-$\alpha_{\text{CRITICAL}} = 0.001$이면 $n_{\text{CRITICAL}} \ge 999$가 되며,
-이는 본 실험 환경에서 가장 큰 데이터 비용 항목이다. §5에서 시사점을 논의하고,
-경계 미충족 시 silent failure가 아닌 strict-mode 오류를 제공한다.
+**실용적 고려사항과 검증된 regime.** CRC가 비-자명한 보장을 갖기 위해서는
+stratum별로 $n_s \ge \lceil (1-\alpha_s)/\alpha_s \rceil$ 표본이 필요하다.
+$\alpha_{\text{CRITICAL}} = 0.001$이면 $n_{\text{CRITICAL}} \ge 999$가 된다.
+**본 논문에서는 $\alpha_{\text{CRITICAL}} = 0.001$을 검증하지 *않는다*.**
+실증 평가는 $\alpha_s \in [0.05, 0.20]$ (구체적으로 CRITICAL=0.05, HIGH=0.10,
+MODERATE=0.15, LOW=0.20 — §6.1 참조) 만을 대상으로 한다. $\alpha_{\text{CRITICAL}}
+= 0.001$ 배포는 기관별 calibration 데이터 $n \ge 999$를 요구하며 본 논문 범위
+밖이다. 프레임워크는 이 regime을 *지원* (strict-mode `StratifiedConformalRiskControl`
+클래스가 제약 위반 시 `RuntimeError` 발생) 하지만 99.9% bound는 본 논문의
+실증 주장이 아니다.
 
 **구현.** [`models/stratified_crc.py`](../models/stratified_crc.py).
 `StratifiedConformalRiskControl(alphas, loss_fn, strict)` 클래스가
@@ -514,7 +519,24 @@ stratum별 및 전체에 대해 다음을 보고한다.
 - **Semantic Entropy** [Farquhar et al., 2024]: meaning-cluster Shannon
   entropy를 비적합으로 하는 split CP.
 - **UASEF v1** (Round 6.10): NLL 비적합, 단일 전역 $\alpha$, 사후 위험도 배율
-  (CRITICAL=0.60, HIGH=0.75, MODERATE=1.00, LOW=1.30) 적용.
+  (CRITICAL=0.60, HIGH=0.75, MODERATE=1.00, LOW=1.30) 적용. **배율의 출처.**
+  Round 6 audit 사이클에서 200-case held-out calibration sub-sample 위에서
+  $\{0.5, 0.6, 0.7, 0.75, 0.8, 1.0, 1.2, 1.3, 1.5\}$ 위에 *coarse grid search*
+  로 결정 — CRITICAL/HIGH의 F1을 최적화하고 MODERATE/LOW 배율은 변경 없이
+  채택. v2 평가에서 추가 hyperparameter tuning은 *없으며*, 본 연구는 발표된
+  v1 구성의 apples-to-apples 재현을 위해 그대로 사용한다. v1이 *cost-aware*
+  목적 함수로 다시 튜닝되지 않았음을 명시한다 — Pivot C와 동일한 비용 행렬로
+  v1을 재튜닝하면 CRITICAL recall이 상승할 것이지만 (§6.3 sensitivity sweep
+  기준 ~0.92로 추정), 그 결과는 더 이상 "발표된 그대로의 v1" 이 아니다.
+  cost-tuned v1 변형은 §6.5에서 추가 비교군 ("v1-cost-aware") 으로 제공한다.
+- **TECP-stratified** (본 연구, §6.4.4 ablation): TECP를 stratum별 별도
+  calibration set 과 stratum별 임계값으로, Pivot A와 동일한 $\alpha_s$로
+  수행. 이는 *stratification 자체* 의 기여를 v2 파이프라인 (multi-trigger
+  결합 + cost-aware 최적화) 의 나머지 기여로부터 분리한다.
+- **Cost-Sensitive baseline** (본 연구, §6.5 ablation): Pivot C와 같은 기대
+  비용을 최소화하도록 임계값을 튜닝하는 single-stratum CP — 즉 stratification
+  없는 cost-weighted 스칼라 임계값. 이는 Pivot C의 stratum별 이득을
+  cost-sensitive thresholding의 일반 이득과 분리한다.
 - **UASEF v2** (본 연구): 알고리즘 3.
 
 ---
@@ -527,9 +549,10 @@ stratum별 및 전체에 대해 다음을 보고한다.
 $n_{\text{cal}} = n_{\text{test}} = 200$으로 held-out test set의 stratum별
 경험적 missed-escalation rate를 측정한다. 목표 비율:
 $\alpha_{\text{CRITICAL}} = 0.05$, $\alpha_{\text{HIGH}} = 0.10$,
-$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$. 논문 quality
-목표 $\alpha_{\text{CRITICAL}} = 0.001$은 $n_{\text{CRITICAL}} \ge 999$를
-요구 — §7 참조.
+$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$. **이 4개 값이
+본 논문에서 검증되는 전체 실증 regime을 정의한다.** $\alpha_{\text{CRITICAL}}
+= 0.001$은 본 논문에서 검증하지 *않는다* ($n_{\text{CRITICAL}} \ge 999$ 요구
+— §3.3, §7.2 참조 — 기관별 배포에 위임).
 
 #### 6.1.1 OpenAI gpt-4o
 
