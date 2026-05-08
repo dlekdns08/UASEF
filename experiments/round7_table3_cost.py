@@ -158,16 +158,54 @@ def main():
     out_dir = ROOT / "results" / "round7"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── 4-D Cartesian sweep mode ──
+    if args.sweep_grid == "4d":
+        result = run_4d_sweep(args.n_per_stratum, args.seed, args.ratios)
+        payload_4d = {
+            "timestamp": datetime.now().isoformat(),
+            "mode": "4d",
+            "n_per_stratum": args.n_per_stratum,
+            "seed": args.seed,
+            "ratios": args.ratios,
+            **result,
+        }
+        (out_dir / "table3_cost_4d.json").write_text(
+            json.dumps(payload_4d, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        s = result["summary"]
+        md = [
+            "# Round 7 Table 3 — 4-D Cost-Matrix Sweep\n",
+            f"- n_per_stratum={args.n_per_stratum}, seed={args.seed}, "
+            f"ratio grid={args.ratios} → {s['n_combinations']} combinations\n",
+            "## Reduction-ratio statistics\n",
+            f"- min: **{s['min_reduction']}×**",
+            f"- median: **{s['median_reduction']}×**",
+            f"- mean: **{s['mean_reduction']}×**",
+            f"- max: **{s['max_reduction']}×**",
+            "",
+            "## Per-combination (top 10 by reduction)",
+            "| CRIT:over | HIGH:over | MOD:over | LOW:over | R6 cost | R7 cost | reduction |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        rows_sorted = sorted(
+            (r for r in result["combinations"] if r["reduction_ratio"] is not None),
+            key=lambda r: -r["reduction_ratio"],
+        )
+        for row in rows_sorted[:10]:
+            r = row["ratios"]
+            md.append(
+                f"| {r['CRITICAL']}:1 | {r['HIGH']}:1 | {r['MODERATE']}:1 | {r['LOW']}:1 | "
+                f"{row['round6_total_cost']:.0f} | {row['round7_total_cost']:.0f} | "
+                f"{row['reduction_ratio']}× |"
+            )
+        (out_dir / "table3_cost_4d.md").write_text("\n".join(md), encoding="utf-8")
+        print("\n".join(md))
+        print(f"\n✅ saved: {out_dir}/table3_cost_4d.{{json,md}}")
+        return
+
+    # ── 1-D mode (original Table 3) ──
     # 합성 데이터: 4 stratum × n_per
-    random.seed(args.seed)
-    sb, lb = {}, {}
-    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
-                          ("MODERATE", 0.10), ("LOW", 0.05)]:
-        sb[stratum], lb[stratum] = [], []
-        for _ in range(args.n_per_stratum):
-            l = random.random() < base
-            s = random.gauss(2.0 if l else 0.0, 1.0)
-            sb[stratum].append(s); lb[stratum].append(l)
+    sb, lb = _generate_synthetic(args.n_per_stratum, args.seed)
 
     # ── Round 6: F1-symmetric per stratum ────────────────────────────────
     round6_rows = []
