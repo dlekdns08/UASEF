@@ -140,23 +140,21 @@ def main():
     parser.add_argument("--n-test", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--alpha", type=float, default=0.10)
+    from data.loader import SUPPORTED_DATASETS  # local import to avoid mod-load cost
+    parser.add_argument(
+        "--dataset", default="medabstain",
+        choices=list(SUPPORTED_DATASETS),
+        help="Dataset for evaluation (passed to round7_table1.collect_stratified_data).",
+    )
     args = parser.parse_args()
 
     out_dir = ROOT / "results" / "round7"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 데이터 수집 (table1과 동일 함수) ────────────────────────────────
-    if args.reuse_table1 and (out_dir / "table1_coverage.json").exists():
-        print("[reuse] table1 데이터 재활용")
-        d1 = json.loads((out_dir / "table1_coverage.json").read_text())
-        # table1은 결과만 저장하므로 raw scores를 별도로 다시 수집
-        from experiments.round7_table1_coverage import collect_stratified_data
-        cal_data = collect_stratified_data(args.backend, args.n_cal, args.seed)
-        test_data = collect_stratified_data(args.backend, args.n_test, args.seed + 1000)
-    else:
-        from experiments.round7_table1_coverage import collect_stratified_data
-        cal_data = collect_stratified_data(args.backend, args.n_cal, args.seed)
-        test_data = collect_stratified_data(args.backend, args.n_test, args.seed + 1000)
+    from experiments.round7_table1_coverage import collect_stratified_data
+    cal_data = collect_stratified_data(args.backend, args.n_cal, args.seed, dataset=args.dataset)
+    test_data = collect_stratified_data(args.backend, args.n_test, args.seed + 1000, dataset=args.dataset)
 
     methods_results = []
 
