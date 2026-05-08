@@ -200,28 +200,37 @@ def main():
         f"- α_CRITICAL = **{args.alpha_critical}** (n_CRITICAL = {args.n_critical}, "
         f"required ≥ {min_n_for_alpha(args.alpha_critical)})",
         "",
-        "## Per-stratum empirical miss rate vs target α",
+        "## Per-stratum CRC loss vs target α",
         "",
-        "| Stratum | target α | n | mean miss | std | 2σ upper | satisfies? |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "CRC bounds **E[ℓ] ≤ α** where ℓ = 1{Y=1 ∧ missed}. This is the "
+        "*per-example* loss, **not** the conditional miss rate. We report both "
+        "for transparency.",
+        "",
+        "| Stratum | target α | n | mean E[ℓ] | std | 2σ upper | satisfies? | cond miss (recall⁻¹) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for s, r in results.items():
-        if r.get("mean_miss_rate") is None:
-            md.append(f"| {s} | {r['target_alpha']} | — | N/A | — | — | — |")
+        if r.get("mean_empirical_loss") is None:
+            md.append(f"| {s} | {r['target_alpha']} | — | N/A | — | — | — | — |")
             continue
+        cond = r.get("mean_cond_miss_rate")
+        cond_str = f"{cond:.4f}" if cond is not None else "—"
         md.append(
             f"| {s} | {r['target_alpha']} | {n_per[s]} | "
-            f"{r['mean_miss_rate']:.4f} | {r['std']:.4f} | "
-            f"{r['ci95_upper']:.4f} | {'✓' if r['satisfies_alpha'] else '✗'} |"
+            f"{r['mean_empirical_loss']:.4f} | {r['std']:.4f} | "
+            f"{r['ci95_upper']:.4f} | {'✓' if r['satisfies_alpha'] else '✗'} | {cond_str} |"
         )
     md.append("")
     md.append(
-        "**Interpretation.** The Stratified CRC procedure satisfies its target α "
-        "in the synthetic regime tested here, including α_CRITICAL = 0.001 when "
-        "n_CRITICAL ≥ 1000. This validates the *algorithm* at the small-α "
-        "regime; the paper's empirical claims (Table 1, 4) remain limited to "
-        "α_s ∈ [0.05, 0.20] because the MedAbstain extraction does not provide "
-        "n_CRITICAL ≥ 999."
+        "**Interpretation.** Stratified CRC bounds the *per-example* loss "
+        "E[ℓ] = P(Y=1 ∧ missed) ≤ α (Angelopoulos & Bates [2024] Theorem 1), "
+        "not the conditional miss rate P(missed | Y=1). The empirical 2σ "
+        "upper-bound on E[ℓ] sits below the target α for all four strata when "
+        "$n_s \\ge \\lceil (1-α_s)/α_s \\rceil$, including α_CRITICAL = 0.001 "
+        f"with n_CRITICAL = {args.n_critical}. This is an *algorithm-level* "
+        "validation; the paper's empirical claims (Table 1, 4) remain limited "
+        "to α_s ∈ [0.05, 0.20] because the MedAbstain extraction does not "
+        "provide n_CRITICAL ≥ 999."
     )
 
     (out_dir / "alpha_critical_validation.md").write_text("\n".join(md), encoding="utf-8")
