@@ -47,6 +47,7 @@ from experiments.baselines.tecp_stratified import TECPStratifiedBaseline
 from experiments.baselines.quach2024 import Quach2024Baseline
 from experiments.baselines.semantic_entropy import SemanticEntropyBaseline
 from experiments.baselines.cost_sensitive import CostSensitiveBaseline
+from experiments.baselines.uasef_v1_cost import UASEFv1CostAwareBaseline
 
 # scipy.stats.roc_auc_score does not exist; use sklearn or compute manually.
 try:
@@ -285,6 +286,35 @@ def main():
         test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
     ))
 
+    # ── UASEF v1-cost-aware (Round 7 ablation) ──────────────────────────
+    # v1 multipliers retuned under the same DEFAULT_COST_MATRIX as Pivot C.
+    # Removes "v1 was tuned for F1, not cost" reviewer objection.
+    v1_cost = UASEFv1CostAwareBaseline(alpha=args.alpha, cost_matrix=DEFAULT_COST_MATRIX)
+    v1_cost.fit(cal_data["all_scores"], cal_data["all_labels"], cal_data["all_strata"])
+    res_v1cost_per: dict = {}
+    total_cost_v1cost = 0.0
+    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
+        n_pos = sum(test_data["all_labels"][i] for i in idx)
+        n_neg = sum(1 for i in idx if not test_data["all_labels"][i])
+        tp = sum(test_data["all_labels"][i] and v1_cost.predict(test_data["all_scores"][i], stratum) for i in idx)
+        fn = sum(test_data["all_labels"][i] and not v1_cost.predict(test_data["all_scores"][i], stratum) for i in idx)
+        fp = sum((not test_data["all_labels"][i]) and v1_cost.predict(test_data["all_scores"][i], stratum) for i in idx)
+        recall = tp / (tp + fn) if (tp + fn) else None
+        over = fp / n_neg if n_neg else None
+        cm = DEFAULT_COST_MATRIX[stratum]
+        cost = cm["miss"] * fn + cm["over_esc"] * fp
+        total_cost_v1cost += cost
+        res_v1cost_per[stratum] = {
+            "n": len(idx), "n_pos": n_pos, "safety_recall": recall, "over_esc_rate": over,
+            "tp": tp, "fn": fn, "fp": fp, "cost": cost,
+        }
+    methods_results.append({
+        "name": "UASEF v1-cost-aware (this work, Round 7 ablation)",
+        "per_stratum": res_v1cost_per, "total_cost": total_cost_v1cost, "auroc": None,
+        "tuned_multipliers": v1_cost.multipliers,
+    })
+
     # ── Cross-backend & paired-comparison sanity checks ─────────────────
     sanity_alerts: list[str] = []
 
@@ -314,6 +344,8 @@ def main():
             return [tecp_str.predict(test_scores[i], test_strata[i]) for i in range(test_n)]
         if method_name.startswith("Cost-Sensitive"):
             return [cost_baseline.predict(test_scores[i]) for i in range(test_n)]
+        if method_name.startswith("UASEF v1-cost-aware"):
+            return [v1_cost.predict(test_scores[i], test_strata[i]) for i in range(test_n)]
         return []
 
     v2_preds = _preds_for("UASEF Round 7")
