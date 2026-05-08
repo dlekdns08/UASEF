@@ -43,14 +43,54 @@ from models.conformal_combination import TriggerCalibrator, MultiTriggerConforma
 from models.cost_aware_calibration import sweep_cost_aware_per_stratum, DEFAULT_COST_MATRIX
 
 from experiments.baselines.tecp import TECPBaseline
+from experiments.baselines.tecp_stratified import TECPStratifiedBaseline
 from experiments.baselines.quach2024 import Quach2024Baseline
 from experiments.baselines.semantic_entropy import SemanticEntropyBaseline
+from experiments.baselines.cost_sensitive import CostSensitiveBaseline
 
+# scipy.stats.roc_auc_score does not exist; use sklearn or compute manually.
 try:
-    from scipy.stats import roc_auc_score
-    HAS_SCIPY = True
+    from sklearn.metrics import roc_auc_score
+    HAS_AUROC = True
 except ImportError:
-    HAS_SCIPY = False
+    HAS_AUROC = False
+
+
+def _manual_auroc(labels: list[bool], scores: list[float]) -> float | None:
+    """Compute AUROC by ranking, no sklearn dependency."""
+    pos = [s for s, y in zip(scores, labels) if y]
+    neg = [s for s, y in zip(scores, labels) if not y]
+    if not pos or not neg:
+        return None
+    wins = 0
+    for p in pos:
+        for n in neg:
+            if p > n:
+                wins += 1
+            elif p == n:
+                wins += 0.5
+    return wins / (len(pos) * len(neg))
+
+
+def mcnemar_pvalue(pred_a: list[bool], pred_b: list[bool], labels: list[bool]) -> float | None:
+    """
+    Two-sided exact-binomial McNemar test for paired binary classifiers.
+    Returns p-value or None if not enough discordant pairs.
+    H0: methods have equal accuracy.
+    Discordant pair = exactly one of (A,B) is correct on a given example.
+    """
+    correct_a = [pa == y for pa, y in zip(pred_a, labels)]
+    correct_b = [pb == y for pb, y in zip(pred_b, labels)]
+    b = sum(1 for ca, cb in zip(correct_a, correct_b) if ca and not cb)
+    c = sum(1 for ca, cb in zip(correct_a, correct_b) if cb and not ca)
+    n = b + c
+    if n == 0:
+        return None
+    # exact binomial two-sided p-value (Sachs 1984): P(X<=min(b,c)) under Bin(n, 0.5)
+    from math import comb
+    k = min(b, c)
+    tail = sum(comb(n, i) * 0.5**n for i in range(k + 1))
+    return min(1.0, 2.0 * tail)
 
 
 def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
@@ -74,13 +114,16 @@ def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
             "tp": tp, "fn": fn, "fp": fp, "cost": cost,
         }
 
-    auroc = None
-    if HAS_SCIPY:
+    # AUROC: prefer sklearn if available, otherwise rank-based fallback.
+    if HAS_AUROC:
         try:
-            preds = [int(predictor_fn(scores[i])) for i in range(len(scores))]
-            auroc = round(float(roc_auc_score(labels, preds)), 4)
+            auroc = round(float(roc_auc_score(labels, scores)), 4)
         except Exception:
-            pass
+            auroc = _manual_auroc(labels, scores)
+            auroc = round(auroc, 4) if auroc is not None else None
+    else:
+        man = _manual_auroc(labels, scores)
+        auroc = round(man, 4) if man is not None else None
 
     return {
         "name": name, "per_stratum": per_stratum,
