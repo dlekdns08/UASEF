@@ -29,7 +29,12 @@ load_dotenv(ROOT / ".env")
 from models.uqm import UQM, ConformalCalibrator, compute_nonconformity_score
 from models.stratified_crc import StratifiedConformalRiskControl
 from models.model_interface import query_model
-from data.loader import load_calibration_questions, load_scenarios
+from data.loader import (
+    load_calibration_questions,
+    load_scenarios,
+    load_dataset_for_stratification,
+    SUPPORTED_DATASETS,
+)
 from experiments.baselines.tecp import TECPBaseline
 
 
@@ -43,32 +48,77 @@ SPECIALTY_TO_STRATUM = {
 }
 
 
-def collect_stratified_data(backend: str, n_per_stratum: int, seed: int) -> dict:
-    """LLM 호출로 stratum별 (score, label) 수집."""
-    print(f"\n[Phase 1] Calibration scores 수집 ...")
+def _flatten_scenarios_to_strata(scenario_map: dict[str, list]) -> list:
+    """Helper: scenario_map -> flat list of MedQACase (preserves all specialties)."""
+    out: list = []
+    for cases in scenario_map.values():
+        out.extend(cases)
+    return out
+
+
+def collect_stratified_data(
+    backend: str,
+    n_per_stratum: int,
+    seed: int,
+    dataset: str = "medabstain",
+) -> dict:
+    """
+    LLM 호출로 stratum별 (score, label) 수집.
+
+    Args:
+        dataset: one of `data.loader.SUPPORTED_DATASETS`.
+                 - "medabstain"        (default; original behavior — uses load_scenarios)
+                 - "medqa_usmle"       (USMLE 4-options sub-sample)
+                 - "medqa_usmle_full"  (full HF split)
+                 - "pubmedqa"          (mostly MODERATE stratum; flagged)
+                 - "medmcqa"           (subject_name → specialty mapping)
+    """
+    print(f"\n[Phase 1] Calibration scores 수집 (dataset={dataset}) ...")
     sys_prompt = UQM.SYSTEM_PROMPT
-    scenario_map = load_scenarios(n_per_scenario=n_per_stratum, split="test", seed=seed)
+
+    if dataset == "medabstain":
+        scenario_map = load_scenarios(n_per_scenario=n_per_stratum, split="test", seed=seed)
+        cases = _flatten_scenarios_to_strata(scenario_map)
+    else:
+        # Heuristic: total target ≈ 4 × n_per_stratum so that on average each
+        # stratum has ~n_per_stratum samples (some strata may be sparse for
+        # PubMedQA / MedMCQA — flagged in output).
+        cases = load_dataset_for_stratification(
+            name=dataset, n=4 * n_per_stratum, seed=seed,
+        )
+        if not cases:
+            raise RuntimeError(
+                f"dataset={dataset!r} loader returned 0 cases — check HF access / credentials."
+            )
 
     scores_by_stratum: dict[str, list[float]] = {s: [] for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]}
     labels_by_stratum: dict[str, list[bool]] = {s: [] for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]}
 
     all_scores, all_labels, all_strata = [], [], []
-    for scenario_type, cases in scenario_map.items():
-        for case in cases:
-            stratum = SPECIALTY_TO_STRATUM.get(case.specialty, "MODERATE")
-            try:
-                resp = query_model(backend, sys_prompt, case.question, temperature=0.0)
-                score = compute_nonconformity_score(resp)
-            except Exception as e:
-                print(f"  [skip] {e}")
-                continue
-            scores_by_stratum[stratum].append(score)
-            labels_by_stratum[stratum].append(case.expected_escalate)
-            all_scores.append(score)
-            all_labels.append(case.expected_escalate)
-            all_strata.append(stratum)
+    for case in cases:
+        stratum = SPECIALTY_TO_STRATUM.get(case.specialty, "MODERATE")
+        try:
+            resp = query_model(backend, sys_prompt, case.question, temperature=0.0)
+            score = compute_nonconformity_score(resp)
+        except Exception as e:
+            print(f"  [skip] {e}")
+            continue
+        scores_by_stratum[stratum].append(score)
+        labels_by_stratum[stratum].append(case.expected_escalate)
+        all_scores.append(score)
+        all_labels.append(case.expected_escalate)
+        all_strata.append(stratum)
+
+    # Soft warning when a stratum is empty (PubMedQA all-MODERATE common case).
+    empty = [s for s, v in scores_by_stratum.items() if not v]
+    if empty:
+        print(
+            f"[Phase 1] WARN: dataset={dataset} produced empty strata {empty}; "
+            f"per-stratum CRC will fall back to vacuous threshold for these."
+        )
 
     return {
+        "dataset": dataset,
         "scores_by_stratum": scores_by_stratum,
         "labels_by_stratum": labels_by_stratum,
         "all_scores": all_scores,
@@ -108,14 +158,23 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--alpha-global", type=float, default=0.10,
                         help="TECP / Round 6 single α")
+    parser.add_argument(
+        "--dataset", default="medabstain",
+        choices=list(SUPPORTED_DATASETS),
+        help="Source dataset for case collection. Default 'medabstain' (paper Table 1).",
+    )
     args = parser.parse_args()
 
     out_dir = ROOT / "results" / "round7"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 데이터 수집 ──────────────────────────────────────────────────────
-    cal_data = collect_stratified_data(args.backend, args.n_cal, seed=args.seed)
-    test_data = collect_stratified_data(args.backend, args.n_test, seed=args.seed + 1000)
+    cal_data = collect_stratified_data(
+        args.backend, args.n_cal, seed=args.seed, dataset=args.dataset,
+    )
+    test_data = collect_stratified_data(
+        args.backend, args.n_test, seed=args.seed + 1000, dataset=args.dataset,
+    )
 
     # ── 1. TECP / Quach (single global α) ────────────────────────────────
     tecp = TECPBaseline(alpha=args.alpha_global)
@@ -169,18 +228,21 @@ def main():
     payload = {
         "timestamp": datetime.now().isoformat(),
         "backend": args.backend,
+        "dataset": args.dataset,
         "n_cal": args.n_cal, "n_test": args.n_test,
         "alpha_global": args.alpha_global,
         "crc_alphas": crc_alphas,
         "results": [res_tecp, res_round6, res_round7],
     }
-    (out_dir / "table1_coverage.json").write_text(
+    suffix = "" if args.dataset == "medabstain" else f"_{args.dataset}"
+    (out_dir / f"table1_coverage{suffix}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     # markdown report
     md = ["# Round 7 Table 1 — Per-Stratum Coverage Validity\n",
-          f"- backend: `{args.backend}`, n_cal={args.n_cal}/stratum, n_test={args.n_test}/stratum\n",
+          f"- backend: `{args.backend}`, dataset: `{args.dataset}`, "
+          f"n_cal={args.n_cal}/stratum, n_test={args.n_test}/stratum\n",
           "| Method | CRITICAL miss | HIGH miss | MODERATE miss | LOW miss |",
           "| --- | --- | --- | --- | --- |"]
     for r in [res_tecp, res_round6, res_round7]:
@@ -189,10 +251,10 @@ def main():
             v = r["per_stratum"][s].get("miss_rate")
             row += f" {v if v is not None else 'N/A'} |"
         md.append(row)
-    (out_dir / "table1_coverage.md").write_text("\n".join(md), encoding="utf-8")
+    (out_dir / f"table1_coverage{suffix}.md").write_text("\n".join(md), encoding="utf-8")
 
     print("\n" + "\n".join(md))
-    print(f"\n✅ saved: {out_dir}/table1_coverage.{{json,md}}")
+    print(f"\n✅ saved: {out_dir}/table1_coverage{suffix}.{{json,md}}")
 
 
 if __name__ == "__main__":
