@@ -56,10 +56,103 @@ def total_cost(scores, labels, threshold, c_miss, c_over):
     return c_miss * fn + c_over * fp
 
 
+def _generate_synthetic(n_per_stratum: int, seed: int) -> tuple[dict, dict]:
+    """Synthetic 4-stratum (score, label) generator used by both 1-D and 4-D sweep."""
+    random.seed(seed)
+    sb, lb = {}, {}
+    for stratum, base in [("CRITICAL", 0.30), ("HIGH", 0.20),
+                          ("MODERATE", 0.10), ("LOW", 0.05)]:
+        sb[stratum], lb[stratum] = [], []
+        for _ in range(n_per_stratum):
+            l = random.random() < base
+            s = random.gauss(2.0 if l else 0.0, 1.0)
+            sb[stratum].append(s); lb[stratum].append(l)
+    return sb, lb
+
+
+def run_4d_sweep(n_per_stratum: int, seed: int, ratios: list[int]) -> dict:
+    """
+    4-D Cartesian sweep over (CRITICAL, HIGH, MODERATE, LOW) miss:over cost
+    ratios. For each combination of ratios, fit the cost-aware optimizer +
+    a F1-symmetric Round-6 baseline, and record total cost / cost-reduction
+    ratio.
+
+    Args:
+        n_per_stratum: synthetic n per stratum.
+        seed: RNG seed.
+        ratios: candidate miss-cost values (over_esc cost fixed at 1).
+                e.g. [10, 100, 1000] → 3^4 = 81 combinations.
+
+    Returns:
+        dict with `combinations`: list of result rows + summary stats.
+    """
+    sb, lb = _generate_synthetic(n_per_stratum, seed)
+    alphas = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
+
+    rows = []
+    n_total = len(ratios) ** 4
+    print(f"[Phase 4D] sweeping {n_total} combinations ...")
+    counter = 0
+    for r_crit in ratios:
+        for r_high in ratios:
+            for r_mod in ratios:
+                for r_low in ratios:
+                    counter += 1
+                    cost_matrix = {
+                        "CRITICAL":  {"miss": r_crit, "over_esc": 1.0},
+                        "HIGH":      {"miss": r_high, "over_esc": 1.0},
+                        "MODERATE":  {"miss": r_mod,  "over_esc": 1.0},
+                        "LOW":       {"miss": r_low,  "over_esc": 1.0},
+                    }
+                    # Round 6: F1-symmetric per stratum (cost-agnostic)
+                    r6_total = 0.0
+                    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+                        thr = f1_symmetric_threshold(sb[stratum], lb[stratum])
+                        cm = cost_matrix[stratum]
+                        r6_total += total_cost(sb[stratum], lb[stratum], thr, cm["miss"], cm["over_esc"])
+                    # Round 7: cost-aware
+                    out = sweep_cost_aware_per_stratum(sb, lb, cost_matrix, alphas)
+                    r7_total = sum(r.cost for r in out.values())
+                    ratio = (r6_total / r7_total) if r7_total > 0 else None
+                    rows.append({
+                        "ratios": {"CRITICAL": r_crit, "HIGH": r_high,
+                                   "MODERATE": r_mod, "LOW": r_low},
+                        "round6_total_cost": r6_total,
+                        "round7_total_cost": r7_total,
+                        "reduction_ratio": round(ratio, 2) if ratio else None,
+                    })
+
+    # summary stats
+    valid = [r["reduction_ratio"] for r in rows if r["reduction_ratio"] is not None]
+    summary = {
+        "n_combinations": len(rows),
+        "ratio_grid": ratios,
+        "min_reduction": min(valid) if valid else None,
+        "max_reduction": max(valid) if valid else None,
+        "median_reduction": sorted(valid)[len(valid)//2] if valid else None,
+        "mean_reduction": round(sum(valid)/len(valid), 2) if valid else None,
+    }
+    return {"combinations": rows, "summary": summary}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Round 7 Table 3 — Cost-Weighted Performance")
     parser.add_argument("--n-per-stratum", type=int, default=300)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--sweep-grid",
+        choices=["1d", "4d"],
+        default="1d",
+        help="1d: original CRITICAL ratio sweep (Table 3 main). "
+             "4d: Cartesian sweep over all 4 strata (3^4=81 by default).",
+    )
+    parser.add_argument(
+        "--ratios",
+        type=int,
+        nargs="+",
+        default=[10, 100, 1000],
+        help="Miss-cost candidate values for 4-D sweep (over_esc cost fixed at 1).",
+    )
     args = parser.parse_args()
 
     out_dir = ROOT / "results" / "round7"
