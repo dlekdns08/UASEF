@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-08T13:48:45.944465",
+  "timestamp": "2026-05-08T13:49:17.507945",
   "alphas": {
     "CRITICAL": 0.001,
     "HIGH": 0.01,
@@ -14,9 +14,9 @@
   },
   "prevalence": {
     "CRITICAL": 0.3,
-    "HIGH": 0.2,
-    "MODERATE": 0.1,
-    "LOW": 0.05
+    "HIGH": 0.3,
+    "MODERATE": 0.3,
+    "LOW": 0.3
   },
   "n_seeds": 5,
   "sufficiency_check": {
@@ -64,46 +64,46 @@
     "HIGH": {
       "target_alpha": 0.01,
       "n_seeds": 5,
-      "mean_miss_rate": 0.054889,
-      "std": 0.035149,
-      "ci95_upper": 0.086327,
+      "mean_miss_rate": 0.030219,
+      "std": 0.020181,
+      "ci95_upper": 0.04827,
       "satisfies_alpha": false,
       "values": [
-        0.059406,
-        0.033333,
-        0.111111,
-        0.019048,
-        0.051546
+        0.0625,
+        0.028369,
+        0.026846,
+        0.006536,
+        0.026846
       ]
     },
     "MODERATE": {
       "target_alpha": 0.05,
       "n_seeds": 5,
-      "mean_miss_rate": 0.483551,
-      "std": 0.125723,
-      "ci95_upper": 0.596,
+      "mean_miss_rate": 0.152255,
+      "std": 0.038224,
+      "ci95_upper": 0.186444,
       "satisfies_alpha": false,
       "values": [
-        0.595745,
-        0.568182,
-        0.285714,
-        0.530612,
-        0.4375
+        0.198675,
+        0.124138,
+        0.117284,
+        0.188312,
+        0.132867
       ]
     },
     "LOW": {
       "target_alpha": 0.1,
       "n_seeds": 5,
-      "mean_miss_rate": 0.965217,
-      "std": 0.056689,
-      "ci95_upper": 1.015921,
+      "mean_miss_rate": 0.295774,
+      "std": 0.09916,
+      "ci95_upper": 0.384466,
       "satisfies_alpha": false,
       "values": [
-        0.956522,
-        1.0,
-        0.869565,
-        1.0,
-        1.0
+        0.324324,
+        0.245033,
+        0.422535,
+        0.158621,
+        0.328358
       ]
     }
   }
