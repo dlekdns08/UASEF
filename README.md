@@ -86,10 +86,20 @@ BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 
 **한 번 실행으로 4단계 자동:**
 
-1. **pytest 137 tests** (회귀 안전망)
+1. **pytest 140 tests** (회귀 안전망 + cross-backend sanity check)
 2. **v1**: `run_all_experiments.py × {각 backend}` — 각 호출이 agent + baseline + medabstain + pareto 4개 sub 자동 포함
 3. **v2 Round 7 합성** (backend 무관): Table 2 FWER + Table 3 Cost
-4. **v2 Round 7 LLM** (backend별): Table 1 per-stratum coverage + Table 4 head-to-head (TECP / Quach / Semantic Entropy / UASEF Round 6 / UASEF Round 7)
+4. **v2 Round 7 LLM** (backend별): Table 1 per-stratum coverage + Table 4 head-to-head (TECP / Quach / Semantic Entropy / UASEF Round 6 / UASEF Round 7 / **TECP-stratified** / **Cost-Sensitive single-α** ablation baselines)
+
+**Multi-seed bootstrap (camera-ready 인프라):**
+
+```bash
+# 5-seed 자동 aggregation (~$125 OpenAI + ~50분 LMStudio)
+SEEDS="42 43 44 45 46" BACKENDS="openai lmstudio" \
+    bash run_multiseed_evaluation.sh
+# → results/run_<ts>_aggregate/aggregate_seeds.{json,md}
+#   = 평균 ± 표준편차 + 95% bootstrap CI (per backend × method × stratum)
+```
 
 **산출물 구조** (`results/run_<timestamp>/`):
 
