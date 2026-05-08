@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 #
+# IMPORTANT: This script requires bash (not sh/dash). It uses process
+# substitution `>(...)`, $'...' ANSI escapes, and `local` — none of which are
+# POSIX. If invoked via `sh run_all_round8.sh`, the snippet below detects
+# that and re-execs under bash automatically.
+if [ -z "${BASH_VERSION:-}" ]; then
+    if command -v bash >/dev/null 2>&1; then
+        exec bash "$0" "$@"
+    fi
+    echo "[error] this script requires bash. Run as: bash run_all_round8.sh" >&2
+    exit 1
+fi
+
 # UASEF — Round 8 ALL-IN-ONE Master Runner
 # ════════════════════════════════════════════════════════════════════════════
 #
