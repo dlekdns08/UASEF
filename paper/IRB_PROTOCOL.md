@@ -120,6 +120,25 @@ If the IRB timeline slips beyond 2026-08-30, the camera-ready will
 note the result will appear in a *named follow-up paper* rather than
 being held in the conference proceedings revision.
 
+### 7.1 LLM-Judge Self-Consistency Fallback (round 8)
+
+In parallel to the IRB process, we run a **non-clinical**, *partial-validation*
+fallback to surface any catastrophic L1 mismatch *before* IRB results arrive:
+
+- **Procedure.** $n = 200$ stratified-random MedAbstain CRITICAL/HIGH cases
+  are independently judged by two LLMs (OpenAI gpt-5.5, Anthropic
+  claude-opus-4-7) for ESCALATE / NO ESCALATE.
+- **Reporting.** We publish Cohen's $\kappa$ between the two judges and
+  the agreement rate against the heuristic-classifier label
+  (`results/round8/llm_judge_relabel.{json,md}`).
+- **Decision rule.** Auxiliary "consensus label" is used in supplementary
+  §C **only if $\kappa \ge 0.7$**.
+- **Hard limit.** LLM-judge agreement measures *reliability*, not *validity*.
+  Two models trained on overlapping distributions can systematically agree
+  on biased labels. **The IRB-driven physician relabeling remains the
+  load-bearing L1 mitigation** in the camera-ready; the LLM-judge is a
+  pre-IRB sanity probe.
+
 ## 8. Pre-registration
 
 This protocol is the pre-registration document. It is committed to the
