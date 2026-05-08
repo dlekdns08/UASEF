@@ -1,4 +1,4 @@
-"""
+r"""
 TECP-stratified — Per-stratum split-CP version of TECP (Round 7 ablation).
 
 This baseline isolates the contribution of *stratification itself* from the
