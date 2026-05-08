@@ -27,6 +27,14 @@
 #   N_TRIALS         Table 2 FWER simulation (default 5000)
 #   N_PER_STRATUM    Table 3 합성 (default 300)
 #   ALPHA            global α (default 0.10)
+#   DATASETS         space-separated list of datasets for v2 Table 1/4 evaluation
+#                    (default "medabstain"). Supported:
+#                      medabstain | medqa_usmle | medqa_usmle_full | pubmedqa | medmcqa
+#                    Example: DATASETS="medabstain medqa_usmle" runs Table 1+4 on
+#                    each dataset and stores under
+#                    results/run_<ts>/<backend>/table{1,4}_<dataset>.{json,md}.
+#                    PubMedQA mostly produces MODERATE-only stratification (a known
+#                    limitation reported in the paper §5.1).
 #   SEED             random seed (default 42; single-run mode)
 #   SEEDS            space-separated multi-seed list for bootstrap (default empty;
 #                    if set, e.g. SEEDS="42 43 44 45 46", the script runs every
@@ -72,6 +80,7 @@ N_PER_STRATUM="${N_PER_STRATUM:-300}"
 ALPHA="${ALPHA:-0.10}"
 SEED="${SEED:-42}"
 SEEDS="${SEEDS:-}"
+DATASETS="${DATASETS:-medabstain}"
 SKIP_LLM="${SKIP_LLM:-0}"
 SKIP_TESTS="${SKIP_TESTS:-0}"
 SKIP_V1="${SKIP_V1:-0}"
@@ -109,6 +118,7 @@ echo "════════════════════════�
 echo "  Timestamp        : $TIMESTAMP"
 echo "  Output           : $RUN_DIR"
 echo "  Backends         : $BACKENDS"
+echo "  Datasets (v2)    : $DATASETS"
 echo "  N_CAL / N_TEST   : $N_CAL / $N_TEST  (per stratum)"
 echo "  N_MEDABSTAIN     : $N_MEDABSTAIN  (per variant)"
 echo "  N_PARETO         : $N_PARETO  (per scenario)"
@@ -194,9 +204,26 @@ if [ "$SKIP_V2_SYN" != "1" ]; then
     "$PYTHON" experiments/round7_table3_cost.py \
         --n-per-stratum "$N_PER_STRATUM" --seed "$SEED" \
         > "$RUN_DIR/synthetic/table3_stdout.txt" 2>&1 \
-        && echo "  ✓ Table 3 (Cost)" || echo "  ✗ Table 3 실패"
+        && echo "  ✓ Table 3 (Cost, 1-D)" || echo "  ✗ Table 3 실패"
     [ -f "results/round7/table3_cost.json" ] \
         && cp results/round7/table3_cost.{json,md} "$RUN_DIR/synthetic/"
+
+    # 4-D cost sensitivity sweep (3^4 = 81 combinations)
+    "$PYTHON" experiments/round7_table3_cost.py \
+        --n-per-stratum "$N_PER_STRATUM" --seed "$SEED" \
+        --sweep-grid 4d --ratios 10 100 1000 \
+        > "$RUN_DIR/synthetic/table3_4d_stdout.txt" 2>&1 \
+        && echo "  ✓ Table 3 (Cost, 4-D sweep)" || echo "  ✗ Table 3 4-D 실패"
+    [ -f "results/round7/table3_cost_4d.json" ] \
+        && cp results/round7/table3_cost_4d.{json,md} "$RUN_DIR/synthetic/"
+
+    # α=0.001 synthetic CRC validation (algorithm-level)
+    "$PYTHON" experiments/round7_alpha_critical_validation.py \
+        --n-critical 1500 --n-other 500 --n-seeds 10 \
+        > "$RUN_DIR/synthetic/alpha_critical_stdout.txt" 2>&1 \
+        && echo "  ✓ α=0.001 synthetic validation" || echo "  ✗ α=0.001 실패"
+    [ -f "results/round7/alpha_critical_validation.json" ] \
+        && cp results/round7/alpha_critical_validation.{json,md} "$RUN_DIR/synthetic/"
 else
     echo ""
     echo "  ⏩ [3/4] v2 합성 SKIP (SKIP_V2_SYN=1)"
@@ -213,27 +240,37 @@ if [ "$SKIP_V2_LLM" != "1" ]; then
         echo ""
         echo "  ── [v2] backend=$B"
 
-        # Table 1 — per-stratum coverage
-        "$PYTHON" experiments/round7_table1_coverage.py \
-            --backend "$B" \
-            --n-cal "$N_CAL" --n-test "$N_TEST" \
-            --alpha-global "$ALPHA" --seed "$SEED" \
-            > "$RUN_DIR/$B/table1_stdout.txt" 2>&1 \
-            && echo "    ✓ Table 1 ($B)" \
-            || echo "    ✗ Table 1 ($B) 실패"
-        [ -f "results/round7/table1_coverage.json" ] \
-            && mv results/round7/table1_coverage.{json,md} "$RUN_DIR/$B/"
+        for D in $DATASETS; do
+            # Suffix logic mirrors the Python scripts: medabstain → no suffix.
+            if [ "$D" = "medabstain" ]; then
+                SUF=""
+            else
+                SUF="_${D}"
+            fi
+            echo "    ── dataset=$D"
 
-        # Table 4 — head-to-head baseline
-        "$PYTHON" experiments/round7_table4_baseline.py \
-            --backend "$B" \
-            --n-cal "$N_CAL" --n-test "$N_TEST" \
-            --alpha "$ALPHA" --seed "$SEED" \
-            > "$RUN_DIR/$B/table4_stdout.txt" 2>&1 \
-            && echo "    ✓ Table 4 ($B)" \
-            || echo "    ✗ Table 4 ($B) 실패"
-        [ -f "results/round7/table4_baseline.json" ] \
-            && mv results/round7/table4_baseline.{json,md} "$RUN_DIR/$B/"
+            # Table 1 — per-stratum coverage
+            "$PYTHON" experiments/round7_table1_coverage.py \
+                --backend "$B" --dataset "$D" \
+                --n-cal "$N_CAL" --n-test "$N_TEST" \
+                --alpha-global "$ALPHA" --seed "$SEED" \
+                > "$RUN_DIR/$B/table1${SUF}_stdout.txt" 2>&1 \
+                && echo "      ✓ Table 1 ($B/$D)" \
+                || echo "      ✗ Table 1 ($B/$D) 실패"
+            [ -f "results/round7/table1_coverage${SUF}.json" ] \
+                && mv "results/round7/table1_coverage${SUF}.json" "results/round7/table1_coverage${SUF}.md" "$RUN_DIR/$B/"
+
+            # Table 4 — head-to-head baseline
+            "$PYTHON" experiments/round7_table4_baseline.py \
+                --backend "$B" --dataset "$D" \
+                --n-cal "$N_CAL" --n-test "$N_TEST" \
+                --alpha "$ALPHA" --seed "$SEED" \
+                > "$RUN_DIR/$B/table4${SUF}_stdout.txt" 2>&1 \
+                && echo "      ✓ Table 4 ($B/$D)" \
+                || echo "      ✗ Table 4 ($B/$D) 실패"
+            [ -f "results/round7/table4_baseline${SUF}.json" ] \
+                && mv "results/round7/table4_baseline${SUF}.json" "results/round7/table4_baseline${SUF}.md" "$RUN_DIR/$B/"
+        done
     done
 else
     echo ""
