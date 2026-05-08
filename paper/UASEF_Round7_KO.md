@@ -36,14 +36,20 @@ $p$-값을 *Wilson [2019]*의 조화평균 규칙 또는 *Vovk & Wang [2019]*의
 **(C) 비용 인식 보정**은 $F_1$ 최적화를 stratum별 위험 통제 제약 하의
 비용 가중 목적 함수로 대체한다.
 
-합성 null 가설 시뮬레이션에서 naive 분리합 baseline의 경험적 FWER은
-nominal $\alpha=0.05$에서 0.11–0.13인 반면, 본 연구의 조화평균 결합기는
-0.02–0.04 내에 있다. 임상 보정된 비용 행렬에서 본 기법은 $F_1$-대칭
-최적화 대비 총 기대 비용을 **27–31×** 감소시키면서 CRITICAL stratum의 미스율을
-2.3% → 0%로 개선한다. 추가로 TECP *[Xu & Lu, 2025]*, Conformal Language
-Modeling *[Quach et al., 2024]*, Semantic Entropy *[Farquhar et al., 2024]*와
-비교한다. 모든 산출물 (`tests/`, `experiments/round7_table*.py`,
-`run_full_evaluation.sh`)은 한 줄 재현을 위해 공개한다.
+합성 null 가설 시뮬레이션 ($n_{\text{trials}} = 5000$, $\alpha = 0.05$)에서
+naive 분리합 baseline `len(triggers) > 0`의 경험적 FWER은 **0.107(독립) /
+0.143(상관)** 인 반면, 본 연구의 조화평균 결합기는 **0.015 / 0.033** 에 머문다.
+임상 보정된 비용 행렬에서 본 기법은 $F_1$-대칭 최적화 대비 총 기대 비용을
+**38.3×** 감소시키며 (4 stratum 합계 16,264 → 425), CRITICAL stratum 미스율을
+UASEF v1 (heuristic 배율) 대비 OpenAI gpt-4o에서 0.16 → **0.03**, LMStudio
+LLaMA-3.1-8B에서 0.31 → **0.04**로 개선한다. MedAbstain head-to-head 비교에서
+TECP *[Xu & Lu, 2025]*, Conformal Language Modeling *[Quach et al., 2024]*,
+Semantic Entropy *[Farquhar et al., 2024]*와 대조한다 — 본 v2는 두 backend
+모두에서 CRITICAL stratum Safety Recall **0.96** 을 달성 (TECP/Quach/SE는
+0.16, UASEF v1은 0.84/0.70)하고 TECP 대비 총 비용을 **20.3× / 21.3×**
+감소시킨다. 모든 산출물 (137-test pytest 스위트,
+`experiments/round7_table*.py`, `run_full_evaluation.sh`)은 한 줄 재현을 위해
+공개한다.
 
 ---
 
@@ -471,22 +477,41 @@ stratum별 및 전체에 대해 다음을 보고한다.
 
 ### 6.1 표 1 — Per-Stratum Coverage (Pivot A)
 
-OpenAI `gpt-4o`에서 stratum별 $n_{\text{cal}} = n_{\text{test}} = 500$으로
-held-out test set의 stratum별 경험적 missed-escalation rate를 측정한다.
-목표 비율: $\alpha_{\text{CRITICAL}} = 0.05$, $\alpha_{\text{HIGH}} = 0.10$,
-$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$. (논문 quality
-목표 $\alpha_{\text{CRITICAL}} = 0.001$은 $n_{\text{CRITICAL}} \ge 999$을 요구
-— §7 참조.)
+**OpenAI gpt-4o**와 **LMStudio LLaMA-3.1-8B-Instruct**에서 stratum별
+$n_{\text{cal}} = n_{\text{test}} = 200$으로 held-out test set의 stratum별
+경험적 missed-escalation rate를 측정한다. 목표 비율:
+$\alpha_{\text{CRITICAL}} = 0.05$, $\alpha_{\text{HIGH}} = 0.10$,
+$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$. 논문 quality
+목표 $\alpha_{\text{CRITICAL}} = 0.001$은 $n_{\text{CRITICAL}} \ge 999$를
+요구 — §7 참조.
+
+#### 6.1.1 OpenAI gpt-4o
 
 | 방법                                          | CRITICAL miss | HIGH miss | MODERATE miss | LOW miss | 모든 stratum OK? |
 | --------------------------------------------- | :-----------: | :-------: | :-----------: | :------: | :--------------: |
-| TECP / Quach 2024 (단일 전역 α=0.10)          | 0.32          | 0.18      | 0.09          | 0.03     | ✗ (CRITICAL)     |
-| UASEF v1 (Round 6, heuristic 배율)            | 0.15          | 0.11      | 0.09          | 0.04     | ⚠ (CRITICAL)     |
-| **UASEF v2** (Stratified CRC)                 | **0.05**      | **0.10**  | **0.13**      | **0.05** | **✓**            |
+| TECP / Quach 2024 (단일 전역 α=0.10)          | 0.890         | 1.000     | 0.903         | 0.000†   | ✗ (CRITICAL/HIGH/MODERATE) |
+| UASEF v1 (Round 6, heuristic 배율)            | 0.160         | 0.822     | 0.903         | 0.000†   | ✗ (CRITICAL/HIGH/MODERATE) |
+| **UASEF v2** (Stratified CRC)                 | **0.030**     | **0.044** | **0.069**     | **0.000†** | **✓ (4/4)**    |
 
-단일-α baseline은 CRITICAL에서 과소-에스컬레이션(TECP, 가장 위험한 case에
-임계값이 너무 관대) 또는 LOW에서 과다-에스컬레이션(heuristic 배율이 지나치게
-보수적)이다. 모든 stratum별 목표를 만족하는 유일한 방법은 Stratified CRC다.
+#### 6.1.2 LMStudio LLaMA-3.1-8B
+
+| 방법                                          | CRITICAL miss | HIGH miss | MODERATE miss | LOW miss | 모든 stratum OK? |
+| --------------------------------------------- | :-----------: | :-------: | :-----------: | :------: | :--------------: |
+| TECP / Quach 2024 (단일 전역 α=0.10)          | 0.900         | 0.932     | 0.887         | 0.000†   | ✗ (CRITICAL/HIGH/MODERATE) |
+| UASEF v1 (Round 6, heuristic 배율)            | 0.310         | 0.705     | 0.887         | 0.000†   | ✗ (CRITICAL/HIGH/MODERATE) |
+| **UASEF v2** (Stratified CRC)                 | **0.040**     | **0.068** | **0.141**     | **0.000†** | **✓ (4/4)**    |
+
+> †: LOW stratum은 본 MedAbstain sub-sample의 $n_{\text{test}}$ 규모에서
+> 양성 케이스가 0개($n_{+} = 0$)이므로 miss-rate가 모든 method에서 vacuously
+> 0이다. 비-vacuous 비교는 CRITICAL/HIGH/MODERATE에서 이루어진다.
+
+단일-α baseline (TECP, Quach 2024 — 본 평가 환경에서 동등)은 CRITICAL
+case의 거의 전부 (89~90%)를 놓친다 — 임계값이 전역 분포로 보정되었기 때문.
+UASEF v1의 heuristic 배율은 CRITICAL을 부분 보정 (gpt-4o 16% miss, LMStudio
+31%)하지만 HIGH (70~82% miss)와 MODERATE (89~90% miss)에서 실패한다.
+**Stratified CRC는 두 backend 모두에서 비-vacuous stratum의 stratum별 목표를
+만족하는 유일한 방법이다** — gpt-4o에서 0.030~0.069, LMStudio에서 0.040~0.141
+모두 해당 $\alpha_s$ 미만이다.
 
 ### 6.2 표 2 — Multi-Trigger FWER (Pivot B)
 
