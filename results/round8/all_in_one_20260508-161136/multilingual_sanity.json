@@ -1,0 +1,6 @@
+{
+  "status": "skipped",
+  "reason": "data file missing",
+  "expected_path": "data/raw/medqa_zh.jsonl",
+  "timestamp": "2026-05-08T16:11:49.578646"
+}

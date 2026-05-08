@@ -1,10 +1,15 @@
 # Round 8 — Execution Runbook
 
-> **상태**: Round 8 코드/문서 변경은 모두 commit 가능한 상태로 stage됨.
-> **이 문서는 expensive run을 트리거하기 전 사용자가 따라야 할 순서를 정리한다.**
+> **TL;DR — 한 줄 명령**
+> ```bash
+> bash run_all_round8.sh        # 전체 14 단계, ~$205 + ~3시간
+> ```
+> SKIP_*, STRICT_FAIL, DRY_RUN 등 환경변수로 부분 실행 / what-if 가능.
+> 자세한 옵션은 `run_all_round8.sh` 헤더 주석 참조.
 >
-> 모든 Phase 1~3 산출물은 한 세션에서 실행하기에는 비용/시간이 큰 LLM 호출이
-> 포함되므로, 코드/문서는 완성하고 expensive run은 별도 단계로 분리했다.
+> **상태**: Round 8 코드/문서 변경은 모두 commit 가능한 상태로 stage됨.
+> **이 문서는 master script `run_all_round8.sh`의 14개 단계를 풀어 설명하고,
+> expensive run을 트리거하기 전 점검 사항을 정리한다.**
 
 ---
 
