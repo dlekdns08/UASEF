@@ -63,7 +63,13 @@ def run_single_seed(
     prevalence: dict[str, float],
     seed: int,
 ) -> dict:
-    """One CRC fit + held-out empirical check. Returns per-stratum miss rate."""
+    """
+    One CRC fit + held-out empirical check.
+
+    Reports two miss-rate metrics:
+      - empirical_loss = (# (Y=1 AND missed)) / n_total — directly comparable to α (CRC's bound).
+      - cond_miss_rate = (# missed) / (# positives) — complement of recall, common reporting.
+    """
     cal_scores, cal_labels, cal_strata = generate_synthetic(n_per_stratum, seed, prevalence)
     test_scores, test_labels, test_strata = generate_synthetic(n_per_stratum, seed + 1000, prevalence)
 
@@ -73,15 +79,18 @@ def run_single_seed(
     per_stratum: dict[str, dict] = {}
     for s in alphas:
         idx = [i for i, st in enumerate(test_strata) if st == s]
+        n_total = len(idx)
         n_pos = sum(test_labels[i] for i in idx)
-        if n_pos == 0:
-            per_stratum[s] = {"n_pos": 0, "miss_rate": None}
+        if n_total == 0:
+            per_stratum[s] = {"n": 0, "n_pos": 0, "empirical_loss": None, "cond_miss_rate": None}
             continue
         thr = crc.threshold_for(s)
         miss = sum(1 for i in idx if test_labels[i] and test_scores[i] <= thr)
         per_stratum[s] = {
+            "n": n_total,
             "n_pos": n_pos,
-            "miss_rate": miss / n_pos,
+            "empirical_loss": miss / n_total,
+            "cond_miss_rate": (miss / n_pos) if n_pos else None,
             "miss": miss,
             "threshold": thr,
         }
@@ -134,35 +143,41 @@ def main():
         print("⚠ At least one stratum has n < min_n_for_alpha — CRC may be vacuous there.")
 
     # Multi-seed empirical check.
-    miss_rates_by_stratum: dict[str, list[float]] = {s: [] for s in alphas}
+    losses_by_stratum: dict[str, list[float]] = {s: [] for s in alphas}
+    cond_miss_by_stratum: dict[str, list[float]] = {s: [] for s in alphas}
     for seed in range(42, 42 + args.n_seeds):
         per = run_single_seed(n_per, alphas, prevalence, seed)
         for s, r in per.items():
-            if r["miss_rate"] is not None:
-                miss_rates_by_stratum[s].append(r["miss_rate"])
+            if r["empirical_loss"] is not None:
+                losses_by_stratum[s].append(r["empirical_loss"])
+            if r.get("cond_miss_rate") is not None:
+                cond_miss_by_stratum[s].append(r["cond_miss_rate"])
         print(f"  seed={seed}: " + ", ".join(
-            f"{s}={r['miss_rate']:.4f}" if r["miss_rate"] is not None else f"{s}=N/A"
+            f"{s} loss={r['empirical_loss']:.4f}/recall_loss={r.get('cond_miss_rate', 0):.4f}"
+            if r["empirical_loss"] is not None else f"{s}=N/A"
             for s, r in per.items()
         ))
 
-    # Aggregate.
+    # Aggregate. CRC's bound is on E[loss] ≤ α, NOT on conditional miss rate.
     results = {}
-    for s, vals in miss_rates_by_stratum.items():
+    for s, vals in losses_by_stratum.items():
         if not vals:
-            results[s] = {"target_alpha": alphas[s], "mean_miss_rate": None}
+            results[s] = {"target_alpha": alphas[s], "mean_empirical_loss": None}
             continue
-        mean_m = statistics.mean(vals)
-        std_m = statistics.stdev(vals) if len(vals) > 1 else 0.0
-        # CRC guarantee is on E[loss] ≤ α; verified empirically by mean ≤ α + slack.
-        slack = 2 * std_m / math.sqrt(len(vals))  # 2-σ Monte-Carlo slack
+        mean_loss = statistics.mean(vals)
+        std_loss = statistics.stdev(vals) if len(vals) > 1 else 0.0
+        slack = 2 * std_loss / math.sqrt(len(vals))  # 2-σ Monte-Carlo slack on the mean
+        cond_vals = cond_miss_by_stratum[s]
+        mean_cond = statistics.mean(cond_vals) if cond_vals else None
         results[s] = {
             "target_alpha": alphas[s],
             "n_seeds": len(vals),
-            "mean_miss_rate": round(mean_m, 6),
-            "std": round(std_m, 6),
-            "ci95_upper": round(mean_m + slack, 6),
-            "satisfies_alpha": mean_m <= alphas[s] + slack,
-            "values": [round(v, 6) for v in vals],
+            "mean_empirical_loss": round(mean_loss, 6),
+            "std": round(std_loss, 6),
+            "ci95_upper": round(mean_loss + slack, 6),
+            "satisfies_alpha": mean_loss <= alphas[s] + slack,
+            "mean_cond_miss_rate": round(mean_cond, 6) if mean_cond is not None else None,
+            "loss_values": [round(v, 6) for v in vals],
         }
 
     payload = {
