@@ -6,8 +6,10 @@ UASEF — Baseline adapters for Round 7 head-to-head comparison.
 
 지원 baseline:
   - tecp.py             — Token-Entropy Conformal Prediction (Xu & Lu 2025)
+  - tecp_stratified.py  — Per-stratum TECP (Round 7 ablation, isolates stratification)
   - quach2024.py        — Conformal Language Modeling (ICLR 2024 단순화)
   - semantic_entropy.py — Semantic Entropy (Farquhar Nature 2024 단순화)
+  - cost_sensitive.py   — Cost-tuned scalar threshold (Round 7 ablation, isolates Pivot C)
 
 각 어댑터의 fit/predict 인터페이스는 BaselineAdapter abstract class 따름.
 """
