@@ -248,12 +248,108 @@ def main():
         "per_stratum": res_r7_per, "total_cost": total_cost_r7, "auroc": None,
     })
 
+    # ── TECP-stratified ablation (Round 7 fairness baseline) ────────────
+    tecp_str = TECPStratifiedBaseline(alphas=crc_alphas)
+    tecp_str.fit(cal_data["all_scores"], cal_data["all_labels"], cal_data["all_strata"])
+    res_tecp_str_per = {}
+    total_cost_tecp_str = 0.0
+    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+        idx = [i for i, s in enumerate(test_data["all_strata"]) if s == stratum]
+        n_pos = sum(test_data["all_labels"][i] for i in idx)
+        n_neg = sum(1 for i in idx if not test_data["all_labels"][i])
+        tp = sum(test_data["all_labels"][i] and tecp_str.predict(test_data["all_scores"][i], stratum) for i in idx)
+        fn = sum(test_data["all_labels"][i] and not tecp_str.predict(test_data["all_scores"][i], stratum) for i in idx)
+        fp = sum((not test_data["all_labels"][i]) and tecp_str.predict(test_data["all_scores"][i], stratum) for i in idx)
+        recall = tp / (tp + fn) if (tp + fn) else None
+        over = fp / n_neg if n_neg else None
+        cm = DEFAULT_COST_MATRIX[stratum]
+        cost = cm["miss"] * fn + cm["over_esc"] * fp
+        total_cost_tecp_str += cost
+        res_tecp_str_per[stratum] = {
+            "n": len(idx), "n_pos": n_pos, "safety_recall": recall, "over_esc_rate": over,
+            "tp": tp, "fn": fn, "fp": fp, "cost": cost,
+        }
+    methods_results.append({
+        "name": "TECP-stratified (this work, Round 7 ablation)",
+        "per_stratum": res_tecp_str_per, "total_cost": total_cost_tecp_str, "auroc": None,
+    })
+
+    # ── Cost-Sensitive (single-α) ablation ──────────────────────────────
+    # Use HIGH-stratum cost ratio (100:1) as a representative scalar; we
+    # report this baseline to compare Pivot C against general cost-sensitive
+    # learning, separate from per-stratum CRC.
+    cm_high = DEFAULT_COST_MATRIX["HIGH"]
+    cost_baseline = CostSensitiveBaseline(c_miss=cm_high["miss"], c_over=cm_high["over_esc"])
+    cost_baseline.fit(cal_data["all_scores"], cal_data["all_labels"])
+    methods_results.append(evaluate_predictor(
+        "Cost-Sensitive single-α (this work, Round 7 ablation)",
+        cost_baseline.predict,
+        test_data["all_scores"], test_data["all_labels"], test_data["all_strata"],
+    ))
+
+    # ── Cross-backend & paired-comparison sanity checks ─────────────────
+    sanity_alerts: list[str] = []
+
+    # Build per-method test predictions for paired tests.
+    test_n = len(test_data["all_scores"])
+    test_strata = test_data["all_strata"]
+    test_labels = test_data["all_labels"]
+    test_scores = test_data["all_scores"]
+
+    def _preds_for(method_name: str) -> list[bool]:
+        if method_name.startswith("TECP ("):
+            return [tecp.predict(test_scores[i]) for i in range(test_n)]
+        if method_name.startswith("Quach"):
+            return [q.predict(test_scores[i]) for i in range(test_n)]
+        if method_name.startswith("Semantic"):
+            return [se.predict(test_scores[i]) for i in range(test_n)]
+        if method_name.startswith("UASEF Round 6"):
+            return [
+                test_scores[i] > cal_global.threshold * multipliers[test_strata[i]]
+                for i in range(test_n)
+            ]
+        if method_name.startswith("UASEF Round 7"):
+            return [
+                test_scores[i] > crc.threshold_for(test_strata[i]) for i in range(test_n)
+            ]
+        if method_name.startswith("TECP-stratified"):
+            return [tecp_str.predict(test_scores[i], test_strata[i]) for i in range(test_n)]
+        if method_name.startswith("Cost-Sensitive"):
+            return [cost_baseline.predict(test_scores[i]) for i in range(test_n)]
+        return []
+
+    v2_preds = _preds_for("UASEF Round 7")
+    pairwise_pvalues: dict[str, float | None] = {}
+    for m in methods_results:
+        if m["name"].startswith("UASEF Round 7"):
+            continue
+        other_preds = _preds_for(m["name"])
+        if other_preds:
+            pairwise_pvalues[m["name"]] = mcnemar_pvalue(v2_preds, other_preds, test_labels)
+
+    # Sanity check #1: identical-confusion-matrix detector across methods.
+    # Two distinct methods producing identical (TP, FN, FP, TN) on the
+    # CRITICAL stratum is a soft warning (could be coincidence, but flag it).
+    crit_signatures: dict[tuple, list[str]] = {}
+    for m in methods_results:
+        c = m["per_stratum"]["CRITICAL"]
+        sig = (c["tp"], c["fn"], c["fp"])
+        crit_signatures.setdefault(sig, []).append(m["name"])
+    for sig, names in crit_signatures.items():
+        if len(names) > 1 and not all("TECP" in n or "Quach" in n or "Semantic" in n for n in names):
+            sanity_alerts.append(
+                f"SANITY: methods {names} share identical CRITICAL confusion {sig} — "
+                "verify this is not a copy-paste / placeholder bug."
+            )
+
     # ── 저장 + 보고서 ────────────────────────────────────────────────────
     payload = {
         "timestamp": datetime.now().isoformat(),
         "backend": args.backend, "n_cal": args.n_cal, "n_test": args.n_test,
         "alpha": args.alpha, "crc_alphas": crc_alphas,
         "methods": methods_results,
+        "pairwise_mcnemar_vs_v2": pairwise_pvalues,
+        "sanity_alerts": sanity_alerts,
     }
     (out_dir / "table4_baseline.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
@@ -263,15 +359,28 @@ def main():
         "# Round 7 Table 4 — Head-to-Head Baseline\n",
         f"- backend={args.backend}, n_cal={args.n_cal}, n_test={args.n_test}, α={args.alpha}\n",
         "## CRITICAL stratum",
-        "| Method | Safety Recall | Over-Esc | TP/FN/FP | Total cost |",
-        "| --- | --- | --- | --- | --- |",
+        "| Method | Safety Recall (n+) | Over-Esc (n−) | TP/FN/FP | Total cost | AUROC | McNemar vs v2 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for m in methods_results:
         c = m["per_stratum"]["CRITICAL"]
+        n_pos = c.get("n_pos", c.get("tp", 0) + c.get("fn", 0))
+        n_neg = c.get("n", 0) - n_pos
+        recall_str = f"{c['safety_recall']:.4f} ({c['tp']}/{n_pos})" if c.get("safety_recall") is not None else "N/A"
+        over_str = f"{c['over_esc_rate']:.4f} ({c['fp']}/{n_neg})" if c.get("over_esc_rate") is not None else "N/A"
+        auroc_str = f"{m['auroc']:.4f}" if m.get("auroc") is not None else "—"
+        p = pairwise_pvalues.get(m['name'])
+        p_str = f"{p:.4g}" if p is not None else ("—" if "Round 7" in m['name'] else "n/a")
         md.append(
-            f"| {m['name']} | {c['safety_recall']} | {c['over_esc_rate']} | "
-            f"{c['tp']}/{c['fn']}/{c['fp']} | {m['total_cost']:.1f} |"
+            f"| {m['name']} | {recall_str} | {over_str} | "
+            f"{c['tp']}/{c['fn']}/{c['fp']} | {m['total_cost']:.1f} | {auroc_str} | {p_str} |"
         )
+
+    if sanity_alerts:
+        md.append("\n## ⚠️ Sanity alerts\n")
+        for a in sanity_alerts:
+            md.append(f"- {a}")
+
     (out_dir / "table4_baseline.md").write_text("\n".join(md), encoding="utf-8")
     print("\n".join(md))
     print(f"\n✅ saved: {out_dir}/table4_baseline.{{json,md}}")
