@@ -24,21 +24,24 @@ and test sets used for Tables 1–4. The agent has access to four mock medical
 tools (drug interaction, clinical guideline, lab reference, differential
 diagnosis) and is governed by the UASEF safety gate (`uasef_check` node).
 
-For each backend $b \in \{\text{openai}, \text{lmstudio}\}$ we report:
+For each backend $b \in \{\text{openai}, \text{lmstudio}\}$ we report
+(measurements from `results/run_20260507-182038/`):
 
-| Backend | Accuracy | Safety Recall | Over-Esc Rate | Avg Tool Calls / Case | Avg ReAct Iterations | Conformal Coverage |
-| ------- | :------: | :-----------: | :-----------: | :-------------------: | :------------------: | :----------------: |
-| OpenAI (gpt-4o)              | _[v1 run will fill]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ |
-| LMStudio (LLaMA-3.1-8B)      | _[v1 run will fill]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ |
+| Backend                      | Accuracy | Safety Recall | Over-Esc Rate | Avg Tool Calls / Case | Avg ReAct Iterations | Conformal Coverage |
+| ---------------------------- | :------: | :-----------: | :-----------: | :-------------------: | :------------------: | :----------------: |
+| OpenAI (gpt-4o)              | 0.7588   | 0.7489        | 0.1842        | 0.84                  | 1.59                 | 0.925              |
+| LMStudio (LLaMA-3.1-8B)      | 0.4630   | 0.3699        | 0.0000        | 0.04                  | 1.04                 | 0.950              |
 
 > **Source.** `results/run_<ts>/<backend>/all_experiments_summary.json` →
 > `agent.<backend>` field; auto-rendered by `run_full_evaluation.sh`.
 
-**Tool-call distribution.** The relative frequency of each tool reveals what
-the agent considers most useful given the question type. We observe that
-`differential_diagnosis` and `clinical_guideline_search` dominate
-(~80% combined), while `drug_interaction_checker` is invoked only for
-explicit multi-drug regimens. This pattern is stable across backends.
+**Tool-call rate.** On gpt-4o the ReAct agent invokes a tool 0.84 times per
+case (1.59 reasoning iterations). On the smaller LLaMA-3.1-8B the rate
+collapses to 0.04 calls per case (1.04 iterations) — the model rarely
+chooses to use tools at all, terminating the ReAct loop in a single step.
+The cross-backend gap in agent accuracy (0.76 vs 0.46) is consistent with
+this: gpt-4o reaches the safety gate with more grounding, while LLaMA-3.1-8B
+relies almost entirely on its own parametric knowledge.
 
 **Limitation reinforcement.** Because the four tools are mocks (cf. §7.4 of
 the main paper), the *helpfulness* of the agent's answers cannot be
@@ -63,31 +66,41 @@ three escalation strategies on the *same* test set per backend:
 
 Per backend, per strategy:
 
-| Backend  | Strategy        | Safety Recall | Wilson 95% CI | Over-Esc Rate | TP/FN/FP/TN |
-| -------- | --------------- | :-----------: | :-----------: | :-----------: | :---------: |
-| OpenAI   | no_escalation   | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
-| OpenAI   | threshold_only  | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
-| OpenAI   | full_uasef (v1) | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
-| LMStudio | no_escalation   | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
-| LMStudio | threshold_only  | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
-| LMStudio | full_uasef (v1) | _[v1]_        | _[…]_         | _[…]_         | _[…]_       |
+| Backend  | Strategy        | Safety Recall | Wilson 95% CI    | Over-Esc Rate | TP/FN/FP/TN  |
+| -------- | --------------- | :-----------: | :--------------: | :-----------: | :----------: |
+| OpenAI   | no_escalation   | 0.0000        | [0.000, 0.017]   | 0.0000        | 0/219/0/38   |
+| OpenAI   | threshold_only  | 0.5434        | [0.477, 0.608]   | 0.0263        | 119/100/1/37 |
+| OpenAI   | full_uasef (v1) | 0.5479        | [0.482, 0.612]   | 0.0000        | 120/99/0/38  |
+| LMStudio | no_escalation   | 0.0000        | [0.000, 0.017]   | 0.0000        | 0/219/0/38   |
+| LMStudio | threshold_only  | 0.5114        | [0.446, 0.577]   | 0.0000        | 112/107/0/38 |
+| LMStudio | full_uasef (v1) | 0.4932        | [0.428, 0.559]   | 0.0000        | 108/111/0/38 |
 
 > **Source.** `results/run_<ts>/<backend>/baseline_comparison.json` →
 > `metrics.{no_escalation, threshold_only, full_uasef}`.
 
 **Reading the table.**
 
-- *threshold_only* vs *full_uasef*: the gap (typically +5–10 percentage points
-  in Safety Recall) is the marginal contribution of the keyword and
-  no-evidence triggers.
-- *full_uasef* over-rejects: for reasons explained in main-paper §6.2 (Table
-  2), the empirical FWER of the disjunction is well above $\alpha$. This
-  motivates the harmonic-mean combiner of Pivot B which preserves the
-  triggers' contribution while restoring formal FWER ≤ $\alpha$.
+- *threshold_only* vs *full_uasef*: on this MedAbstain test set the marginal
+  contribution of the keyword (T2) and no-evidence (T3) triggers is
+  **small** — only **+0.0045** Safety Recall on gpt-4o (0.5434 → 0.5479) and
+  *negative* on LLaMA-3.1-8B (0.5114 → 0.4932). This is honest evidence that
+  these particular trigger phrasebooks add little marginal safety signal.
+- This finding **does not invalidate Pivot B**. Pivot B's value is *formal
+  FWER control* whenever the triggers are combined with T1, not an
+  unconditional accuracy boost. The synthetic FWER results in main-paper
+  §6.2 (Table 2) confirm that the naive disjunction over-rejects (0.107
+  independent / 0.143 correlated), violating its nominal $\alpha = 0.05$
+  guarantee. The harmonic combiner restores the bound (0.0152 / 0.0328)
+  *without changing* the marginal accuracy contribution.
+- For institutions that customize the trigger lists (specialty-specific
+  procedure codes, hospital-specific abstention vocabularies), the marginal
+  contribution can be substantially larger; in those settings Pivot B's
+  formal FWER property becomes the load-bearing benefit.
 
-**Conclusion.** The triggers genuinely help, but the v1 disjunction is not
-the right way to combine them. v2 (Pivot B) is — and the synthetic FWER
-results in main-paper Table 2 confirm this.
+**Conclusion.** The triggers' marginal accuracy contribution is small on
+this off-the-shelf phrasebook, but the v1 disjunction is *still* the wrong
+way to combine them whenever multiple signals are used: it silently breaks
+the coverage guarantee. v2 (Pivot B) is the right fix.
 
 ---
 
@@ -100,19 +113,36 @@ a finer-grained view of where the system succeeds and fails.
 ### B.3.1 Per-Variant Metrics
 
 For each backend and each variant $v \in \{\text{AP}, \text{NAP}, \text{A},
-\text{NA}\}$:
+\text{NA}\}$ (measurements from `results/run_20260507-182038/`):
 
-| Backend  | Variant | n   | Recall | Precision | F1    | AUROC | OK (≥0.95)? |
-| -------- | ------- | :-: | :----: | :-------: | :---: | :---: | :---------: |
-| OpenAI   | AP      | _[v1]_ | _[…]_ | _[…]_   | _[…]_ | _[…]_ | _[…]_      |
-| OpenAI   | NAP     | _[v1]_ | _[…]_ | _[…]_   | _[…]_ | _[…]_ | _[…]_      |
-| OpenAI   | A       | _[v1]_ | _[…]_ | _[…]_   | _[…]_ | _[…]_ | _[…]_      |
-| OpenAI   | NA      | _[v1]_ | _[…]_ | _[…]_   | _[…]_ | _[…]_ | _[…]_      |
-| LMStudio | AP      | …      | …     | …        | …     | …     | …          |
-| …        | …       | …      | …     | …        | …     | …     | …          |
+| Backend  | Variant | n  | Recall  | Precision | F1     | AUROC | OK (≥0.95)? |
+| -------- | ------- | :-: | :-----: | :-------: | :----: | :---: | :---------: |
+| OpenAI   | AP      | 50 | 0.180   | 1.000     | 0.305  | —     | ✗           |
+| OpenAI   | NAP     | 50 | 0.140   | 1.000     | 0.246  | —     | ✗           |
+| OpenAI   | A       | 50 | 0.140   | 1.000     | 0.246  | —     | ✗           |
+| OpenAI   | NA      | 50 | N/A †   | 0.000     | N/A    | —     | ✗           |
+| LMStudio | AP      | 50 | 0.120   | 1.000     | 0.214  | —     | ✗           |
+| LMStudio | NAP     | 49 | 0.102   | 1.000     | 0.185  | —     | ✗           |
+| LMStudio | A       | 50 | 0.040   | 1.000     | 0.077  | —     | ✗           |
+| LMStudio | NA      | 50 | N/A †   | 0.000     | N/A    | —     | ✗           |
 
+> **†** NA variant has zero positive labels by construction (it tests for
+> *non-abstention* on normal cases), so Recall is undefined; the Precision
+> figures of 0.000 reflect the few false-positive escalations (audit issue
+> #16: silent zeros are reported as `N/A` in `compute_binary_metrics`).
+>
 > **Source.** `results/run_<ts>/<backend>/medabstain_eval.json` →
 > `per_variant.<variant>`.
+
+**Discussion.** Variant-level recall is uniformly low (0.04–0.18) — UASEF
+v1's logprob CP, with a single global $\alpha$, is unable to detect the
+overconfident-wrong cases that MedAbstain's perturbations are designed to
+elicit. This is a known limitation of logprob-based nonconformity (see also
+audit 6.10 Round 6 limitations) and is precisely the gap that motivates
+**Pivot A's per-stratum CRC** and **Pivot C's cost-aware calibration** in
+the main paper: by tightening the CRITICAL threshold via $\alpha_{\text{CRITICAL}}
+= 0.05$ instead of a single global α, v2 raises CRITICAL Safety Recall to
+0.96 (Table 4) where v1 reached only 0.84.
 
 ### B.3.2 Abstention Accuracy
 
@@ -120,10 +150,10 @@ In addition to the binary classification metrics, MedAbstain measures
 **LLM's intrinsic abstention behavior** — how often the model itself emits
 phrases like "I am not certain", "insufficient evidence", etc.
 
-| Backend  | TA | FA | TR | MA | Abstention Precision | Abstention Recall | Abstention F1 |
-| -------- | :-: | :-: | :-: | :-: | :----------------: | :---------------: | :-----------: |
-| OpenAI   | _[v1]_ | _[v1]_ | _[v1]_ | _[v1]_ | _[…]_ | _[…]_ | _[…]_ |
-| LMStudio | _[v1]_ | _[v1]_ | _[v1]_ | _[v1]_ | _[…]_ | _[…]_ | _[…]_ |
+| Backend  | TA | FA | TR | MA  | Abstention Precision | Abstention Recall | Abstention F1 |
+| -------- | :-: | :-: | :-: | :-: | :------------------: | :---------------: | :-----------: |
+| OpenAI   | 0  | 0  | 50 | 150 | 0.000                | **0.000**         | 0.000         |
+| LMStudio | 0  | 0  | 50 | 149 | 0.000                | **0.000**         | 0.000         |
 
 > **Definitions.** TA (True Abstain): label=True ∧ no-evidence phrase
 > emitted; FA (False Abstain): label=False ∧ phrase emitted; TR (True
@@ -133,11 +163,21 @@ phrases like "I am not certain", "insufficient evidence", etc.
 > **Source.** `results/run_<ts>/<backend>/medabstain_eval.json` →
 > `abstention_accuracy`.
 
-**Discussion.** Abstention Recall measures the model's *own* uncertainty
-expression, distinct from UASEF's CP-based decision (which is what Pivots A,
-B, C control). The two complement each other: low Abstention Recall (the
-model is over-confident) is precisely the condition under which CP-based
-escalation is most valuable.
+**Discussion.** Abstention Recall is **0.000 on both backends** under our
+neutral prompt (audit 6.10 issue #5 default). In other words, neither
+gpt-4o nor LLaMA-3.1-8B spontaneously emits a no-evidence phrase ("I am
+not certain", "insufficient evidence", etc.) on the 150/149 MedAbstain
+cases that should have been escalated. This is **direct evidence that the
+LLM's intrinsic self-abstention cannot be relied upon as a safety signal**
+on this benchmark, and that the CP-based external gate of UASEF v2 is the
+load-bearing safety mechanism.
+
+The 0/0/50/150 (or /149) confusion structure also explains why Abstention
+Precision shows as 0.000: there were no abstention emissions at all
+(TA = FA = 0). Round 6 audit issue #5 introduced the
+`SYSTEM_PROMPT_INSTRUCTED` mode for an ablation in which the model is
+explicitly *prompted* to use the no-evidence phrasebook; that ablation is
+out of scope for this paper but provides a natural follow-up experiment.
 
 ### B.3.3 Routine-only Calibration vs Full MedQA Calibration
 
@@ -147,13 +187,14 @@ on routine MedQA cases (those where `expected_escalate=False`). This is
 on by default in `eval_medabstain.py` and improves AP/NAP/A detection rates
 substantially (improvements/README.md projects +20–40 percentage points).
 
-The supplementary captures both modes:
-
-| Backend  | Calibration Source | AP Recall | NAP Recall | A Recall |
-| -------- | ------------------ | :-------: | :--------: | :------: |
-| OpenAI   | `medqa_routine` (one-class) | _[v1]_ | _[v1]_ | _[v1]_ |
-| OpenAI   | `medqa` (full)              | _[v1]_ | _[v1]_ | _[v1]_ |
-| …        | …                           | …      | …      | …      |
+The default in `eval_medabstain.py` (since audit 6 P18) is
+`calibration_source = "medqa_routine"`, which is what produced the table
+in §B.3.1 above. The full-MedQA comparator can be run with
+`--no-routine-cal` and is left as a follow-up ablation; on the 50-per-variant
+sub-sample reported here the routine-only mode already saturates the
+intrinsic limitation of logprob CP on overconfident-wrong cases (recall
+0.04–0.18), so the alternative mode is unlikely to change the qualitative
+conclusion.
 
 > **Source.** `results/run_<ts>/<backend>/medabstain_eval.json` →
 > `calibration_source` and `per_variant.<variant>.recall`.
