@@ -110,7 +110,7 @@ def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
         cost = cm["miss"] * fn + cm["over_esc"] * fp
         total_cost += cost
         per_stratum[stratum] = {
-            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
+            "n": len(idx), "n_pos": n_pos, "safety_recall": recall, "over_esc_rate": over,
             "tp": tp, "fn": fn, "fp": fp, "cost": cost,
         }
 
@@ -211,7 +211,7 @@ def main():
         cost = cm["miss"] * fn + cm["over_esc"] * fp
         total_cost_r6 += cost
         res_r6_per[stratum] = {
-            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
+            "n": len(idx), "n_pos": n_pos, "safety_recall": recall, "over_esc_rate": over,
             "tp": tp, "fn": fn, "fp": fp, "cost": cost,
         }
     methods_results.append({
@@ -240,7 +240,7 @@ def main():
         cost = cm["miss"] * fn + cm["over_esc"] * fp
         total_cost_r7 += cost
         res_r7_per[stratum] = {
-            "n": len(idx), "safety_recall": recall, "over_esc_rate": over,
+            "n": len(idx), "n_pos": n_pos, "safety_recall": recall, "over_esc_rate": over,
             "tp": tp, "fn": fn, "fp": fp, "cost": cost,
         }
     methods_results.append({
