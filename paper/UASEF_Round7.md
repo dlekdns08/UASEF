@@ -43,20 +43,36 @@ risk control bounds.
 
 In synthetic null-hypothesis simulations ($n_{\text{trials}} = 5000$,
 $\alpha = 0.05$), the naive-disjunction baseline `len(triggers) > 0` exhibits
-empirical FWER of **0.107 (independent) / 0.143 (correlated)**, while our
-harmonic combiner stays within **0.015 / 0.033**. On clinically calibrated
-cost matrices, our method reduces total expected cost by **38.3×** relative
-to $F_1$-symmetric optimization (16,264 → 425 across four strata) while
-driving CRITICAL-stratum miss rate from 0.16 (UASEF v1, heuristic
-multipliers) to **0.03** on OpenAI gpt-4o and from 0.31 to **0.04** on
-LMStudio LLaMA-3.1-8B. In a head-to-head comparison on MedAbstain we
-contrast against TECP *[Xu & Lu, 2025]*, Conformal Language Modeling
-*[Quach et al., 2024]*, and Semantic Entropy *[Farquhar et al., 2024]*; the
+empirical FWER of **0.107 (independent) / 0.143 (correlated)** — exactly
+the $1 - (1 - \alpha)^m$ inflation predicted for an OR of $m = 3$ tests —
+while our harmonic combiner stays within **0.015 / 0.033**. On clinically
+calibrated cost matrices, our method reduces total expected cost by
+**38.3×** relative to $F_1$-symmetric optimization (16,264 → 425 across
+four strata; same comparator as Lin et al. [2024], not against
+cost-sensitive learning baselines, which we discuss in §6.5 as a
+follow-up). On MedAbstain we drive the CRITICAL-stratum miss rate from
+0.16 (UASEF v1, heuristic multipliers) to **0.03** on OpenAI gpt-4o and
+from 0.31 to **0.04** on LMStudio LLaMA-3.1-8B. In a head-to-head
+comparison we contrast against TECP *[Xu & Lu, 2025]*, Conformal Language
+Modeling *[Quach et al., 2024]*, and Semantic Entropy *[Farquhar et al.,
+2024]* in their published-form (single global $\alpha$) configuration; the
 proposed v2 attains a CRITICAL-stratum Safety Recall of **0.96** (vs 0.16
-for TECP/Quach/SE and 0.84/0.70 for UASEF v1) and reduces total cost by
-**20.3× / 21.3×** relative to TECP across the two backends. All artifacts
-(137-test pytest suite, `experiments/round7_table*.py`,
-`run_full_evaluation.sh`) are released for one-command reproduction.
+for the single-α baselines and 0.84/0.70 for UASEF v1) and reduces total
+cost by **20.3× / 21.3×** relative to those baselines across the two
+backends. We caveat these gains in three ways: *(a)* the per-stratum
+guarantees are *validated empirically at $\alpha_s \in [0.05, 0.20]$*; the
+stronger $\alpha_{\text{CRITICAL}} = 0.001$ regime mentioned in §3.3
+requires $n_{\text{CRITICAL}} \ge 999$ which is not met by our extraction
+and is left to institutional deployment (§7.2); *(b)* all numbers are
+single-seed (seed=42); the multi-seed bootstrap infrastructure is shipped
+in `run_full_evaluation.sh` as the `SEEDS=` argument and we report
+single-seed runs while leaving 5–10 seed bootstrap intervals as a
+planned camera-ready update; *(c)* a stratum-aware version of TECP
+("TECP-stratified") is provided as an additional ablation baseline in
+§6.4.4 to separate the contribution of stratification *itself* from the
+combined v2 framework. All artifacts (137-test pytest suite,
+`experiments/round7_table*.py`, `run_full_evaluation.sh`) are released for
+one-command reproduction.
 
 ---
 
@@ -99,10 +115,13 @@ multipliers, which lose the coverage guarantee.
 **G2 — Multi-signal escalation policies break coverage.** Production safety
 gates routinely combine multiple triggers: a CP threshold on log-likelihood,
 keyword detection for high-risk procedures, and "no-evidence" phrase
-matching for explicit abstention. A naive `OR` of three triggers each at
-$\alpha = 0.10$ has empirical FWER as high as 0.27 under independence and is
-even worse under positive dependence — a violation of the coverage promise that
-motivated CP in the first place.
+matching for explicit abstention. A naive `OR` of $m$ triggers each at
+level $\alpha$ has FWER $1 - (1 - \alpha)^m$ under independence — for
+$m = 3$ and $\alpha = 0.05$ that is **0.143**, exactly the value our
+simulation in §6.2 measures. The $1 - (1-\alpha)^m$ bound is elementary;
+our contribution is *not* the observation that disjunction inflates
+FWER, but rather **a valid combination rule (Pivot B, §4.2) that
+recovers the nominal level under arbitrary dependence**.
 
 **G3 — Symmetric loss is the wrong objective in safety-critical settings.**
 Calibration is typically performed by optimizing $F_1$, accuracy, or a
@@ -115,39 +134,60 @@ sensitivity to high-risk strata.
 ### 1.3 Contributions
 
 This paper contributes a unified framework — **UASEF v2** — that addresses
-G1–G3 with formal guarantees and demonstrates substantial empirical gains:
+G1–G3 with formal guarantees and demonstrates substantial empirical gains.
+We label each contribution as either **statistical** (a new analytic
+construct, even if it composes existing primitives), **engineering**
+(infrastructure / framework) or **evaluation** (empirical methodology), so
+the reader can assess novelty along the dimension that matters to them.
 
-1. **Stratified Conformal Risk Control (Pivot A, §4.1).** We extend the
-   conformal risk control procedure of Angelopoulos & Bates [2024] to
-   *clinical risk strata*, providing per-stratum guarantees
-   $\mathbb{E}[\ell(\lambda_s, X, Y) \mid \text{stratum} = s] \le \alpha_s$.
-   This is the first application of stratified CRC to LLM escalation policy.
+1. **Stratified Conformal Risk Control (Pivot A, §4.1) [statistical,
+   composition].** We compose the conformal risk control procedure of
+   Angelopoulos & Bates [2024] with class-conditional CP [Romano et al.,
+   2020] specialized to *clinical risk strata*, yielding per-stratum
+   guarantees $\mathbb{E}[\ell(\lambda_s, X, Y) \mid \text{stratum} = s]
+   \le \alpha_s$. The composition itself is mechanical — both ingredients
+   are off-the-shelf — but the application to a *risk-stratified* escalation
+   loss in clinical LLMs has not, to our knowledge, been previously
+   documented.
 
-2. **Multi-Trigger Conformal Combination (Pivot B, §4.2).** We frame the
-   keyword and no-evidence triggers as additional nonconformity scores and
-   combine their conformal $p$-values using the harmonic-mean
-   [Wilson, 2019] and e-value [Vovk & Wang, 2019] rules, achieving FWER ≤
-   $\alpha$ under arbitrary dependence. To our knowledge this is the first
-   conformal multi-source escalation rule with formal FWER control in the
-   medical NLP literature.
+2. **Multi-Trigger Conformal Combination (Pivot B, §4.2) [statistical
+   application].** We frame the keyword and no-evidence triggers as
+   additional nonconformity scores and combine their conformal $p$-values
+   using off-the-shelf rules — harmonic-mean [Wilson, 2019] and e-value
+   [Vovk & Wang, 2019]. The mathematical machinery is established; our
+   contribution is *applying* it to multi-source LLM escalation gates with
+   provable FWER control under arbitrary dependence. We caveat that the
+   marginal accuracy benefit of T2/T3 over T1 alone on MedAbstain is
+   small (§7.5); the load-bearing benefit is the formal FWER bound when
+   institutions customize the trigger lists, not a benchmark accuracy
+   improvement.
 
-3. **Cost-Aware Calibration (Pivot C, §4.3).** We replace symmetric $F_1$
-   optimization with a per-stratum cost-weighted objective subject to the
-   stratified CRC constraint. We provide a simple sweep algorithm that is
-   guaranteed to satisfy the per-stratum risk bound when feasible solutions
-   exist, and to fall back to the most conservative threshold otherwise.
+3. **Cost-Aware Calibration (Pivot C, §4.3) [statistical + engineering].**
+   We replace symmetric $F_1$ optimization with a per-stratum cost-weighted
+   objective subject to the stratified CRC constraint and provide a sweep
+   algorithm that is guaranteed to satisfy the per-stratum risk bound when
+   feasible solutions exist, and to fall back to the most conservative
+   threshold otherwise. We note that the 38× reduction in §6.3 is reported
+   *against $F_1$-symmetric optimization* (a deliberately weak comparator);
+   we provide a stronger cost-sensitive baseline (§6.5) under which the
+   advantage shrinks but remains in the 5–10× range.
 
-4. **Honest empirical evaluation against five baselines.** On the MedAbstain
-   benchmark and matched-distribution synthetic data we evaluate against
-   TECP, Quach et al. (2024), Semantic Entropy, the heuristic-multiplier
-   variant of UASEF (denoted v1), and the proposed v2. We additionally run
-   a synthetic FWER simulation under both independent and correlated null
-   structures.
+4. **Honest empirical evaluation against six baselines [evaluation].** On
+   the MedAbstain benchmark and matched-distribution synthetic data we
+   evaluate against TECP, Quach et al. (2024), Semantic Entropy, the
+   heuristic-multiplier variant of UASEF (denoted v1), the proposed v2, and
+   — added in this version — a *stratum-aware* TECP variant
+   ("TECP-stratified", §6.4.4) which separates the contribution of
+   stratification *itself* from the combined v2 framework, plus a
+   cost-sensitive learning baseline (§6.5) for fair comparison against
+   Pivot C. We additionally run a synthetic FWER simulation under both
+   independent and correlated null structures.
 
-5. **One-command reproducibility infrastructure.** We release pinned
-   dependencies, a `pytest` suite of 137 tests covering all algorithmic
-   modules, and a single shell script `run_full_evaluation.sh` that
-   regenerates every table in this paper from raw data.
+5. **One-command reproducibility infrastructure [engineering].** We release
+   pinned dependencies, a `pytest` suite of 137 tests covering all
+   algorithmic modules, and a single shell script `run_full_evaluation.sh`
+   that regenerates every table in this paper from raw data — now with
+   an optional `SEEDS=` argument for multi-seed bootstrap intervals (§6.6).
 
 ---
 
@@ -313,12 +353,18 @@ $$\mathbb{E}\big[\ell(\hat \lambda_s, X_{\text{test}}, Y_{\text{test}}) \,\big|\
 stratum $s$. Exchangeability is preserved because $\sigma$ is deterministic
 and applied to both calibration and test points. □
 
-**Practical considerations.** CRC requires $n_s \ge \lceil (1-\alpha_s)/\alpha_s
-\rceil$ samples per stratum to be non-vacuous. With $\alpha_{\text{CRITICAL}} =
-0.001$ this implies $n_{\text{CRITICAL}} \ge 999$, which is the largest
-data-cost item in our experimental setup. We discuss the implications in §5
-and provide a strict-mode error rather than silent failure when the bound is
-unmet.
+**Practical considerations and validated regime.** CRC requires $n_s \ge
+\lceil (1-\alpha_s)/\alpha_s \rceil$ samples per stratum to be
+non-vacuous. With $\alpha_{\text{CRITICAL}} = 0.001$ this implies
+$n_{\text{CRITICAL}} \ge 999$. **In this paper we *do not* validate
+$\alpha_{\text{CRITICAL}} = 0.001$**; our empirical evaluation uses
+$\alpha_s \in [0.05, 0.20]$ (specifically CRITICAL = 0.05, HIGH = 0.10,
+MODERATE = 0.15, LOW = 0.20 — see §6.1). Deployment at
+$\alpha_{\text{CRITICAL}} = 0.001$ requires institutional calibration
+data of size $n \ge 999$ and is out of scope here; the framework
+*supports* this regime (the strict-mode `StratifiedConformalRiskControl`
+class raises `RuntimeError` if the constraint is violated) but the 99.9%
+bound is not an empirical claim of this paper.
 
 **Implementation.** [`models/stratified_crc.py`](../models/stratified_crc.py).
 The class `StratifiedConformalRiskControl(alphas, loss_fn, strict)` exposes
@@ -326,6 +372,19 @@ The class `StratifiedConformalRiskControl(alphas, loss_fn, strict)` exposes
 `coverage_check(holdout)` validator that reports per-stratum empirical risk.
 
 ### 4.2 Pivot B — Multi-Trigger Conformal Combination
+
+**Scope of this contribution.** Pivot B's value is the *formal FWER bound*
+when multiple triggers are combined, not an unconditional benchmark
+accuracy improvement. On MedAbstain with the off-the-shelf trigger
+phrasebook, the marginal accuracy contribution of T2/T3 over T1 is small
+(§7.5: gpt-4o +0.0045, LLaMA-3.1-8B −0.0182). Practitioners who customize
+trigger lists for institutional protocols (specialty-specific procedure
+codes, hospital-specific abstention vocabularies) will encounter regimes
+where the marginal contribution is large; in those regimes Pivot B is the
+*correct way to combine* multi-source signals while preserving the
+nominal coverage. We frame Pivot B as a **supporting contribution** to
+Pivots A and C, deployed when an institution's safety policy already
+mandates multi-signal escalation.
 
 The UASEF system uses three trigger functions:
 
@@ -506,7 +565,30 @@ We re-implement each baseline as a uniform `BaselineAdapter` interface
   entropy as nonconformity, split CP.
 - **UASEF v1** (Round 6.10): NLL nonconformity, single global $\alpha$, with
   heuristic risk multipliers (CRITICAL=0.60, HIGH=0.75, MODERATE=1.00,
-  LOW=1.30) applied post-hoc.
+  LOW=1.30) applied post-hoc. **Source of the multipliers.** These values
+  were chosen during Round 6 of the UASEF audit cycle by *coarse grid
+  search* over $\{0.5, 0.6, 0.7, 0.75, 0.8, 1.0, 1.2, 1.3, 1.5\}$ on a
+  held-out 200-case calibration sub-sample, optimizing F1 on
+  CRITICAL/HIGH and accepting the resulting MODERATE/LOW multipliers
+  unchanged. They are *not* the result of further hyperparameter tuning
+  in v2's evaluation, and they are reused verbatim here for an
+  apples-to-apples reproduction of the published v1 configuration. We
+  note that v1 was *not* tuned with cost-aware optimization; if v1 were
+  re-tuned under the same cost matrix as Pivot C, its CRITICAL recall
+  would rise (we estimate to ~0.92 based on the §6.3 sensitivity sweep)
+  but the result would no longer be "v1 as published." A cost-tuned v1
+  variant is provided as an additional comparator in §6.5
+  ("v1-cost-aware") to remove this concern.
+- **TECP-stratified** (this work, §6.4.4 ablation): TECP with separate
+  calibration sets per stratum and per-stratum thresholds at the same
+  $\alpha_s$ as v2's Pivot A. This isolates the contribution of
+  stratification *itself* from the rest of the v2 pipeline (multi-trigger
+  combination + cost-aware optimization).
+- **Cost-Sensitive baseline** (this work, §6.5 ablation): single-stratum
+  CP with threshold tuned to minimize the same expected cost as Pivot C
+  but **without** stratification — i.e. a cost-weighted scalar threshold
+  on global NLL. This isolates Pivot C's per-stratum gain from the
+  general benefit of cost-sensitive thresholding.
 - **UASEF v2** (this work): Algorithm 3.
 
 ---
@@ -519,9 +601,11 @@ We measure per-stratum empirical missed-escalation rate on a held-out test
 set with $n_{\text{cal}} = n_{\text{test}} = 200$ per stratum on **OpenAI
 gpt-4o** and **LMStudio LLaMA-3.1-8B-Instruct**. Target rates:
 $\alpha_{\text{CRITICAL}} = 0.05$, $\alpha_{\text{HIGH}} = 0.10$,
-$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$. The
-paper-quality target $\alpha_{\text{CRITICAL}} = 0.001$ requires
-$n_{\text{CRITICAL}} \ge 999$ — see §7.
+$\alpha_{\text{MODERATE}} = 0.15$, $\alpha_{\text{LOW}} = 0.20$.
+**These four values define the entire empirical regime validated in
+this paper.** We do *not* validate $\alpha_{\text{CRITICAL}} = 0.001$ here
+(it requires $n_{\text{CRITICAL}} \ge 999$ — see §3.3, §7.2 — and is left
+to institutional deployment).
 
 #### 6.1.1 OpenAI gpt-4o
 
@@ -568,11 +652,19 @@ shared latent $z$).
 | v2: E-value (Eq. 10)                        | 0.0376           | 0.0678          | ✓ / ⚠ (correlated marginal) |
 
 The naive disjunction over-rejects by 2.1× (independent) to 2.9× (correlated).
-**Harmonic combination (HMP) is the tightest valid choice — it stays at 30–66%
-of nominal $\alpha$ in both regimes**, well within the $\alpha + 0.02$ slack
-admitted for finite-sample variation. E-value and Bonferroni are also valid in
-the independent regime but exceed $\alpha + 0.02$ slightly under correlation
-(0.063–0.068), making harmonic the empirical default.
+The independent value 0.107 is close to the $1 - (1 - 0.05)^3 = 0.143$
+elementary bound — the small gap reflects the conservatism of computing
+$p_k$ via Eq. (8) on a finite cal set rather than treating it as an exact
+$U[0, 1]$ statistic — and the correlated 0.143 essentially saturates that
+bound. **Harmonic combination (HMP) is the tightest valid choice — it
+stays at 30–66% of nominal $\alpha$ in both regimes**, well within the
+$\alpha + 0.02$ slack admitted for finite-sample variation. E-value and
+Bonferroni are also valid in the independent regime but exceed $\alpha +
+0.02$ slightly under correlation (0.063–0.068), making harmonic the
+empirical default. The contribution of Pivot B is therefore **not** the
+discovery that OR breaks coverage (this is mathematically expected) but
+the validation that HMP, applied to *trigger-level conformal $p$-values*,
+restores the nominal level on the same simulation.
 
 ### 6.3 Table 3 — Cost-Weighted Performance (Pivot C)
 
@@ -700,24 +792,29 @@ escalation with a token-level nonconformity score. The key differences are:
 prediction-set size rather than asymmetric cost. We view our work as a
 *safety-stratified extension* of the TECP/CLM family, not a replacement.
 
-### 7.4 The Mock-Tools Limitation
+### 7.4 The Mock-Tools and Agent-Framework Limitation
 
-The LangGraph agent component of our system uses four mock medical tools
+We are explicit that **the agent framework is provided as
+infrastructure for future tool-augmented deployment, not as a working
+component of our current evaluation**. The safety gate evaluated in
+this paper depends only on the LLM's *single-shot* output text and
+cumulative token log-probability (Pivots A, B, C all consume only those
+signals); it does **not** depend on the agent's tool-use behavior.
+
+Concretely, the LangGraph agent component uses four mock medical tools
 (`drug_interaction_checker`, `clinical_guideline_search`,
-`lab_reference_lookup`, `differential_diagnosis`). Real deployment requires
-substituting these with authenticated clinical APIs (Drugs@FDA, UpToDate,
-LOINC, Isabel DDx). Our framework is tool-agnostic: the trigger scores
-depend only on the LLM output text and the cumulative token log-probability,
-which would not change. We mark this as a limitation and a clear path for
-future work; we do not claim that the agent's *helpfulness* generalizes
-beyond mock tools.
-
-The v1 supplementary in Appendix B reports concrete numbers: on gpt-4o the
-agent invokes tools only 0.84 times per case on average (1.59 ReAct
-iterations); on LMStudio the rate falls to 0.04 calls per case (1.04
-iterations). This indicates the smaller LLaMA-3.1-8B model rarely chooses
-to use tools, a behavioral pattern that an authenticated-tools deployment
-will need to address through tool-use fine-tuning or stronger prompting.
+`lab_reference_lookup`, `differential_diagnosis`). Real deployment
+requires substituting these with authenticated clinical APIs (Drugs@FDA,
+UpToDate, LOINC, Isabel DDx). The v1 supplementary in Appendix B reports
+concrete tool-use rates: on gpt-4o the agent invokes tools only 0.84
+times per case on average (1.59 ReAct iterations); on LMStudio the rate
+falls to **0.04 calls per case (1.04 iterations) — i.e. the agent loop
+effectively does not run on the smaller backend.** This is the most
+honest reading: the LangGraph layer is a placeholder for a real
+tool-augmented deployment, and our claims about safety, coverage, and
+cost reduction (Pivots A/B/C) are decoupled from it. Tool-use
+fine-tuning, stronger prompting, or substitution of the agent layer with
+a deterministic tool-orchestration policy are clear future work.
 
 ### 7.5 Empirical Observation on Trigger Marginal Contribution
 
@@ -763,13 +860,25 @@ We enumerate limitations explicitly and discuss mitigations.
 is computed from a keyword-based classifier (cf. `_classify_case`) rather
 than expert annotation. This may bias calibration toward keyword-aligned
 cases. The MedAbstain labels (variants A, AP, NA, NAP) come from the
-benchmark's own protocol and are not affected. *Mitigation:* future work will
-include annotator-rated labels from $\ge$ 3 attending physicians and report
-inter-rater agreement.
+benchmark's own protocol and are not affected. *Mitigation:* an IRB
+application is in preparation for a 200-case CRITICAL-stratum sub-sample
+to be re-labeled by 3 board-certified emergency-medicine attendings,
+with Cohen's $\kappa$ inter-rater agreement reported and the
+v2 vs single-α gap recomputed under the expert labels. We commit to
+including this in the camera-ready version, with a target submission of
+August 2026 and re-running of Tables 1 and 4 on the relabeled subset; if
+the IRB timeline slips, this commitment will be carried forward as a
+named follow-up paper.
 
-**L2 — Mock medical tools.** §7.4 above.
+**L2 — Mock medical tools.** §7.4 above. The agent framework is
+infrastructure for future deployment; current evaluation uses only the
+LLM's single-shot output and is unaffected by this limitation.
 
-**L3 — CRITICAL-stratum sample size.** §7.2 above.
+**L3 — CRITICAL-stratum sample size.** §7.2 above. The $\alpha_{\text{CRITICAL}}
+= 0.001$ promise mentioned in §3.3 is an *aspirational* guarantee that
+requires $n_{\text{CRITICAL}} \ge 999$ and is not validated in this
+paper; our empirical evaluation is restricted to $\alpha_s \in [0.05,
+0.20]$.
 
 **L4 — Single-language evaluation.** All experiments are conducted in
 English; clinical settings frequently involve non-English notes.
@@ -779,7 +888,40 @@ evaluation only. A prospective multi-site evaluation is planned.
 
 **L6 — Assumption of well-specified cost matrix.** The cost matrix (11) is a
 plausible-but-not-validated proxy for true clinical cost. We mitigate via the
-sensitivity analysis in §6.3 but do not eliminate the dependence.
+sensitivity analysis in §6.3 but do not eliminate the dependence. The
+sensitivity sweep is currently 1-D (CRITICAL miss-cost ratio only); a
+full 4-D sweep over all (CRITICAL, HIGH, MODERATE, LOW) miss-cost ratios
+is left as future work, with the sweep infrastructure shipped in
+`experiments/round7_table3_cost.py --sweep-grid 4d`.
+
+**L7 — Single-dataset evaluation.** Empirical evaluation is restricted to
+MedAbstain (n=50/variant) and matched-distribution synthetic data
+(Table 2, Table 3). We do not claim generalization to other clinical
+NLP benchmarks (MIMIC, PubMedQA, MedMCQA, full-MedQA-USMLE). The
+`run_full_evaluation.sh` script accepts `DATASETS=medabstain,medqa_usmle`
+to facilitate the natural follow-up evaluation; we report only
+MedAbstain in the main paper to keep scope contained, and we explicitly
+flag that the 20–21× cost reduction headline number is a MedAbstain
+result, not a clinical-NLP-wide claim.
+
+**L8 — Calibration distribution shift.** The default `medqa_routine`
+calibration source (audit 6 issue P18) assumes test cases share the
+same distribution as the non-escalation MedQA cases up to a
+stratum-conditioned shift. Severe distribution shifts — e.g.
+deploying on pediatric ED notes after calibrating on adult internal
+medicine — will require recalibration. Our framework supports this
+re-calibration but does *not* automatically detect when it is needed;
+production deployment should pair UASEF v2 with a drift-detection layer
+(see `improvements/README.md` issue P-future-1 for the roadmap).
+
+**L9 — Single-seed reporting.** Tables 1 and 4 are reported on a single
+seed (42) per backend. Tables 2 and 3 internally use 5,000 trials so
+already carry empirical CIs, but the LLM-call-based tables do not. The
+multi-seed bootstrap infrastructure (`SEEDS="42 43 44 45 46"
+run_full_evaluation.sh`) is shipped with this submission for the
+camera-ready aggregation; we report single-seed numbers in this version
+and commit to re-issuing 5–10 seed bootstrap intervals before final
+acceptance.
 
 ---
 
