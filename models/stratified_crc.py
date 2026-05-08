@@ -194,7 +194,10 @@ class StratifiedConformalRiskControl:
             if not sufficient:
                 msg = (
                     f"[StratifiedCRC] stratum={stratum} n={n} < min_n={min_n} "
-                    f"(α={alpha}). CRC 보장이 무효일 수 있음."
+                    f"(α={alpha}). CRC 보장이 무효 — 본 stratum에 대한 출력은 "
+                    f"vacuous fallback (모든 case escalate)이며, paper-quality "
+                    f"보고에 사용해서는 안 됨. 해결: (a) 더 많은 calibration "
+                    f"데이터 수집, (b) 더 큰 α 사용, 또는 (c) strict=True로 즉시 fail."
                 )
                 if self.strict:
                     raise RuntimeError(msg + " (strict=True)")
