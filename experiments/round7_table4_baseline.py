@@ -343,19 +343,22 @@ def main():
     # ── 저장 + 보고서 ────────────────────────────────────────────────────
     payload = {
         "timestamp": datetime.now().isoformat(),
-        "backend": args.backend, "n_cal": args.n_cal, "n_test": args.n_test,
+        "backend": args.backend, "dataset": args.dataset,
+        "n_cal": args.n_cal, "n_test": args.n_test,
         "alpha": args.alpha, "crc_alphas": crc_alphas,
         "methods": methods_results,
         "pairwise_mcnemar_vs_v2": pairwise_pvalues,
         "sanity_alerts": sanity_alerts,
     }
-    (out_dir / "table4_baseline.json").write_text(
+    suffix = "" if args.dataset == "medabstain" else f"_{args.dataset}"
+    (out_dir / f"table4_baseline{suffix}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
 
     md = [
         "# Round 7 Table 4 — Head-to-Head Baseline\n",
-        f"- backend={args.backend}, n_cal={args.n_cal}, n_test={args.n_test}, α={args.alpha}\n",
+        f"- backend={args.backend}, dataset={args.dataset}, "
+        f"n_cal={args.n_cal}, n_test={args.n_test}, α={args.alpha}\n",
         "## CRITICAL stratum",
         "| Method | Safety Recall (n+) | Over-Esc (n−) | TP/FN/FP | Total cost | AUROC | McNemar vs v2 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -379,9 +382,9 @@ def main():
         for a in sanity_alerts:
             md.append(f"- {a}")
 
-    (out_dir / "table4_baseline.md").write_text("\n".join(md), encoding="utf-8")
+    (out_dir / f"table4_baseline{suffix}.md").write_text("\n".join(md), encoding="utf-8")
     print("\n".join(md))
-    print(f"\n✅ saved: {out_dir}/table4_baseline.{{json,md}}")
+    print(f"\n✅ saved: {out_dir}/table4_baseline{suffix}.{{json,md}}")
 
 
 if __name__ == "__main__":
