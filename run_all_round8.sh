@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# IMPORTANT: This script requires bash (not sh/dash). It uses process
-# substitution `>(...)`, $'...' ANSI escapes, and `local` — none of which are
-# POSIX. If invoked via `sh run_all_round8.sh`, the snippet below detects
-# that and re-execs under bash automatically.
+# IMPORTANT: This script requires bash in non-POSIX mode. It uses process
+# substitution `>(...)`, $'...' ANSI escapes, and `local` — none POSIX.
+# Two failure modes are handled:
+#   (a) invoked under a different shell (dash, zsh, ksh) → BASH_VERSION unset
+#   (b) invoked as `sh run_all_round8.sh` on macOS, where /bin/sh is bash 3.2
+#       in POSIX mode — BASH_VERSION IS set but process substitution is
+#       parse-rejected. Detect via `set -o` and re-exec.
 if [ -z "${BASH_VERSION:-}" ]; then
     if command -v bash >/dev/null 2>&1; then
         exec bash "$0" "$@"
     fi
     echo "[error] this script requires bash. Run as: bash run_all_round8.sh" >&2
     exit 1
+fi
+# bash but in POSIX mode (e.g., /bin/sh on macOS) → re-exec out of POSIX mode.
+if set -o 2>/dev/null | awk '/^posix/ {exit ($NF == "on") ? 0 : 1}'; then
+    exec bash "$0" "$@"
 fi
 
 # UASEF — Round 8 ALL-IN-ONE Master Runner
