@@ -23,21 +23,23 @@ agent (cf. `agent/graph.py`)를 실행한다. agent는 4개 mock 의료 도구
 (약물 상호작용, 임상 가이드라인, 검사 참고치, 감별 진단) 접근 권한을 갖고
 UASEF 안전 게이트(`uasef_check` 노드)의 통제를 받는다.
 
-각 backend $b \in \{\text{openai}, \text{lmstudio}\}$에 대해 다음을 보고한다.
+각 backend $b \in \{\text{openai}, \text{lmstudio}\}$에 대해 다음을 보고한다
+(측정치는 `results/run_20260507-182038/`에서).
 
 | Backend                  | Accuracy | Safety Recall | Over-Esc Rate | Avg Tool Calls / Case | Avg ReAct Iterations | Conformal Coverage |
 | ------------------------ | :------: | :-----------: | :-----------: | :-------------------: | :------------------: | :----------------: |
-| OpenAI (gpt-4o)          | _[v1]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ |
-| LMStudio (LLaMA-3.1-8B)  | _[v1]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ | _[…]_ |
+| OpenAI (gpt-4o)          | 0.7588   | 0.7489        | 0.1842        | 0.84                  | 1.59                 | 0.925              |
+| LMStudio (LLaMA-3.1-8B)  | 0.4630   | 0.3699        | 0.0000        | 0.04                  | 1.04                 | 0.950              |
 
 > **Source.** `results/run_<ts>/<backend>/all_experiments_summary.json` →
 > `agent.<backend>` 필드; `run_full_evaluation.sh`로 자동 렌더링.
 
-**도구 호출 분포.** 각 도구의 상대 빈도는 agent가 질문 유형별로 어떤 도구를
-가장 유용하다고 판단하는지를 드러낸다. 일반적으로 `differential_diagnosis`와
-`clinical_guideline_search`가 합산 ~80%를 차지하고, `drug_interaction_checker`
-는 명시적인 다중 약물 처방 케이스에만 호출된다. 이 패턴은 두 backend에서
-안정적이다.
+**도구 호출률.** gpt-4o에서 ReAct agent는 case당 평균 0.84회 도구를 호출
+(1.59 reasoning iteration)한다. 더 작은 LLaMA-3.1-8B에서는 0.04회 (1.04
+iteration)로 떨어진다 — 모델이 거의 도구를 선택하지 않으며 ReAct 루프를
+한 단계 만에 종료한다. backend 간 agent 정확도 격차 (0.76 vs 0.46)는 이와
+일치한다 — gpt-4o는 더 많은 grounding으로 안전 게이트에 도달하는 반면,
+LLaMA-3.1-8B는 거의 전적으로 자체 parametric 지식에 의존한다.
 
 **한계 강화.** 4개 도구가 mock이므로 (main paper §7.4) agent 답변의 *유용성*
 은 실제 임상 도구로 외삽할 수 없다. 그러나 게이트의 에스컬레이션 결정 —
