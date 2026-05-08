@@ -86,7 +86,7 @@ BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 
 **한 번 실행으로 4단계 자동:**
 
-1. **pytest 140 tests** (회귀 안전망 + cross-backend sanity check)
+1. **pytest 154 tests** (회귀 안전망 + cross-backend sanity check + 새 baseline / dataset / 4-D sweep / α=0.001)
 2. **v1**: `run_all_experiments.py × {각 backend}` — 각 호출이 agent + baseline + medabstain + pareto 4개 sub 자동 포함
 3. **v2 Round 7 합성** (backend 무관): Table 2 FWER + Table 3 Cost
 4. **v2 Round 7 LLM** (backend별): Table 1 per-stratum coverage + Table 4 head-to-head (TECP / Quach / Semantic Entropy / UASEF Round 6 / UASEF Round 7 / **TECP-stratified** / **Cost-Sensitive single-α** ablation baselines)
