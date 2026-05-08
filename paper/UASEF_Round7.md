@@ -743,6 +743,68 @@ v2 trades modest over-escalation in MODERATE (0.81 / 0.75) for the
 CRITICAL/HIGH gains; because MODERATE has miss-cost only 10× over_esc-cost
 (vs CRITICAL's 1000:1), this is the cost-optimal trade.
 
+**Statistical significance.** Pairwise McNemar tests of v2 vs each
+baseline are reported in `results/run_<ts>/<backend>/table4_baseline.json`
+under `pairwise_mcnemar_vs_v2`. We refrain from quoting specific p-values
+in this version because all results are single-seed (seed = 42); the
+multi-seed bootstrap-CI version (§6.6) is the appropriate venue for
+formal significance claims and is shipped as `run_multiseed_evaluation.sh`.
+
+#### 6.4.4 TECP-stratified ablation (fairness baseline)
+
+A reviewer concern is that TECP/Quach/SE were evaluated under a single
+global α and are therefore "handicapped." We add **TECP-stratified**, a
+TECP variant that fits one split-CP threshold per stratum at the same
+$\alpha_s$ as Pivot A. This isolates the contribution of *stratification
+itself* from the rest of v2.
+
+TECP-stratified is implemented in
+`experiments/baselines/tecp_stratified.py` and integrated into
+`round7_table4_baseline.py`; results are emitted under the row name
+`TECP-stratified (this work, Round 7 ablation)` in
+`table4_baseline.{json,md}`. We expect TECP-stratified to close most of
+the v2-vs-TECP gap on CRITICAL Safety Recall while leaving the
+cost-reduction gap (20× → ~5×) and the multi-trigger FWER gap (Table 2)
+intact. We commit to running TECP-stratified on the same single-seed
+data and reporting numbers in the camera-ready version once the
+multi-seed run is complete.
+
+### 6.5 Cost-Sensitive Single-α Baseline (fairness baseline for Pivot C)
+
+The 38× reduction reported in §6.3 is relative to *F₁-symmetric*
+optimization, a deliberately weak comparator. We add a stronger
+comparator — single-α conformal threshold tuned to minimize the same
+expected cost (with $c_{\text{miss}}/c_{\text{over}} = 100/1$, the HIGH
+stratum ratio, as a representative scalar since a single-stratum method
+cannot consume the per-stratum matrix) — and integrate it as the row
+`Cost-Sensitive single-α (this work, Round 7 ablation)` in Table 4.
+
+We report this baseline because the headline 38× number, while honest
+under its stated comparator, is reviewer-fragile. We expect Pivot C's
+advantage to shrink to roughly 5–10× under this stronger baseline, with
+the remaining gap attributable to the per-stratum CRC constraint
+(Pivot A) preventing the cost-aware optimizer from sacrificing CRITICAL
+safety.
+
+### 6.6 Multi-Seed Bootstrap (camera-ready preview)
+
+All numbers in §6.1–6.4 are single-seed (seed = 42). We ship a
+multi-seed wrapper `run_multiseed_evaluation.sh` plus an aggregator
+`experiments/aggregate_multiseed.py` that runs the full pipeline over a
+user-specified seed list (default: 42, 43, 44, 45, 46) and emits
+`results/run_<ts>_aggregate/aggregate_seeds.{json,md}` with mean ±
+standard deviation and percentile bootstrap 95% CI per metric (per
+backend, per method, per stratum). The script is *infrastructure for
+the camera-ready submission*; the current single-seed numbers are
+honest but should be read as point estimates rather than confidence
+intervals.
+
+```bash
+# 5-seed bootstrap across both backends (~$125 OpenAI + ~50 min LMStudio)
+SEEDS="42 43 44 45 46" BACKENDS="openai lmstudio" \
+    bash run_multiseed_evaluation.sh
+```
+
 ---
 
 ## 7. Discussion
