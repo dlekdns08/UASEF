@@ -773,21 +773,26 @@ $\alpha$를 사용하는 반면 본 연구는 stratum별 통제를 제공; (ii) 
 최적화한다. 본 연구를 TECP/CLM family의 *안전성-계층화 확장*으로 보며, 대체가
 아니라고 본다.
 
-### 7.4 Mock-Tool 한계
+### 7.4 Mock-Tool 과 Agent 프레임워크 한계
 
-본 시스템의 LangGraph 에이전트 컴포넌트는 4개 mock 의료 도구를 사용한다
+**agent 프레임워크는 미래의 도구 augmented 배포를 위한 인프라이지, 본
+평가의 실제 작동 컴포넌트가 *아니다*** 임을 명시한다. 본 논문에서 평가된
+안전 게이트는 LLM의 *single-shot* 출력 텍스트와 누적 token
+log-probability에만 의존한다 (Pivot A/B/C 모두 그 신호만 소비) — agent의
+도구 사용 행동에 의존하지 *않는다*.
+
+구체적으로, LangGraph agent 컴포넌트는 4개 mock 의료 도구
 (`drug_interaction_checker`, `clinical_guideline_search`,
-`lab_reference_lookup`, `differential_diagnosis`). 실제 배포는 인증된 임상
-API (Drugs@FDA, UpToDate, LOINC, Isabel DDx)로 교체가 필요하다. 본 프레임워크는
-도구 비종속이다 — trigger 점수는 LLM 출력 텍스트와 누적 token log-probability에만
-의존하며, 이는 변하지 않는다. 이를 한계로 명시하며 향후 작업의 명확한 경로로
-표시한다 — agent의 *유용성*이 mock 도구를 넘어 일반화된다고 주장하지 않는다.
-
+`lab_reference_lookup`, `differential_diagnosis`)를 사용한다. 실제 배포는
+인증된 임상 API (Drugs@FDA, UpToDate, LOINC, Isabel DDx)로 교체가 필요하다.
 부록 B의 v1 supplementary가 구체 수치를 보고한다: gpt-4o에서 agent는 case당
-평균 0.84회만 도구를 호출하고 (1.59 ReAct iteration), LMStudio에서는 0.04회
-(1.04 iteration)로 떨어진다. 이는 더 작은 LLaMA-3.1-8B 모델이 도구 사용을
-거의 선택하지 않음을 가리키며, 인증된 도구 배포는 도구 사용 fine-tuning이나
-더 강한 프롬프트로 이를 해결해야 한다.
+평균 0.84회만 도구를 호출하고 (1.59 ReAct iteration), LMStudio에서는 **0.04회
+(1.04 iteration) — 즉 더 작은 backend에서는 agent loop가 사실상 작동하지
+않는다**. 가장 honest한 읽기: LangGraph layer는 실제 도구 augmented 배포를
+위한 placeholder이며, 안전·coverage·비용 절감에 대한 본 연구의 주장
+(Pivot A/B/C) 은 그것과 분리된다. 도구 사용 fine-tuning, 더 강한 프롬프트,
+또는 agent layer를 결정적 도구 orchestration 정책으로 교체하는 것이 명확한
+향후 작업이다.
 
 ### 7.5 Trigger의 한계 기여에 대한 실증 관찰
 
