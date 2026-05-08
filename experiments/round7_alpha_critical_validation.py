@@ -115,7 +115,13 @@ def main():
         "MODERATE": args.n_other,
         "LOW": args.n_other,
     }
-    prevalence = {"CRITICAL": 0.30, "HIGH": 0.20, "MODERATE": 0.10, "LOW": 0.05}
+    # Use uniform 0.30 prevalence across strata so the synthetic test is
+    # an *algorithm-level* validation (CRC bound) rather than a class-imbalance
+    # test. With prevalence 0.05 and α=0.10 and n=500 the CRC bound is trivially
+    # satisfied on cal (missed/n ≤ α even if all positives missed) so the
+    # empirical-miss check on test is dominated by class-imbalance variance,
+    # not algorithm correctness.
+    prevalence = {"CRITICAL": 0.30, "HIGH": 0.30, "MODERATE": 0.30, "LOW": 0.30}
 
     # Sufficiency check.
     suff: dict[str, dict] = {}
