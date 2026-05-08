@@ -977,7 +977,7 @@ Language Modeling, Semantic Entropy 대비 상당한 이득을 보였다 — CRI
 stratum safety recall 손실 없이 31× total cost 감소, 그리고 본 연구가 시험한
 방법 중 모든 수준에서 stratum별 coverage 목표를 만족하는 유일한 방법.
 
-모든 산출물 — 알고리즘 모듈, baseline 어댑터, 137개 단위 테스트 pytest 스위트,
+모든 산출물 — 알고리즘 모듈, baseline 어댑터, 140개 단위 테스트 pytest 스위트,
 단일 명령어 shell script — 는 verbatim 재현을 위해 공개한다.
 
 ---
@@ -1080,7 +1080,7 @@ BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 ```
 
 스크립트는 `results/run_<timestamp>/result.md`, `result.json`, 모든 sub-table을
-각각의 디렉토리에 생성한다; `pytest_summary.txt`가 137/137 통과 테스트를 확인한다.
+각각의 디렉토리에 생성한다; `pytest_summary.txt`가 140/140 통과 테스트를 확인한다.
 
 ### A.2 논문 주장 ↔ 코드 매핑
 
