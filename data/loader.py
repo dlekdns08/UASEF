@@ -602,25 +602,35 @@ def load_scenarios(
         bucket = case.scenario_type if case.scenario_type in buckets else "routine"
         buckets[bucket].append(case)
 
-    # 폴백으로 부족한 시나리오 보충 — audit issue #3
-    needs_fallback = any(
-        len(cs) < n_per_scenario
-        and any(c.scenario_type == st for c in _FALLBACK_SCENARIOS)
-        for st, cs in buckets.items()
-    )
-    if needs_fallback:
-        _refuse_fallback("load_scenarios (시나리오 케이스 부족)")
-    for scenario_type, cases in buckets.items():
-        if len(cases) < n_per_scenario:
-            fallback_for_type = [
-                c for c in _FALLBACK_SCENARIOS if c.scenario_type == scenario_type
-            ]
-            needed = n_per_scenario - len(cases)
-            # 부족하면 반복
-            extended = (fallback_for_type * (needed // max(len(fallback_for_type), 1) + 1))[:needed]
-            cases.extend(extended)
-            if extended and verbose:
-                print(f"[DataLoader] [WARNING] '{scenario_type}' 폴백 보충: {len(extended)}개")
+    # audit issue #3: keyword 분류 후 stratum이 n_per_scenario보다 작은 경우 처리.
+    # 기본(권장) 동작: 실데이터에 있는 만큼만 반환 (variable-size bucket). CP 절차는
+    # stratum별 n으로 동작 가능하며, 다운스트림은 n=0/n<requested 모두 처리한다.
+    # opt-in (UASEF_ALLOW_FALLBACK=1) 시에만 synthetic _FALLBACK_SCENARIOS로 패딩.
+    sparse_strata = {st: len(cs) for st, cs in buckets.items() if len(cs) < n_per_scenario}
+    if sparse_strata and _fallback_allowed():
+        warnings.warn(
+            f"[DataLoader] {ALLOW_FALLBACK_ENV}=1 → synthetic fallback으로 sparse stratum 보충. "
+            f"CP coverage 보장이 무효화되므로 논문 결과로 보고하지 마세요.",
+            UserWarning, stacklevel=2,
+        )
+        for scenario_type, cases in buckets.items():
+            if len(cases) < n_per_scenario:
+                fallback_for_type = [
+                    c for c in _FALLBACK_SCENARIOS if c.scenario_type == scenario_type
+                ]
+                if not fallback_for_type:
+                    continue
+                needed = n_per_scenario - len(cases)
+                extended = (fallback_for_type * (needed // max(len(fallback_for_type), 1) + 1))[:needed]
+                cases.extend(extended)
+                if verbose:
+                    print(f"[DataLoader] [WARNING] '{scenario_type}' synthetic 폴백 보충: {len(extended)}개")
+    elif sparse_strata and verbose:
+        msg = ", ".join(f"{st}={n}/{n_per_scenario}" for st, n in sparse_strata.items())
+        print(
+            f"[DataLoader] [INFO] 일부 stratum 케이스 부족 (실데이터로만 채움): {msg}. "
+            f"synthetic 보충을 원하면 {ALLOW_FALLBACK_ENV}=1 (CP 보장 무효)."
+        )
 
     # 각 시나리오에서 n_per_scenario개 샘플링
     rng = random.Random(seed)

@@ -1,0 +1,4 @@
+backend,scoring_method,strategy,safety_recall,over_escalation_rate,safety_recall_ok,tp,fn,fp,tn
+openai,logprob,no_escalation,0.0,0.0,False,0,219,0,38
+openai,logprob,threshold_only,0.5434,0.0263,False,119,100,1,37
+openai,logprob,full_uasef,0.5479,0.0,False,120,99,0,38

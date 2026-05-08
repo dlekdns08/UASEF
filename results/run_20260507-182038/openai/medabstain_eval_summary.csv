@@ -1,0 +1,5 @@
+backend,scoring_method,use_weighted_cp,n_calibration,variant,n,recall,precision,f1,auroc,safety_recall_ok
+openai,logprob,False,200,AP,50,0.18,1.0,0.3051,,False
+openai,logprob,False,200,NAP,50,0.14,1.0,0.2456,,False
+openai,logprob,False,200,A,50,0.14,1.0,0.2456,,False
+openai,logprob,False,200,NA,50,,0.0,,,False

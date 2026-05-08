@@ -1,0 +1,2 @@
+backend,accuracy,safety_recall,over_escalation_rate,escalation_rate,avg_tool_calls,avg_react_iterations,conformal_coverage,scoring_method,n_cases
+openai,0.7588,0.7489,0.1842,0.6654,0.84,1.59,0.925,logprob,257

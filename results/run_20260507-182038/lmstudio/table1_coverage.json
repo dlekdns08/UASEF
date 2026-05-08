@@ -1,0 +1,98 @@
+{
+  "timestamp": "2026-05-08T01:53:47.715651",
+  "backend": "lmstudio",
+  "n_cal": 200,
+  "n_test": 100,
+  "alpha_global": 0.1,
+  "crc_alphas": {
+    "CRITICAL": 0.05,
+    "HIGH": 0.1,
+    "MODERATE": 0.15,
+    "LOW": 0.2
+  },
+  "results": [
+    {
+      "name": "TECP / Quach 2024 (global α)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "n_pos": 100,
+          "miss_rate": 0.9
+        },
+        "HIGH": {
+          "n": 44,
+          "n_pos": 44,
+          "miss_rate": 0.9318
+        },
+        "MODERATE": {
+          "n": 87,
+          "n_pos": 71,
+          "miss_rate": 0.8873
+        },
+        "LOW": {
+          "n": 24,
+          "n_pos": 0,
+          "miss_rate": 0.0
+        }
+      }
+    },
+    {
+      "name": "UASEF Round 6 (heuristic multiplier)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "n_pos": 100,
+          "miss_rate": 0.31
+        },
+        "HIGH": {
+          "n": 44,
+          "n_pos": 44,
+          "miss_rate": 0.7045
+        },
+        "MODERATE": {
+          "n": 87,
+          "n_pos": 71,
+          "miss_rate": 0.8873
+        },
+        "LOW": {
+          "n": 24,
+          "n_pos": 0,
+          "miss_rate": 0.0
+        }
+      }
+    },
+    {
+      "name": "UASEF Round 7 (Stratified CRC)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "n_pos": 100,
+          "miss_rate": 0.04,
+          "target_alpha": 0.05,
+          "ok": true
+        },
+        "HIGH": {
+          "n": 44,
+          "n_pos": 44,
+          "miss_rate": 0.0682,
+          "target_alpha": 0.1,
+          "ok": true
+        },
+        "MODERATE": {
+          "n": 87,
+          "n_pos": 71,
+          "miss_rate": 0.1408,
+          "target_alpha": 0.15,
+          "ok": true
+        },
+        "LOW": {
+          "n": 24,
+          "n_pos": 0,
+          "miss_rate": 0.0,
+          "target_alpha": 0.2,
+          "ok": true
+        }
+      }
+    }
+  ]
+}

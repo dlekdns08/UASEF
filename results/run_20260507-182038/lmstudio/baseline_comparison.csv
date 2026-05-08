@@ -1,0 +1,4 @@
+backend,scoring_method,strategy,safety_recall,over_escalation_rate,safety_recall_ok,tp,fn,fp,tn
+lmstudio,logprob,no_escalation,0.0,0.0,False,0,219,0,38
+lmstudio,logprob,threshold_only,0.5114,0.0,False,112,107,0,38
+lmstudio,logprob,full_uasef,0.4932,0.0,False,108,111,0,38

@@ -1,0 +1,77 @@
+{
+  "openai": {
+    "backend": "openai",
+    "timestamp": "2026-05-07T19:27:11.700314",
+    "scoring_method": "logprob",
+    "n_calibration": 200,
+    "n_test_per_scenario": 100,
+    "metrics": {
+      "no_escalation": {
+        "n": 257,
+        "tp": 0,
+        "fn": 219,
+        "fp": 0,
+        "tn": 38,
+        "safety_recall": 0.0,
+        "safety_recall_ci": [
+          0.0,
+          0.0172
+        ],
+        "safety_recall_ok": false,
+        "over_escalation_rate": 0.0,
+        "over_escalation_ci": [
+          0.0,
+          0.0918
+        ],
+        "over_escalation_ok": true,
+        "precision": null,
+        "f1": null,
+        "escalation_rate": 0.0
+      },
+      "threshold_only": {
+        "n": 257,
+        "tp": 119,
+        "fn": 100,
+        "fp": 1,
+        "tn": 37,
+        "safety_recall": 0.5434,
+        "safety_recall_ci": [
+          0.4772,
+          0.6081
+        ],
+        "safety_recall_ok": false,
+        "over_escalation_rate": 0.0263,
+        "over_escalation_ci": [
+          0.0047,
+          0.1349
+        ],
+        "over_escalation_ok": true,
+        "precision": 0.9917,
+        "f1": 0.7021,
+        "escalation_rate": 0.4669
+      },
+      "full_uasef": {
+        "n": 257,
+        "tp": 120,
+        "fn": 99,
+        "fp": 0,
+        "tn": 38,
+        "safety_recall": 0.5479,
+        "safety_recall_ci": [
+          0.4817,
+          0.6124
+        ],
+        "safety_recall_ok": false,
+        "over_escalation_rate": 0.0,
+        "over_escalation_ci": [
+          0.0,
+          0.0918
+        ],
+        "over_escalation_ok": true,
+        "precision": 1.0,
+        "f1": 0.7079,
+        "escalation_rate": 0.4669
+      }
+    }
+  }
+}

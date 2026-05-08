@@ -1,0 +1,5 @@
+backend,scoring_method,use_weighted_cp,n_calibration,variant,n,recall,precision,f1,auroc,safety_recall_ok
+lmstudio,logprob,False,200,AP,50,0.12,1.0,0.2143,,False
+lmstudio,logprob,False,200,NAP,49,0.102,1.0,0.1851,,False
+lmstudio,logprob,False,200,A,50,0.04,1.0,0.0769,,False
+lmstudio,logprob,False,200,NA,50,,0.0,,,False

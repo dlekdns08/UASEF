@@ -1,0 +1,36 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+[Phase 1] Calibration scores 수집 ...
+[DataLoader] HuggingFace MedQA 로드: 1273개
+[DataLoader] MedAbstain AP 로드: 1007개
+[DataLoader] MedAbstain NAP 로드: 1007개
+[DataLoader] [INFO] 일부 stratum 케이스 부족 (실데이터로만 채움): rare_disease=45/200, multimorbidity=12/200. synthetic 보충을 원하면 UASEF_ALLOW_FALLBACK=1 (CP 보장 무효).
+  emergency         : 200개 (에스컬레이션 예상: 200개)
+  rare_disease      : 45개 (에스컬레이션 예상: 45개)
+  multimorbidity    : 12개 (에스컬레이션 예상: 12개)
+  routine           : 200개 (에스컬레이션 예상: 128개)
+
+[Phase 1] Calibration scores 수집 ...
+[DataLoader] HuggingFace MedQA 로드: 1273개
+[DataLoader] MedAbstain AP 로드: 1007개
+[DataLoader] MedAbstain NAP 로드: 1007개
+[DataLoader] [INFO] 일부 stratum 케이스 부족 (실데이터로만 채움): rare_disease=45/100, multimorbidity=12/100. synthetic 보충을 원하면 UASEF_ALLOW_FALLBACK=1 (CP 보장 무효).
+  emergency         : 100개 (에스컬레이션 예상: 100개)
+  rare_disease      : 45개 (에스컬레이션 예상: 45개)
+  multimorbidity    : 12개 (에스컬레이션 예상: 12개)
+  routine           : 100개 (에스컬레이션 예상: 60개)
+[UQM] Calibration 완료: n=457, α=0.1, q̂=0.3559
+# Round 7 Table 4 — Head-to-Head Baseline
+
+- backend=openai, n_cal=200, n_test=100, α=0.1
+
+## CRITICAL stratum
+| Method | Safety Recall | Over-Esc | TP/FN/FP | Total cost |
+| --- | --- | --- | --- | --- |
+| TECP (Xu & Lu 2025) | 0.16 | None | 16/84/0 | 88941.0 |
+| Quach 2024 CLM | 0.16 | None | 16/84/0 | 88941.0 |
+| Semantic Entropy (Farquhar Nature 2024) | 0.16 | None | 16/84/0 | 88941.0 |
+| UASEF Round 6 (heuristic multiplier) | 0.84 | None | 84/16/0 | 19940.0 |
+| UASEF Round 7 (Stratified CRC + MTC + Cost-Aware) | 0.96 | None | 96/4/0 | 4374.0 |
+
+✅ saved: /Users/idaun/PoC/UASEF/results/round7/table4_baseline.{json,md}

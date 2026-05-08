@@ -1,0 +1,2 @@
+backend,accuracy,safety_recall,over_escalation_rate,escalation_rate,avg_tool_calls,avg_react_iterations,conformal_coverage,scoring_method,n_cases
+lmstudio,0.463,0.3699,0.0,0.3152,0.04,1.04,0.95,logprob,257

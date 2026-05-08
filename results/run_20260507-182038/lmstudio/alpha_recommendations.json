@@ -1,0 +1,28 @@
+{
+  "lmstudio": {
+    "emergency_medicine": {
+      "alpha": 0.01,
+      "actual_coverage": 1.0,
+      "escalation_rate": 0.24,
+      "adjusted_threshold": 0.2641,
+      "utility": 0.52,
+      "reason": "coverage 제약(≥0.95) 충족 중 escalation_rate 최소 선택 (esc_rate=0.240 > 0.15 초과)"
+    },
+    "internal_medicine": {
+      "alpha": 0.01,
+      "actual_coverage": 1.0,
+      "escalation_rate": 0.0,
+      "adjusted_threshold": 0.4891,
+      "utility": 1.0,
+      "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+    },
+    "general_practice": {
+      "alpha": 0.01,
+      "actual_coverage": 1.0,
+      "escalation_rate": 0.0,
+      "adjusted_threshold": 0.6358,
+      "utility": 1.0,
+      "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+    }
+  }
+}

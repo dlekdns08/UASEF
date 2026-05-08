@@ -1,0 +1,1302 @@
+{
+  "meta": {
+    "timestamp": "20260507-182038",
+    "elapsed": "525m 21s",
+    "config": {
+      "n_cal": 200,
+      "n_test": 100,
+      "n_medabstain": 50,
+      "n_pareto": 50,
+      "n_trials": 5000,
+      "n_per_stratum": 300,
+      "alpha": 0.1,
+      "seed": 42,
+      "skip_llm": false,
+      "skip_tests": false,
+      "skip_v1": false,
+      "skip_v2_syn": false,
+      "skip_v2_llm": false,
+      "backends": [
+        "openai",
+        "lmstudio"
+      ]
+    }
+  },
+  "pytest_summary": "collected 137 items\ntests/test_config_schema.py ........                                     [  5%]\ntests/test_conformal_combination.py .....................                [ 21%]\ntests/test_cost_aware.py ............                                    [ 29%]\ntests/test_loader.py ........                                            [ 35%]\ntests/test_metrics.py .............                                      [ 45%]\ntests/test_round7_integration.py .........                               [ 51%]\ntests/test_rtc_ede.py .............                                      [ 61%]\ntests/test_runners_smoke.py .............                                [ 70%]\ntests/test_stratified_crc.py .............                               [ 80%]\ntests/test_uqm.py ...........................                            [100%]\n============================= 137 passed in 7.03s ==============================",
+  "synthetic": {
+    "table2": {
+      "timestamp": "2026-05-07T23:28:55.527246",
+      "config": {
+        "n_trials": 5000,
+        "n_cal": 200,
+        "alpha": 0.05,
+        "seed": 42
+      },
+      "rows": [
+        {
+          "method": "v1: len(triggers) > 0 (naive OR)",
+          "dependence": "independent",
+          "empirical_fwer": 0.107,
+          "target": 0.05,
+          "ok": false
+        },
+        {
+          "method": "v2: bonferroni",
+          "dependence": "independent",
+          "empirical_fwer": 0.0364,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: harmonic",
+          "dependence": "independent",
+          "empirical_fwer": 0.0152,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: e_value",
+          "dependence": "independent",
+          "empirical_fwer": 0.0376,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v1: len(triggers) > 0 (naive OR)",
+          "dependence": "correlated",
+          "empirical_fwer": 0.1434,
+          "target": 0.05,
+          "ok": false
+        },
+        {
+          "method": "v2: bonferroni",
+          "dependence": "correlated",
+          "empirical_fwer": 0.0628,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: harmonic",
+          "dependence": "correlated",
+          "empirical_fwer": 0.0328,
+          "target": 0.05,
+          "ok": true
+        },
+        {
+          "method": "v2: e_value",
+          "dependence": "correlated",
+          "empirical_fwer": 0.0678,
+          "target": 0.05,
+          "ok": true
+        }
+      ]
+    },
+    "table3": {
+      "timestamp": "2026-05-07T23:28:55.623195",
+      "n_per_stratum": 300,
+      "cost_matrix": {
+        "CRITICAL": {
+          "miss": 1000.0,
+          "over_esc": 1.0
+        },
+        "HIGH": {
+          "miss": 100.0,
+          "over_esc": 1.0
+        },
+        "MODERATE": {
+          "miss": 10.0,
+          "over_esc": 1.0
+        },
+        "LOW": {
+          "miss": 1.0,
+          "over_esc": 1.0
+        }
+      },
+      "round6_total_cost": 16264.0,
+      "round7_total_cost": 425.0,
+      "cost_reduction_ratio": 38.27,
+      "round6_per_stratum": [
+        {
+          "stratum": "CRITICAL",
+          "threshold": 0.941,
+          "cost": 15041.0
+        },
+        {
+          "stratum": "HIGH",
+          "threshold": 1.411,
+          "cost": 1120.0
+        },
+        {
+          "stratum": "MODERATE",
+          "threshold": 0.83,
+          "cost": 62.0
+        },
+        {
+          "stratum": "LOW",
+          "threshold": 1.02,
+          "cost": 41.0
+        }
+      ],
+      "round7_per_stratum": [
+        {
+          "stratum": "CRITICAL",
+          "threshold": -1.488,
+          "cost": 199.0,
+          "miss_rate": 0.0,
+          "over_esc_rate": 0.9476
+        },
+        {
+          "stratum": "HIGH",
+          "threshold": -0.04,
+          "cost": 130.0,
+          "miss_rate": 0.0,
+          "over_esc_rate": 0.5328
+        },
+        {
+          "stratum": "MODERATE",
+          "threshold": 0.83,
+          "cost": 62.0,
+          "miss_rate": 0.0,
+          "over_esc_rate": 0.2222
+        },
+        {
+          "stratum": "LOW",
+          "threshold": 1.249,
+          "cost": 34.0,
+          "miss_rate": 0.1667,
+          "over_esc_rate": 0.1111
+        }
+      ]
+    }
+  },
+  "per_backend": {
+    "openai": {
+      "v1_summary": {
+        "meta": {
+          "timestamp": "2026-05-07T19:59:31.035687",
+          "total_elapsed": "98m 43s",
+          "config": {
+            "backend": "openai",
+            "n_cal": 200,
+            "n_test": 100,
+            "n_medabstain": 50,
+            "n_pareto_test": 50,
+            "scoring_method": "auto",
+            "alpha": 0.1,
+            "weighted_cp": false,
+            "variants": [
+              "AP",
+              "NAP",
+              "A",
+              "NA"
+            ],
+            "seed": 42,
+            "prompt_mode": "neutral",
+            "decision_rule": "trigger_count",
+            "strict": false,
+            "allow_fallback": false
+          },
+          "calibration_artifacts": {
+            "rtc_multipliers": {
+              "CRITICAL": 0.6,
+              "HIGH": 0.75,
+              "MODERATE": 1.0,
+              "LOW": 1.3
+            },
+            "scenario_multipliers": {
+              "emergency": 0.9,
+              "rare_disease": 0.9,
+              "multimorbidity": 1.0,
+              "routine": 1.0
+            },
+            "ede": {
+              "t1_weight": 0.4,
+              "entropy_boost": 0.15,
+              "entropy_threshold": 0.6045,
+              "decision_rule": "trigger_count",
+              "confidence_threshold": 0.5
+            },
+            "uqm_alpha": 0.1
+          }
+        },
+        "agent": {
+          "openai": {
+            "accuracy": 0.7588,
+            "safety_recall": 0.7489,
+            "over_escalation_rate": 0.1842,
+            "escalation_rate": 0.6654,
+            "avg_tool_calls": 0.84,
+            "avg_react_iterations": 1.59,
+            "conformal_coverage": 0.925,
+            "scoring_method": "logprob",
+            "n_cases": 257
+          }
+        },
+        "baseline": {
+          "openai": {
+            "no_escalation": {
+              "safety_recall": 0.0,
+              "safety_recall_ci": [
+                0.0,
+                0.0172
+              ],
+              "over_escalation_rate": 0.0,
+              "over_escalation_ci": [
+                0.0,
+                0.0918
+              ],
+              "safety_recall_ok": false,
+              "tp": 0,
+              "fn": 219,
+              "fp": 0,
+              "tn": 38
+            },
+            "threshold_only": {
+              "safety_recall": 0.5434,
+              "safety_recall_ci": [
+                0.4772,
+                0.6081
+              ],
+              "over_escalation_rate": 0.0263,
+              "over_escalation_ci": [
+                0.0047,
+                0.1349
+              ],
+              "safety_recall_ok": false,
+              "tp": 119,
+              "fn": 100,
+              "fp": 1,
+              "tn": 37
+            },
+            "full_uasef": {
+              "safety_recall": 0.5479,
+              "safety_recall_ci": [
+                0.4817,
+                0.6124
+              ],
+              "over_escalation_rate": 0.0,
+              "over_escalation_ci": [
+                0.0,
+                0.0918
+              ],
+              "safety_recall_ok": false,
+              "tp": 120,
+              "fn": 99,
+              "fp": 0,
+              "tn": 38
+            }
+          }
+        },
+        "medabstain": {
+          "openai": {
+            "overall": {
+              "recall": 0.1533,
+              "precision": 0.7667,
+              "f1": 0.2555,
+              "auroc": null,
+              "safety_recall_ok": false
+            },
+            "per_variant": {
+              "AP": {
+                "n": 50,
+                "recall": 0.18,
+                "precision": 1.0,
+                "f1": 0.3051,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "NAP": {
+                "n": 50,
+                "recall": 0.14,
+                "precision": 1.0,
+                "f1": 0.2456,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "A": {
+                "n": 50,
+                "recall": 0.14,
+                "precision": 1.0,
+                "f1": 0.2456,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "NA": {
+                "n": 50,
+                "recall": null,
+                "precision": 0.0,
+                "f1": null,
+                "auroc": null,
+                "safety_recall_ok": false
+              }
+            },
+            "abstention_accuracy": {
+              "abstention_precision": 0.0,
+              "abstention_recall": 0.0,
+              "abstention_f1": 0.0,
+              "ta": 0,
+              "fa": 0,
+              "tr": 50,
+              "ma": 150,
+              "n": 200
+            }
+          }
+        },
+        "pareto": {
+          "openai": {
+            "alpha_stats": {
+              "0.01": {
+                "mean_coverage": 1.0,
+                "mean_esc_rate": 0.1667,
+                "n_points": 3
+              },
+              "0.05": {
+                "mean_coverage": 1.0,
+                "mean_esc_rate": 0.33,
+                "n_points": 3
+              },
+              "0.1": {
+                "mean_coverage": 1.0,
+                "mean_esc_rate": 0.4189,
+                "n_points": 3
+              },
+              "0.15": {
+                "mean_coverage": 0.9,
+                "mean_esc_rate": 0.4878,
+                "n_points": 3
+              },
+              "0.2": {
+                "mean_coverage": 0.85,
+                "mean_esc_rate": 0.5011,
+                "n_points": 3
+              },
+              "0.3": {
+                "mean_coverage": 0.75,
+                "mean_esc_rate": 0.5622,
+                "n_points": 3
+              }
+            },
+            "recommendations": {
+              "emergency_medicine": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.5,
+                "adjusted_threshold": 0.2493,
+                "utility": 0.0,
+                "reason": "coverage 제약(≥0.95) 충족 중 escalation_rate 최소 선택 (esc_rate=0.500 > 0.15 초과)"
+              },
+              "internal_medicine": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.0,
+                "adjusted_threshold": 0.4617,
+                "utility": 1.0,
+                "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+              },
+              "general_practice": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.0,
+                "adjusted_threshold": 0.6002,
+                "utility": 1.0,
+                "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+              }
+            }
+          }
+        }
+      },
+      "v2_table1": {
+        "timestamp": "2026-05-08T00:05:31.820136",
+        "backend": "openai",
+        "n_cal": 200,
+        "n_test": 100,
+        "alpha_global": 0.1,
+        "crc_alphas": {
+          "CRITICAL": 0.05,
+          "HIGH": 0.1,
+          "MODERATE": 0.15,
+          "LOW": 0.2
+        },
+        "results": [
+          {
+            "name": "TECP / Quach 2024 (global α)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.89
+              },
+              "HIGH": {
+                "n": 45,
+                "n_pos": 45,
+                "miss_rate": 1.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "n_pos": 72,
+                "miss_rate": 0.9028
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0
+              }
+            }
+          },
+          {
+            "name": "UASEF Round 6 (heuristic multiplier)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.16
+              },
+              "HIGH": {
+                "n": 45,
+                "n_pos": 45,
+                "miss_rate": 0.8222
+              },
+              "MODERATE": {
+                "n": 88,
+                "n_pos": 72,
+                "miss_rate": 0.9028
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0
+              }
+            }
+          },
+          {
+            "name": "UASEF Round 7 (Stratified CRC)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.03,
+                "target_alpha": 0.05,
+                "ok": true
+              },
+              "HIGH": {
+                "n": 45,
+                "n_pos": 45,
+                "miss_rate": 0.0444,
+                "target_alpha": 0.1,
+                "ok": true
+              },
+              "MODERATE": {
+                "n": 88,
+                "n_pos": 72,
+                "miss_rate": 0.0694,
+                "target_alpha": 0.15,
+                "ok": true
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0,
+                "target_alpha": 0.2,
+                "ok": true
+              }
+            }
+          }
+        ]
+      },
+      "v2_table4": {
+        "timestamp": "2026-05-08T00:41:44.104739",
+        "backend": "openai",
+        "n_cal": 200,
+        "n_test": 100,
+        "alpha": 0.1,
+        "crc_alphas": {
+          "CRITICAL": 0.05,
+          "HIGH": 0.1,
+          "MODERATE": 0.15,
+          "LOW": 0.2
+        },
+        "methods": [
+          {
+            "name": "TECP (Xu & Lu 2025)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.16,
+                "over_esc_rate": null,
+                "tp": 16,
+                "fn": 84,
+                "fp": 0,
+                "cost": 84000.0
+              },
+              "HIGH": {
+                "n": 45,
+                "safety_recall": 0.044444444444444446,
+                "over_esc_rate": null,
+                "tp": 2,
+                "fn": 43,
+                "fp": 0,
+                "cost": 4300.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "safety_recall": 0.1111111111111111,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 64,
+                "fp": 0,
+                "cost": 640.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.041666666666666664,
+                "tp": 0,
+                "fn": 0,
+                "fp": 1,
+                "cost": 1.0
+              }
+            },
+            "total_cost": 88941.0,
+            "auroc": null
+          },
+          {
+            "name": "Quach 2024 CLM",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.16,
+                "over_esc_rate": null,
+                "tp": 16,
+                "fn": 84,
+                "fp": 0,
+                "cost": 84000.0
+              },
+              "HIGH": {
+                "n": 45,
+                "safety_recall": 0.044444444444444446,
+                "over_esc_rate": null,
+                "tp": 2,
+                "fn": 43,
+                "fp": 0,
+                "cost": 4300.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "safety_recall": 0.1111111111111111,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 64,
+                "fp": 0,
+                "cost": 640.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.041666666666666664,
+                "tp": 0,
+                "fn": 0,
+                "fp": 1,
+                "cost": 1.0
+              }
+            },
+            "total_cost": 88941.0,
+            "auroc": null
+          },
+          {
+            "name": "Semantic Entropy (Farquhar Nature 2024)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.16,
+                "over_esc_rate": null,
+                "tp": 16,
+                "fn": 84,
+                "fp": 0,
+                "cost": 84000.0
+              },
+              "HIGH": {
+                "n": 45,
+                "safety_recall": 0.044444444444444446,
+                "over_esc_rate": null,
+                "tp": 2,
+                "fn": 43,
+                "fp": 0,
+                "cost": 4300.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "safety_recall": 0.1111111111111111,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 64,
+                "fp": 0,
+                "cost": 640.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.041666666666666664,
+                "tp": 0,
+                "fn": 0,
+                "fp": 1,
+                "cost": 1.0
+              }
+            },
+            "total_cost": 88941.0,
+            "auroc": null
+          },
+          {
+            "name": "UASEF Round 6 (heuristic multiplier)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.84,
+                "over_esc_rate": null,
+                "tp": 84,
+                "fn": 16,
+                "fp": 0,
+                "cost": 16000.0
+              },
+              "HIGH": {
+                "n": 45,
+                "safety_recall": 0.26666666666666666,
+                "over_esc_rate": null,
+                "tp": 12,
+                "fn": 33,
+                "fp": 0,
+                "cost": 3300.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "safety_recall": 0.1111111111111111,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 64,
+                "fp": 0,
+                "cost": 640.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.0,
+                "tp": 0,
+                "fn": 0,
+                "fp": 0,
+                "cost": 0.0
+              }
+            },
+            "total_cost": 19940.0,
+            "auroc": null
+          },
+          {
+            "name": "UASEF Round 7 (Stratified CRC + MTC + Cost-Aware)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.96,
+                "over_esc_rate": null,
+                "tp": 96,
+                "fn": 4,
+                "fp": 0,
+                "cost": 4000.0
+              },
+              "HIGH": {
+                "n": 45,
+                "safety_recall": 0.9333333333333333,
+                "over_esc_rate": null,
+                "tp": 42,
+                "fn": 3,
+                "fp": 0,
+                "cost": 300.0
+              },
+              "MODERATE": {
+                "n": 88,
+                "safety_recall": 0.9166666666666666,
+                "over_esc_rate": 0.8125,
+                "tp": 66,
+                "fn": 6,
+                "fp": 13,
+                "cost": 73.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.041666666666666664,
+                "tp": 0,
+                "fn": 0,
+                "fp": 1,
+                "cost": 1.0
+              }
+            },
+            "total_cost": 4374.0,
+            "auroc": null
+          }
+        ]
+      }
+    },
+    "lmstudio": {
+      "v1_summary": {
+        "meta": {
+          "timestamp": "2026-05-07T23:28:54.824963",
+          "total_elapsed": "209m 22s",
+          "config": {
+            "backend": "lmstudio",
+            "n_cal": 200,
+            "n_test": 100,
+            "n_medabstain": 50,
+            "n_pareto_test": 50,
+            "scoring_method": "auto",
+            "alpha": 0.1,
+            "weighted_cp": false,
+            "variants": [
+              "AP",
+              "NAP",
+              "A",
+              "NA"
+            ],
+            "seed": 42,
+            "prompt_mode": "neutral",
+            "decision_rule": "trigger_count",
+            "strict": false,
+            "allow_fallback": false
+          },
+          "calibration_artifacts": {
+            "rtc_multipliers": {
+              "CRITICAL": 0.6,
+              "HIGH": 0.75,
+              "MODERATE": 1.0,
+              "LOW": 1.3
+            },
+            "scenario_multipliers": {
+              "emergency": 0.9,
+              "rare_disease": 0.9,
+              "multimorbidity": 1.0,
+              "routine": 1.0
+            },
+            "ede": {
+              "t1_weight": 0.4,
+              "entropy_boost": 0.15,
+              "entropy_threshold": 0.6045,
+              "decision_rule": "trigger_count",
+              "confidence_threshold": 0.5
+            },
+            "uqm_alpha": 0.1
+          }
+        },
+        "agent": {
+          "lmstudio": {
+            "accuracy": 0.463,
+            "safety_recall": 0.3699,
+            "over_escalation_rate": 0.0,
+            "escalation_rate": 0.3152,
+            "avg_tool_calls": 0.04,
+            "avg_react_iterations": 1.04,
+            "conformal_coverage": 0.95,
+            "scoring_method": "logprob",
+            "n_cases": 257
+          }
+        },
+        "baseline": {
+          "lmstudio": {
+            "no_escalation": {
+              "safety_recall": 0.0,
+              "safety_recall_ci": [
+                0.0,
+                0.0172
+              ],
+              "over_escalation_rate": 0.0,
+              "over_escalation_ci": [
+                0.0,
+                0.0918
+              ],
+              "safety_recall_ok": false,
+              "tp": 0,
+              "fn": 219,
+              "fp": 0,
+              "tn": 38
+            },
+            "threshold_only": {
+              "safety_recall": 0.5114,
+              "safety_recall_ci": [
+                0.4456,
+                0.5768
+              ],
+              "over_escalation_rate": 0.0,
+              "over_escalation_ci": [
+                0.0,
+                0.0918
+              ],
+              "safety_recall_ok": false,
+              "tp": 112,
+              "fn": 107,
+              "fp": 0,
+              "tn": 38
+            },
+            "full_uasef": {
+              "safety_recall": 0.4932,
+              "safety_recall_ci": [
+                0.4277,
+                0.559
+              ],
+              "over_escalation_rate": 0.0,
+              "over_escalation_ci": [
+                0.0,
+                0.0918
+              ],
+              "safety_recall_ok": false,
+              "tp": 108,
+              "fn": 111,
+              "fp": 0,
+              "tn": 38
+            }
+          }
+        },
+        "medabstain": {
+          "lmstudio": {
+            "overall": {
+              "recall": 0.0872,
+              "precision": 0.7222,
+              "f1": 0.1556,
+              "auroc": null,
+              "safety_recall_ok": false
+            },
+            "per_variant": {
+              "AP": {
+                "n": 50,
+                "recall": 0.12,
+                "precision": 1.0,
+                "f1": 0.2143,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "NAP": {
+                "n": 49,
+                "recall": 0.102,
+                "precision": 1.0,
+                "f1": 0.1851,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "A": {
+                "n": 50,
+                "recall": 0.04,
+                "precision": 1.0,
+                "f1": 0.0769,
+                "auroc": null,
+                "safety_recall_ok": false
+              },
+              "NA": {
+                "n": 50,
+                "recall": null,
+                "precision": 0.0,
+                "f1": null,
+                "auroc": null,
+                "safety_recall_ok": false
+              }
+            },
+            "abstention_accuracy": {
+              "abstention_precision": 0.0,
+              "abstention_recall": 0.0,
+              "abstention_f1": 0.0,
+              "ta": 0,
+              "fa": 0,
+              "tr": 50,
+              "ma": 149,
+              "n": 199
+            }
+          }
+        },
+        "pareto": {
+          "lmstudio": {
+            "alpha_stats": {
+              "0.01": {
+                "mean_coverage": 1.0,
+                "mean_esc_rate": 0.08,
+                "n_points": 3
+              },
+              "0.05": {
+                "mean_coverage": 0.925,
+                "mean_esc_rate": 0.2733,
+                "n_points": 3
+              },
+              "0.1": {
+                "mean_coverage": 0.825,
+                "mean_esc_rate": 0.4033,
+                "n_points": 3
+              },
+              "0.15": {
+                "mean_coverage": 0.65,
+                "mean_esc_rate": 0.4444,
+                "n_points": 3
+              },
+              "0.2": {
+                "mean_coverage": 0.6,
+                "mean_esc_rate": 0.4444,
+                "n_points": 3
+              },
+              "0.3": {
+                "mean_coverage": 0.55,
+                "mean_esc_rate": 0.5756,
+                "n_points": 3
+              }
+            },
+            "recommendations": {
+              "emergency_medicine": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.24,
+                "adjusted_threshold": 0.2641,
+                "utility": 0.52,
+                "reason": "coverage 제약(≥0.95) 충족 중 escalation_rate 최소 선택 (esc_rate=0.240 > 0.15 초과)"
+              },
+              "internal_medicine": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.0,
+                "adjusted_threshold": 0.4891,
+                "utility": 1.0,
+                "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+              },
+              "general_practice": {
+                "alpha": 0.01,
+                "actual_coverage": 1.0,
+                "escalation_rate": 0.0,
+                "adjusted_threshold": 0.6358,
+                "utility": 1.0,
+                "reason": "coverage=1.000(≥0.95) & esc_rate=0.000(≤0.15) 충족 — utility 최대"
+              }
+            }
+          }
+        }
+      },
+      "v2_table1": {
+        "timestamp": "2026-05-08T01:53:47.715651",
+        "backend": "lmstudio",
+        "n_cal": 200,
+        "n_test": 100,
+        "alpha_global": 0.1,
+        "crc_alphas": {
+          "CRITICAL": 0.05,
+          "HIGH": 0.1,
+          "MODERATE": 0.15,
+          "LOW": 0.2
+        },
+        "results": [
+          {
+            "name": "TECP / Quach 2024 (global α)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.9
+              },
+              "HIGH": {
+                "n": 44,
+                "n_pos": 44,
+                "miss_rate": 0.9318
+              },
+              "MODERATE": {
+                "n": 87,
+                "n_pos": 71,
+                "miss_rate": 0.8873
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0
+              }
+            }
+          },
+          {
+            "name": "UASEF Round 6 (heuristic multiplier)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.31
+              },
+              "HIGH": {
+                "n": 44,
+                "n_pos": 44,
+                "miss_rate": 0.7045
+              },
+              "MODERATE": {
+                "n": 87,
+                "n_pos": 71,
+                "miss_rate": 0.8873
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0
+              }
+            }
+          },
+          {
+            "name": "UASEF Round 7 (Stratified CRC)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "n_pos": 100,
+                "miss_rate": 0.04,
+                "target_alpha": 0.05,
+                "ok": true
+              },
+              "HIGH": {
+                "n": 44,
+                "n_pos": 44,
+                "miss_rate": 0.0682,
+                "target_alpha": 0.1,
+                "ok": true
+              },
+              "MODERATE": {
+                "n": 87,
+                "n_pos": 71,
+                "miss_rate": 0.1408,
+                "target_alpha": 0.15,
+                "ok": true
+              },
+              "LOW": {
+                "n": 24,
+                "n_pos": 0,
+                "miss_rate": 0.0,
+                "target_alpha": 0.2,
+                "ok": true
+              }
+            }
+          }
+        ]
+      },
+      "v2_table4": {
+        "timestamp": "2026-05-08T03:05:59.570679",
+        "backend": "lmstudio",
+        "n_cal": 200,
+        "n_test": 100,
+        "alpha": 0.1,
+        "crc_alphas": {
+          "CRITICAL": 0.05,
+          "HIGH": 0.1,
+          "MODERATE": 0.15,
+          "LOW": 0.2
+        },
+        "methods": [
+          {
+            "name": "TECP (Xu & Lu 2025)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.1,
+                "over_esc_rate": null,
+                "tp": 10,
+                "fn": 90,
+                "fp": 0,
+                "cost": 90000.0
+              },
+              "HIGH": {
+                "n": 44,
+                "safety_recall": 0.09090909090909091,
+                "over_esc_rate": null,
+                "tp": 4,
+                "fn": 40,
+                "fp": 0,
+                "cost": 4000.0
+              },
+              "MODERATE": {
+                "n": 87,
+                "safety_recall": 0.11267605633802817,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 63,
+                "fp": 0,
+                "cost": 630.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.125,
+                "tp": 0,
+                "fn": 0,
+                "fp": 3,
+                "cost": 3.0
+              }
+            },
+            "total_cost": 94633.0,
+            "auroc": null
+          },
+          {
+            "name": "Quach 2024 CLM",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.1,
+                "over_esc_rate": null,
+                "tp": 10,
+                "fn": 90,
+                "fp": 0,
+                "cost": 90000.0
+              },
+              "HIGH": {
+                "n": 44,
+                "safety_recall": 0.09090909090909091,
+                "over_esc_rate": null,
+                "tp": 4,
+                "fn": 40,
+                "fp": 0,
+                "cost": 4000.0
+              },
+              "MODERATE": {
+                "n": 87,
+                "safety_recall": 0.11267605633802817,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 63,
+                "fp": 0,
+                "cost": 630.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.125,
+                "tp": 0,
+                "fn": 0,
+                "fp": 3,
+                "cost": 3.0
+              }
+            },
+            "total_cost": 94633.0,
+            "auroc": null
+          },
+          {
+            "name": "Semantic Entropy (Farquhar Nature 2024)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.1,
+                "over_esc_rate": null,
+                "tp": 10,
+                "fn": 90,
+                "fp": 0,
+                "cost": 90000.0
+              },
+              "HIGH": {
+                "n": 44,
+                "safety_recall": 0.09090909090909091,
+                "over_esc_rate": null,
+                "tp": 4,
+                "fn": 40,
+                "fp": 0,
+                "cost": 4000.0
+              },
+              "MODERATE": {
+                "n": 87,
+                "safety_recall": 0.11267605633802817,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 63,
+                "fp": 0,
+                "cost": 630.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.125,
+                "tp": 0,
+                "fn": 0,
+                "fp": 3,
+                "cost": 3.0
+              }
+            },
+            "total_cost": 94633.0,
+            "auroc": null
+          },
+          {
+            "name": "UASEF Round 6 (heuristic multiplier)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.7,
+                "over_esc_rate": null,
+                "tp": 70,
+                "fn": 30,
+                "fp": 0,
+                "cost": 30000.0
+              },
+              "HIGH": {
+                "n": 44,
+                "safety_recall": 0.29545454545454547,
+                "over_esc_rate": null,
+                "tp": 13,
+                "fn": 31,
+                "fp": 0,
+                "cost": 3100.0
+              },
+              "MODERATE": {
+                "n": 87,
+                "safety_recall": 0.11267605633802817,
+                "over_esc_rate": 0.0,
+                "tp": 8,
+                "fn": 63,
+                "fp": 0,
+                "cost": 630.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.0,
+                "tp": 0,
+                "fn": 0,
+                "fp": 0,
+                "cost": 0.0
+              }
+            },
+            "total_cost": 33730.0,
+            "auroc": null
+          },
+          {
+            "name": "UASEF Round 7 (Stratified CRC + MTC + Cost-Aware)",
+            "per_stratum": {
+              "CRITICAL": {
+                "n": 100,
+                "safety_recall": 0.96,
+                "over_esc_rate": null,
+                "tp": 96,
+                "fn": 4,
+                "fp": 0,
+                "cost": 4000.0
+              },
+              "HIGH": {
+                "n": 44,
+                "safety_recall": 0.9318181818181818,
+                "over_esc_rate": null,
+                "tp": 41,
+                "fn": 3,
+                "fp": 0,
+                "cost": 300.0
+              },
+              "MODERATE": {
+                "n": 87,
+                "safety_recall": 0.8169014084507042,
+                "over_esc_rate": 0.75,
+                "tp": 58,
+                "fn": 13,
+                "fp": 12,
+                "cost": 142.0
+              },
+              "LOW": {
+                "n": 24,
+                "safety_recall": null,
+                "over_esc_rate": 0.0,
+                "tp": 0,
+                "fn": 0,
+                "fp": 0,
+                "cost": 0.0
+              }
+            },
+            "total_cost": 4442.0,
+            "auroc": null
+          }
+        ]
+      }
+    }
+  }
+}

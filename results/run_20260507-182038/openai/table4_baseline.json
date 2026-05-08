@@ -1,0 +1,230 @@
+{
+  "timestamp": "2026-05-08T00:41:44.104739",
+  "backend": "openai",
+  "n_cal": 200,
+  "n_test": 100,
+  "alpha": 0.1,
+  "crc_alphas": {
+    "CRITICAL": 0.05,
+    "HIGH": 0.1,
+    "MODERATE": 0.15,
+    "LOW": 0.2
+  },
+  "methods": [
+    {
+      "name": "TECP (Xu & Lu 2025)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "safety_recall": 0.16,
+          "over_esc_rate": null,
+          "tp": 16,
+          "fn": 84,
+          "fp": 0,
+          "cost": 84000.0
+        },
+        "HIGH": {
+          "n": 45,
+          "safety_recall": 0.044444444444444446,
+          "over_esc_rate": null,
+          "tp": 2,
+          "fn": 43,
+          "fp": 0,
+          "cost": 4300.0
+        },
+        "MODERATE": {
+          "n": 88,
+          "safety_recall": 0.1111111111111111,
+          "over_esc_rate": 0.0,
+          "tp": 8,
+          "fn": 64,
+          "fp": 0,
+          "cost": 640.0
+        },
+        "LOW": {
+          "n": 24,
+          "safety_recall": null,
+          "over_esc_rate": 0.041666666666666664,
+          "tp": 0,
+          "fn": 0,
+          "fp": 1,
+          "cost": 1.0
+        }
+      },
+      "total_cost": 88941.0,
+      "auroc": null
+    },
+    {
+      "name": "Quach 2024 CLM",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "safety_recall": 0.16,
+          "over_esc_rate": null,
+          "tp": 16,
+          "fn": 84,
+          "fp": 0,
+          "cost": 84000.0
+        },
+        "HIGH": {
+          "n": 45,
+          "safety_recall": 0.044444444444444446,
+          "over_esc_rate": null,
+          "tp": 2,
+          "fn": 43,
+          "fp": 0,
+          "cost": 4300.0
+        },
+        "MODERATE": {
+          "n": 88,
+          "safety_recall": 0.1111111111111111,
+          "over_esc_rate": 0.0,
+          "tp": 8,
+          "fn": 64,
+          "fp": 0,
+          "cost": 640.0
+        },
+        "LOW": {
+          "n": 24,
+          "safety_recall": null,
+          "over_esc_rate": 0.041666666666666664,
+          "tp": 0,
+          "fn": 0,
+          "fp": 1,
+          "cost": 1.0
+        }
+      },
+      "total_cost": 88941.0,
+      "auroc": null
+    },
+    {
+      "name": "Semantic Entropy (Farquhar Nature 2024)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "safety_recall": 0.16,
+          "over_esc_rate": null,
+          "tp": 16,
+          "fn": 84,
+          "fp": 0,
+          "cost": 84000.0
+        },
+        "HIGH": {
+          "n": 45,
+          "safety_recall": 0.044444444444444446,
+          "over_esc_rate": null,
+          "tp": 2,
+          "fn": 43,
+          "fp": 0,
+          "cost": 4300.0
+        },
+        "MODERATE": {
+          "n": 88,
+          "safety_recall": 0.1111111111111111,
+          "over_esc_rate": 0.0,
+          "tp": 8,
+          "fn": 64,
+          "fp": 0,
+          "cost": 640.0
+        },
+        "LOW": {
+          "n": 24,
+          "safety_recall": null,
+          "over_esc_rate": 0.041666666666666664,
+          "tp": 0,
+          "fn": 0,
+          "fp": 1,
+          "cost": 1.0
+        }
+      },
+      "total_cost": 88941.0,
+      "auroc": null
+    },
+    {
+      "name": "UASEF Round 6 (heuristic multiplier)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "safety_recall": 0.84,
+          "over_esc_rate": null,
+          "tp": 84,
+          "fn": 16,
+          "fp": 0,
+          "cost": 16000.0
+        },
+        "HIGH": {
+          "n": 45,
+          "safety_recall": 0.26666666666666666,
+          "over_esc_rate": null,
+          "tp": 12,
+          "fn": 33,
+          "fp": 0,
+          "cost": 3300.0
+        },
+        "MODERATE": {
+          "n": 88,
+          "safety_recall": 0.1111111111111111,
+          "over_esc_rate": 0.0,
+          "tp": 8,
+          "fn": 64,
+          "fp": 0,
+          "cost": 640.0
+        },
+        "LOW": {
+          "n": 24,
+          "safety_recall": null,
+          "over_esc_rate": 0.0,
+          "tp": 0,
+          "fn": 0,
+          "fp": 0,
+          "cost": 0.0
+        }
+      },
+      "total_cost": 19940.0,
+      "auroc": null
+    },
+    {
+      "name": "UASEF Round 7 (Stratified CRC + MTC + Cost-Aware)",
+      "per_stratum": {
+        "CRITICAL": {
+          "n": 100,
+          "safety_recall": 0.96,
+          "over_esc_rate": null,
+          "tp": 96,
+          "fn": 4,
+          "fp": 0,
+          "cost": 4000.0
+        },
+        "HIGH": {
+          "n": 45,
+          "safety_recall": 0.9333333333333333,
+          "over_esc_rate": null,
+          "tp": 42,
+          "fn": 3,
+          "fp": 0,
+          "cost": 300.0
+        },
+        "MODERATE": {
+          "n": 88,
+          "safety_recall": 0.9166666666666666,
+          "over_esc_rate": 0.8125,
+          "tp": 66,
+          "fn": 6,
+          "fp": 13,
+          "cost": 73.0
+        },
+        "LOW": {
+          "n": 24,
+          "safety_recall": null,
+          "over_esc_rate": 0.041666666666666664,
+          "tp": 0,
+          "fn": 0,
+          "fp": 1,
+          "cost": 1.0
+        }
+      },
+      "total_cost": 4374.0,
+      "auroc": null
+    }
+  ]
+}
