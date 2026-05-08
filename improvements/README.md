@@ -1150,3 +1150,76 @@ appendix에 보존**한다:
 이 supplementary는 paper Appendix B로 직접 인용되며, 매 실행마다 backend별
 `all_experiments_summary.json`로부터 재생성되므로 항상 최신 v1 측정값을 반영한다.
 
+---
+
+## 7.9 Round 7 Reviewer-Hardening Update (2026-05-08)
+
+ML4H reviewer 위협 모델에 대한 self-audit 결과 7개 카테고리 (총 22개 항목)
+의 보강 작업을 수행 — 모두 **재실험 없이 코드/문서 수준에서**.
+
+### 보강 항목 매트릭스
+
+| 카테고리 | 영향                       | 적용 결과                                             |
+| -------- | -------------------------- | ----------------------------------------------------- |
+| 1-2 / 6-3 (multi-seed) | 단일 seed → bootstrap CI | `run_multiseed_evaluation.sh` + `aggregate_multiseed.py` 인프라 추가, 사용자가 트리거 |
+| 1-3 (paired test) | McNemar p-value 부재  | `mcnemar_pvalue()` 함수 + `pairwise_mcnemar_vs_v2` JSON 필드 |
+| 2-1 (TECP 공정성) | TECP가 single-α로 평가 | `experiments/baselines/tecp_stratified.py` (TECP-stratified) 추가 |
+| 2-2 (Pivot C 공정성) | F1-symmetric만 비교 | `experiments/baselines/cost_sensitive.py` (Cost-Sensitive single-α) 추가 |
+| 2-3 (v1 출처)   | 배율 결정 과정 미기재     | §5.5 baselines 섹션에 grid-search 출처 명시           |
+| 4-1, 4-4, 4-5 (framing) | "Formal guarantees" 톤 다운 | Abstract + §1.3 contribution을 statistical/engineering/evaluation 분류 + α=0.001 caveat |
+| 4-2 (Pivot B)   | 자기모순 framing         | §4.2 / §7.5 — Pivot B를 "supporting contribution"으로 재정의 |
+| 4-3 (Agent)     | Agent 작동 안 함 (LLaMA 0.04 calls/case) | §7.4 — agent layer를 "future deployment infrastructure"로 재framing |
+| 5-1 (FWER 수학) | 0.143이 발견처럼 제시    | §1.2 G2 / §6.2 — $1-(1-\alpha)^m$ bound임을 명시      |
+| 5-2 (분모)      | n+ 명시 안 됨            | `table4_baseline.md` 가 `recall (TP/n+)` 형식으로 출력 |
+| 5-3 (AUROC)     | 일부 누락                | sklearn fallback + manual rank-based AUROC            |
+| 6-1 (sanity)    | identical confusion matrix 미검출 | `tests/test_cross_backend_sanity.py` (3 tests)        |
+| 6-2 (strict)    | silent failure 가능      | `StratifiedConformalRiskControl` strict-mode 메시지 강화 |
+| 7-1 (L1 IRB)    | "future work" 모호       | §8 L1 — IRB 신청 + 200-case 재라벨링 commitment 명시  |
+| 7-2 (L7)        | 단일 데이터셋             | §8 L7 추가                                            |
+| 7-3 (L8)        | calibration shift         | §8 L8 추가                                            |
+| 7-4 (L9 신규)   | single-seed                | §8 L9 추가                                            |
+| α=0.001 (3-4)   | 99.9% 약속 미검증         | §3.3 / §6.1 — $\alpha_s \in [0.05, 0.20]$ 검증 regime으로 명시, $\alpha_{\text{CRITICAL}} = 0.001$ 약속 제거 |
+
+### 코드 변경
+
+```text
+experiments/baselines/tecp_stratified.py    NEW — Round 7 fairness baseline
+experiments/baselines/cost_sensitive.py     NEW — Round 7 fairness baseline
+experiments/aggregate_multiseed.py          NEW — 5-10 seed bootstrap aggregator
+experiments/round7_table4_baseline.py       UPD — McNemar + 새 baseline 통합 + n+ 분모 + sanity alert
+experiments/baselines/__init__.py           UPD — 새 baseline 등록
+models/stratified_crc.py                    UPD — strict-mode 경고 메시지 강화
+run_full_evaluation.sh                      UPD — SEEDS= argument 문서화
+run_multiseed_evaluation.sh                 NEW — multi-seed wrapper
+tests/test_cross_backend_sanity.py          NEW — 3 cross-backend sanity tests
+```
+
+### 문서 변경
+
+```text
+paper/UASEF_Round7.md          §1.2 G2 / §1.3 / §3.3 / §4.2 / §5.5 / §6.4.4 / §6.5 / §6.6 / §7.4 / §8 (L1/L2/L3/L7/L8/L9)
+paper/UASEF_Round7_KO.md       동일 사항 한국어 mirror
+README.md                      0.5 섹션에 multi-seed wrapper 사용법 + pytest 137 → 140
+improvements/README.md         본 §7.9 entry
+```
+
+### 재실험 미수행 항목 (사용자 트리거 필요)
+
+다음은 인프라만 ship되었으며, 비용·시간 때문에 사용자가 직접 실행해야 함:
+
+- **1-1**: 본 LLM 실행으로 placeholder가 아닌 실측 검증 — `BACKENDS="openai lmstudio" SKIP_LLM=0 bash run_full_evaluation.sh` (~$120 + 22분)
+- **1-2 / 6-3**: Multi-seed bootstrap — `SEEDS="42 43 44 45 46" bash run_multiseed_evaluation.sh` (~$125 + 50분)
+- **3-1**: 추가 데이터셋 (MedQA-USMLE full, MIMIC, PubMedQA) — `experiments/run_round7_pipeline.py --dataset` 매개변수 확장 필요
+- **3-2**: 4-D cost matrix sensitivity — `experiments/round7_table3_cost.py --sweep-grid 4d` (구현 미완료, 1-D만 동작)
+- **3-3**: n_test=300 — main script에서 `N_TEST=300` 환경변수
+- **3-4**: α=0.001 검증 — n_CRITICAL ≥ 999 의 추가 데이터 필요
+
+### Cross-backend sanity check 자동 실행
+
+`pytest tests/test_cross_backend_sanity.py` 가 매 실행 시 다음을 검증:
+
+1. 두 backend가 baseline 메소드에서 identical confusion matrix → 경고 (UASEF v2는 exempt — 제약이 binding 일 수 있으므로)
+2. 한 backend 내에서 mathematically inequivalent 메소드들이 identical → 경고
+3. v2 CRITICAL recall ≥ v1 CRITICAL recall — assertion (Pivot A regression detector)
+
+`UASEF_SANITY_STRICT=1` 환경변수로 경고를 hard fail로 변환 (camera-ready 제출 시 권장).
