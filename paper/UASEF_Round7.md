@@ -70,7 +70,7 @@ single-seed runs while leaving 5–10 seed bootstrap intervals as a
 planned camera-ready update; *(c)* a stratum-aware version of TECP
 ("TECP-stratified") is provided as an additional ablation baseline in
 §6.4.4 to separate the contribution of stratification *itself* from the
-combined v2 framework. All artifacts (137-test pytest suite,
+combined v2 framework. All artifacts (140-test pytest suite,
 `experiments/round7_table*.py`, `run_full_evaluation.sh`) are released for
 one-command reproduction.
 
@@ -148,7 +148,12 @@ the reader can assess novelty along the dimension that matters to them.
    \le \alpha_s$. The composition itself is mechanical — both ingredients
    are off-the-shelf — but the application to a *risk-stratified* escalation
    loss in clinical LLMs has not, to our knowledge, been previously
-   documented.
+   documented. **Validated regime.** Our empirical claims for this pivot
+   (Tables 1, 4) hold for $\alpha_s \in [0.05, 0.20]$. The
+   $\alpha_{\text{CRITICAL}} = 0.001$ regime requires
+   $n_{\text{CRITICAL}} \ge 999$ which our extraction does not provide;
+   §6.8 reports an *algorithm-level* synthetic validation only and the
+   paper does not claim empirical 0.1% miss-rate on real LLM outputs.
 
 2. **Multi-Trigger Conformal Combination (Pivot B, §4.2) [statistical
    application].** We frame the keyword and no-evidence triggers as
@@ -184,7 +189,7 @@ the reader can assess novelty along the dimension that matters to them.
    independent and correlated null structures.
 
 5. **One-command reproducibility infrastructure [engineering].** We release
-   pinned dependencies, a `pytest` suite of 137 tests covering all
+   pinned dependencies, a `pytest` suite of 140 tests covering all
    algorithmic modules, and a single shell script `run_full_evaluation.sh`
    that regenerates every table in this paper from raw data — now with
    an optional `SEEDS=` argument for multi-seed bootstrap intervals (§6.6).
@@ -1095,7 +1100,7 @@ Entropy: a 31× total-cost reduction with no loss of CRITICAL-stratum safety
 recall, and the only method we tested that satisfies its per-stratum coverage
 target at every level.
 
-All artifacts — algorithm modules, baseline adapters, 137-test pytest suite,
+All artifacts — algorithm modules, baseline adapters, 140-test pytest suite,
 and a single-command shell script — are released for verbatim reproduction.
 
 ---
@@ -1198,7 +1203,7 @@ BACKENDS="openai lmstudio" N_CAL=500 N_TEST=200 bash run_full_evaluation.sh
 
 The script produces `results/run_<timestamp>/result.md`, `result.json`, and
 all sub-tables in their own directories; `pytest_summary.txt` confirms
-137/137 passing tests.
+140/140 passing tests.
 
 ### A.2 File-by-file mapping to paper claims
 
