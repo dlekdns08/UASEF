@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-07T23:28:55.623195",
+  "timestamp": "2026-05-09T14:54:38.555847",
   "n_per_stratum": 300,
   "cost_matrix": {
     "CRITICAL": {
@@ -19,59 +19,59 @@
       "over_esc": 1.0
     }
   },
-  "round6_total_cost": 16264.0,
-  "round7_total_cost": 425.0,
-  "cost_reduction_ratio": 38.27,
+  "round6_total_cost": 6769.0,
+  "round7_total_cost": 329.0,
+  "cost_reduction_ratio": 20.57,
   "round6_per_stratum": [
     {
       "stratum": "CRITICAL",
-      "threshold": 0.941,
-      "cost": 15041.0
+      "threshold": 0.833,
+      "cost": 6036.0
     },
     {
       "stratum": "HIGH",
-      "threshold": 1.411,
-      "cost": 1120.0
+      "threshold": 0.935,
+      "cost": 627.0
     },
     {
       "stratum": "MODERATE",
-      "threshold": 0.83,
-      "cost": 62.0
+      "threshold": 0.772,
+      "cost": 53.0
     },
     {
       "stratum": "LOW",
-      "threshold": 1.02,
-      "cost": 41.0
+      "threshold": 0.789,
+      "cost": 53.0
     }
   ],
   "round7_per_stratum": [
     {
       "stratum": "CRITICAL",
-      "threshold": -1.488,
-      "cost": 199.0,
+      "threshold": -0.099,
+      "cost": 109.0,
       "miss_rate": 0.0,
-      "over_esc_rate": 0.9476
+      "over_esc_rate": 0.519
     },
     {
       "stratum": "HIGH",
-      "threshold": -0.04,
-      "cost": 130.0,
+      "threshold": -0.036,
+      "cost": 114.0,
       "miss_rate": 0.0,
-      "over_esc_rate": 0.5328
+      "over_esc_rate": 0.481
     },
     {
       "stratum": "MODERATE",
-      "threshold": 0.83,
-      "cost": 62.0,
+      "threshold": 0.772,
+      "cost": 53.0,
       "miss_rate": 0.0,
-      "over_esc_rate": 0.2222
+      "over_esc_rate": 0.1879
     },
     {
       "stratum": "LOW",
-      "threshold": 1.249,
-      "cost": 34.0,
+      "threshold": 0.789,
+      "cost": 53.0,
       "miss_rate": 0.1667,
-      "over_esc_rate": 0.1111
+      "over_esc_rate": 0.1771
     }
   ]
 }

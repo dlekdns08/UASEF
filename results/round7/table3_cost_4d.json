@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-05-08T13:47:57.531775",
+  "timestamp": "2026-05-09T14:54:42.348258",
   "mode": "4d",
-  "n_per_stratum": 100,
-  "seed": 42,
+  "n_per_stratum": 300,
+  "seed": 43,
   "ratios": [
     10,
     100,
@@ -16,9 +16,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 130.0,
-      "round7_total_cost": 106.0,
-      "reduction_ratio": 1.23
+      "round6_total_cost": 307.0,
+      "round7_total_cost": 289.0,
+      "reduction_ratio": 1.06
     },
     {
       "ratios": {
@@ -27,9 +27,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 130.0,
-      "round7_total_cost": 106.0,
-      "reduction_ratio": 1.23
+      "round6_total_cost": 487.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 1.38
     },
     {
       "ratios": {
@@ -38,9 +38,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 130.0,
-      "round7_total_cost": 106.0,
-      "reduction_ratio": 1.23
+      "round6_total_cost": 2287.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 6.5
     },
     {
       "ratios": {
@@ -49,9 +49,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 1.83
+      "round6_total_cost": 307.0,
+      "round7_total_cost": 289.0,
+      "reduction_ratio": 1.06
     },
     {
       "ratios": {
@@ -60,9 +60,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 1.83
+      "round6_total_cost": 487.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 1.38
     },
     {
       "ratios": {
@@ -71,9 +71,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 1.83
+      "round6_total_cost": 2287.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 6.5
     },
     {
       "ratios": {
@@ -82,9 +82,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 9.33
+      "round6_total_cost": 307.0,
+      "round7_total_cost": 289.0,
+      "reduction_ratio": 1.06
     },
     {
       "ratios": {
@@ -93,9 +93,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 9.33
+      "round6_total_cost": 487.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 1.38
     },
     {
       "ratios": {
@@ -104,9 +104,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 120.0,
-      "reduction_ratio": 9.33
+      "round6_total_cost": 2287.0,
+      "round7_total_cost": 352.0,
+      "reduction_ratio": 6.5
     },
     {
       "ratios": {
@@ -115,9 +115,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 1.44
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 2.59
     },
     {
       "ratios": {
@@ -126,9 +126,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 1.44
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 2.63
     },
     {
       "ratios": {
@@ -137,9 +137,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 220.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 1.44
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 7.25
     },
     {
       "ratios": {
@@ -148,9 +148,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 310.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 1.86
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 2.59
     },
     {
       "ratios": {
@@ -159,9 +159,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 310.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 1.86
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 2.63
     },
     {
       "ratios": {
@@ -170,19 +170,8 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 310.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 1.86
-    },
-    {
-      "ratios": {
-        "CRITICAL": 10,
-        "HIGH": 100,
-        "MODERATE": 1000,
-        "LOW": 10
-      },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 390.0,
       "reduction_ratio": 7.25
     },
     {
@@ -190,11 +179,22 @@
         "CRITICAL": 10,
         "HIGH": 100,
         "MODERATE": 1000,
+        "LOW": 10
+      },
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 2.59
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 100,
+        "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 7.25
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 2.63
     },
     {
       "ratios": {
@@ -203,64 +203,64 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 7.25
-    },
-    {
-      "ratios": {
-        "CRITICAL": 10,
-        "HIGH": 1000,
-        "MODERATE": 10,
-        "LOW": 10
-      },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 7.32
-    },
-    {
-      "ratios": {
-        "CRITICAL": 10,
-        "HIGH": 1000,
-        "MODERATE": 10,
-        "LOW": 100
-      },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 7.32
-    },
-    {
-      "ratios": {
-        "CRITICAL": 10,
-        "HIGH": 1000,
-        "MODERATE": 10,
-        "LOW": 1000
-      },
-      "round6_total_cost": 1120.0,
-      "round7_total_cost": 153.0,
-      "reduction_ratio": 7.32
-    },
-    {
-      "ratios": {
-        "CRITICAL": 10,
-        "HIGH": 1000,
-        "MODERATE": 100,
-        "LOW": 10
-      },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 390.0,
       "reduction_ratio": 7.25
     },
     {
       "ratios": {
         "CRITICAL": 10,
         "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 10
+      },
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 19.1
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 100
+      },
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 16.48
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 10,
+        "LOW": 1000
+      },
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 21.09
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
+        "MODERATE": 100,
+        "LOW": 10
+      },
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 19.1
+    },
+    {
+      "ratios": {
+        "CRITICAL": 10,
+        "HIGH": 1000,
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 7.25
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 16.48
     },
     {
       "ratios": {
@@ -269,9 +269,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 1210.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 7.25
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 21.09
     },
     {
       "ratios": {
@@ -280,9 +280,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 2110.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 12.63
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 327.0,
+      "reduction_ratio": 19.1
     },
     {
       "ratios": {
@@ -291,9 +291,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 2110.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 12.63
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 16.48
     },
     {
       "ratios": {
@@ -302,9 +302,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 2110.0,
-      "round7_total_cost": 167.0,
-      "reduction_ratio": 12.63
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 390.0,
+      "reduction_ratio": 21.09
     },
     {
       "ratios": {
@@ -313,9 +313,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 580.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 5.27
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 2.74
     },
     {
       "ratios": {
@@ -324,9 +324,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 580.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 5.27
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 2.76
     },
     {
       "ratios": {
@@ -335,9 +335,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 580.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 5.27
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 7.6
     },
     {
       "ratios": {
@@ -346,9 +346,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 5.4
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 2.74
     },
     {
       "ratios": {
@@ -357,9 +357,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 5.4
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 2.76
     },
     {
       "ratios": {
@@ -368,9 +368,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 5.4
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 7.6
     },
     {
       "ratios": {
@@ -379,9 +379,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 12.66
+      "round6_total_cost": 847.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 2.74
     },
     {
       "ratios": {
@@ -390,9 +390,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 12.66
+      "round6_total_cost": 1027.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 2.76
     },
     {
       "ratios": {
@@ -401,9 +401,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 12.66
+      "round6_total_cost": 2827.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 7.6
     },
     {
       "ratios": {
@@ -412,9 +412,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 4.27
+      "round6_total_cost": 1387.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 4.0
     },
     {
       "ratios": {
@@ -423,9 +423,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 4.27
+      "round6_total_cost": 1567.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 3.82
     },
     {
       "ratios": {
@@ -434,9 +434,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 670.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 4.27
+      "round6_total_cost": 3367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 8.21
     },
     {
       "ratios": {
@@ -445,9 +445,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 760.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 4.44
+      "round6_total_cost": 1387.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 4.0
     },
     {
       "ratios": {
@@ -456,9 +456,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 760.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 4.44
+      "round6_total_cost": 1567.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 3.82
     },
     {
       "ratios": {
@@ -467,9 +467,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 760.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 4.44
+      "round6_total_cost": 3367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 8.21
     },
     {
       "ratios": {
@@ -478,9 +478,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 1387.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 4.0
     },
     {
       "ratios": {
@@ -489,9 +489,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 1567.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 3.82
     },
     {
       "ratios": {
@@ -500,9 +500,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 3367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 8.21
     },
     {
       "ratios": {
@@ -511,9 +511,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 10.0
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -522,9 +522,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 10.0
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -533,9 +533,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 1570.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 10.0
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -544,9 +544,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -555,9 +555,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -566,9 +566,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 1660.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 9.71
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -577,9 +577,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 2560.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 14.97
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -588,9 +588,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 2560.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 14.97
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -599,9 +599,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 2560.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 14.97
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -610,9 +610,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 5080.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 46.18
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 20.22
     },
     {
       "ratios": {
@@ -621,9 +621,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 5080.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 46.18
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 17.28
     },
     {
       "ratios": {
@@ -632,9 +632,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 5080.0,
-      "round7_total_cost": 110.0,
-      "reduction_ratio": 46.18
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 22.12
     },
     {
       "ratios": {
@@ -643,9 +643,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 41.69
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 20.22
     },
     {
       "ratios": {
@@ -654,9 +654,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 41.69
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 17.28
     },
     {
       "ratios": {
@@ -665,9 +665,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 41.69
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 22.12
     },
     {
       "ratios": {
@@ -676,9 +676,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 48.95
+      "round6_total_cost": 6247.0,
+      "round7_total_cost": 309.0,
+      "reduction_ratio": 20.22
     },
     {
       "ratios": {
@@ -687,9 +687,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 48.95
+      "round6_total_cost": 6427.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 17.28
     },
     {
       "ratios": {
@@ -698,9 +698,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 124.0,
-      "reduction_ratio": 48.95
+      "round6_total_cost": 8227.0,
+      "round7_total_cost": 372.0,
+      "reduction_ratio": 22.12
     },
     {
       "ratios": {
@@ -709,9 +709,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 32.93
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -720,9 +720,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 32.93
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -731,9 +731,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 5170.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 32.93
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -742,9 +742,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 5260.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 30.76
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -753,9 +753,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 5260.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 30.76
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -764,9 +764,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 5260.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 30.76
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -775,9 +775,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 6787.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 19.56
     },
     {
       "ratios": {
@@ -786,9 +786,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 6967.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 16.99
     },
     {
       "ratios": {
@@ -797,9 +797,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 8767.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 21.38
     },
     {
       "ratios": {
@@ -808,9 +808,9 @@
         "MODERATE": 10,
         "LOW": 10
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 38.66
+      "round6_total_cost": 12187.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 35.12
     },
     {
       "ratios": {
@@ -819,9 +819,9 @@
         "MODERATE": 10,
         "LOW": 100
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 38.66
+      "round6_total_cost": 12367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 30.16
     },
     {
       "ratios": {
@@ -830,9 +830,9 @@
         "MODERATE": 10,
         "LOW": 1000
       },
-      "round6_total_cost": 6070.0,
-      "round7_total_cost": 157.0,
-      "reduction_ratio": 38.66
+      "round6_total_cost": 14167.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 34.55
     },
     {
       "ratios": {
@@ -841,9 +841,9 @@
         "MODERATE": 100,
         "LOW": 10
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 12187.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 35.12
     },
     {
       "ratios": {
@@ -852,9 +852,9 @@
         "MODERATE": 100,
         "LOW": 100
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 12367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 30.16
     },
     {
       "ratios": {
@@ -863,9 +863,9 @@
         "MODERATE": 100,
         "LOW": 1000
       },
-      "round6_total_cost": 6160.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 36.02
+      "round6_total_cost": 14167.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 34.55
     },
     {
       "ratios": {
@@ -874,9 +874,9 @@
         "MODERATE": 1000,
         "LOW": 10
       },
-      "round6_total_cost": 7060.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 41.29
+      "round6_total_cost": 12187.0,
+      "round7_total_cost": 347.0,
+      "reduction_ratio": 35.12
     },
     {
       "ratios": {
@@ -885,9 +885,9 @@
         "MODERATE": 1000,
         "LOW": 100
       },
-      "round6_total_cost": 7060.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 41.29
+      "round6_total_cost": 12367.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 30.16
     },
     {
       "ratios": {
@@ -896,9 +896,9 @@
         "MODERATE": 1000,
         "LOW": 1000
       },
-      "round6_total_cost": 7060.0,
-      "round7_total_cost": 171.0,
-      "reduction_ratio": 41.29
+      "round6_total_cost": 14167.0,
+      "round7_total_cost": 410.0,
+      "reduction_ratio": 34.55
     }
   ],
   "summary": {
@@ -908,9 +908,9 @@
       100,
       1000
     ],
-    "min_reduction": 1.23,
-    "max_reduction": 48.95,
-    "median_reduction": 9.71,
-    "mean_reduction": 17.74
+    "min_reduction": 1.06,
+    "max_reduction": 35.12,
+    "median_reduction": 16.99,
+    "mean_reduction": 14.17
   }
 }

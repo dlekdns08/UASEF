@@ -2,14 +2,14 @@
 
 - n_per_stratum=300, default cost matrix
 
-- **Round 6 total cost**: 16264.0
-- **Round 7 total cost**: 425.0
-- **Reduction**: 38.27× (Round 6 / Round 7)
+- **Round 6 total cost**: 6769.0
+- **Round 7 total cost**: 329.0
+- **Reduction**: 20.57× (Round 6 / Round 7)
 
 ## Per-stratum
 | Stratum | R6 thr | R6 cost | R7 thr | R7 cost | R7 miss | R7 over |
 | --- | --- | --- | --- | --- | --- | --- |
-| CRITICAL | 0.941 | 15041.0 | -1.488 | 199.0 | 0.0 | 0.9476 |
-| HIGH | 1.411 | 1120.0 | -0.04 | 130.0 | 0.0 | 0.5328 |
-| MODERATE | 0.83 | 62.0 | 0.83 | 62.0 | 0.0 | 0.2222 |
-| LOW | 1.02 | 41.0 | 1.249 | 34.0 | 0.1667 | 0.1111 |
+| CRITICAL | 0.833 | 6036.0 | -0.099 | 109.0 | 0.0 | 0.519 |
+| HIGH | 0.935 | 627.0 | -0.036 | 114.0 | 0.0 | 0.481 |
+| MODERATE | 0.772 | 53.0 | 0.772 | 53.0 | 0.0 | 0.1879 |
+| LOW | 0.789 | 53.0 | 0.789 | 53.0 | 0.1667 | 0.1771 |

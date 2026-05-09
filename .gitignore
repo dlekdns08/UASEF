@@ -20,7 +20,7 @@ build/
 venv/
 env/
 ENV/
-
+results/
 # 실험 결과 (용량 크고 재현 가능)
 results/*.json
 results/*.csv
