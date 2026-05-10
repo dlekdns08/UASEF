@@ -190,3 +190,80 @@ def test_pytest_test_count_matches_paper_claim_within_band():
         f"Test count drift: paper says {paper_claim}, actual {actual} (>15% drop). "
         "Update paper §1.3 / README."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Round 9 — MIMIC-IV regression guards (skipped until results exist)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_r9_alpha_critical_within_2sigma():
+    """Round 9 R9.1: empirical α=0.001 should hold for CRITICAL stratum
+    (2σ upper bound ≤ 0.0012). Skip if not yet run."""
+    p = ROOT / "results" / "round9" / "alpha_critical_real.json"
+    if not p.exists():
+        pytest.skip("R9.1 not yet run")
+    data = json.loads(p.read_text())
+    failures = []
+    for backend, agg in data.get("per_backend", {}).items():
+        crit = agg.get("CRITICAL")
+        if crit is None:
+            continue
+        ub = crit.get("two_sigma_upper")
+        target = crit.get("alpha_target", 0.001)
+        # allow 1.2× margin (i.e. up to 0.0012 for α=0.001)
+        if ub is None or ub > target * 1.2:
+            failures.append(f"{backend}: 2σ upper {ub} > 1.2 × α {target}")
+    assert not failures, (
+        "Round 9 α=0.001 empirical guarantee violated: " + "; ".join(failures)
+    )
+
+
+def test_r9_table4_mimic_v2_critical_recall_floor():
+    """Round 9 R9.2: v2 CRITICAL recall ≥ 0.90 across both backends."""
+    p = ROOT / "results" / "round9" / "table4_mimic.json"
+    if not p.exists():
+        pytest.skip("R9.2 not yet run")
+    data = json.loads(p.read_text())
+    failures = []
+    target = 0.90
+    for backend, methods in data.get("per_backend", {}).items():
+        for name, m in methods.items():
+            if "Round 7" in name or "Round 9" in name or name.startswith("UASEF Round 7"):
+                cr = m.get("critical_recall_mean")
+                if cr is None or cr < target:
+                    failures.append(f"{backend}/{name}: CRITICAL recall {cr} < {target}")
+    assert not failures, (
+        "Round 9 Table 4-MIMIC v2 CRITICAL recall floor violated: " + "; ".join(failures)
+    )
+
+
+def test_r9_distribution_shift_weighted_cp_recovery():
+    """Round 9 R9.3: weighted CP must reduce naive violation by at least 30%
+    on average across (target × stratum) cells where naive violates."""
+    p = ROOT / "results" / "round9" / "dist_shift_real.json"
+    if not p.exists():
+        pytest.skip("R9.3 not yet run")
+    data = json.loads(p.read_text())
+    naive_v, weighted_v = [], []
+    for backend, runs in data.get("per_backend", {}).items():
+        for r in runs:
+            for row in r.get("transfer", []):
+                for s in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+                    n = row.get("naive", {}).get(s)
+                    w = (row.get("weighted_cp") or {}).get(s)
+                    if not n or n.get("violation_ratio") is None:
+                        continue
+                    if n["violation_ratio"] <= 1.0:
+                        continue  # not violating; skip
+                    naive_v.append(n["violation_ratio"])
+                    if w and w.get("violation_ratio") is not None:
+                        weighted_v.append(w["violation_ratio"])
+    if not naive_v or not weighted_v:
+        pytest.skip("not enough violation cells to evaluate recovery")
+    naive_mean = sum(naive_v) / len(naive_v)
+    weighted_mean = sum(weighted_v) / len(weighted_v)
+    # weighted CP should bring violation ratio down ≥ 30%
+    assert weighted_mean <= naive_mean * 0.70, (
+        f"weighted CP recovery insufficient: naive {naive_mean:.2f}× → "
+        f"weighted {weighted_mean:.2f}× (expected ≤ {naive_mean*0.70:.2f}×)"
+    )
