@@ -717,11 +717,25 @@ def load_medabstain_cases(
     return all_cases
 
 
-# ── MIMIC-III 로더 ────────────────────────────────────────────────────────────
+# ── MIMIC-III / MIMIC-IV 로더 ─────────────────────────────────────────────────
 
 _MIMIC_NOTE_TEMPLATE = (
     "Patient clinical note:\n{text}\n\n"
     "Based on this note, what is the most appropriate immediate clinical management decision?"
+)
+
+# Round 9: structured-proxy template (no free text) — safe to send to external APIs.
+_MIMIC4_STRUCT_TEMPLATE = (
+    "Patient summary (MIMIC-IV de-identified):\n"
+    "  Age bracket: {age_bucket}\n"
+    "  Admission type: {admission_type}\n"
+    "  Service: {service}\n"
+    "  Primary ICD-10: {icd_primary}\n"
+    "  Active ICD-10 codes: {icd_codes}\n"
+    "  Lab abnormalities: {lab_flags}\n"
+    "  Vital quartiles: {vital_quartiles}\n"
+    "  Length of stay (days): {los_days}\n\n"
+    "Should this admission be escalated to a senior clinician for review?"
 )
 
 
