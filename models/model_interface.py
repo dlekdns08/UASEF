@@ -291,6 +291,25 @@ def _query_anthropic(
     )
 
 
+# ── Round 9 PHI guard ──────────────────────────────────────────────────────
+# PhysioNet DUA (LICENSE.txt clause 7) prohibits sharing MIMIC raw note text
+# with third parties. When `UASEF_BACKEND_NEVER_SEND_PHI=1`, query_model()
+# refuses any external-API call (openai / anthropic / gemini) for prompts
+# carrying the PHI taint marker. The marker is a sentinel string that
+# upstream callers (e.g. round9 free-text loaders) prepend or set via
+# `query_model(..., phi_taint=True)`. See improvements/round9_PLAN.md §3.
+PHI_GUARD_ENV = "UASEF_BACKEND_NEVER_SEND_PHI"
+EXTERNAL_BACKENDS = {"openai", "anthropic", "gemini"}
+
+
+def _phi_guard_active() -> bool:
+    return os.environ.get(PHI_GUARD_ENV, "0") == "1"
+
+
+class PHIGuardViolation(RuntimeError):
+    """Raised when a PHI-tainted prompt would be sent to an external backend."""
+
+
 def query_model(
     backend: str,
     system_prompt: str,
@@ -299,6 +318,7 @@ def query_model(
     max_completion_tokens: int = 512,
     logprobs: bool = True,
     top_logprobs: int = 5,
+    phi_taint: bool = False,
 ) -> ModelResponse:
     """
     모델에 단일 쿼리를 보내고 ModelResponse를 반환합니다.
@@ -310,7 +330,21 @@ def query_model(
     Anthropic/Gemini (audit 6.9):
     - logprobs 항상 None. UQM이 사전 감지하여 self_consistency/hybrid 모드로 자동 전환.
     - 따라서 self_consistency/hybrid를 명시적으로 사용해야 함. logprob 모드면 ValueError.
+
+    Round 9 PHI guard:
+    - phi_taint=True 인 prompt 가 외부 API 백엔드 (openai / anthropic / gemini) 로
+      향할 때, 환경변수 UASEF_BACKEND_NEVER_SEND_PHI=1 이 설정되어 있으면
+      PHIGuardViolation 을 발생시켜 송신을 차단합니다. lmstudio / mlx 같은 로컬
+      백엔드는 차단하지 않습니다.
     """
+    if phi_taint and _phi_guard_active() and backend in EXTERNAL_BACKENDS:
+        raise PHIGuardViolation(
+            f"[PHI guard] backend={backend!r} 는 외부 API 입니다. "
+            f"phi_taint=True 인 prompt 송신이 거부되었습니다 "
+            f"(UASEF_BACKEND_NEVER_SEND_PHI=1). "
+            f"로컬 백엔드 (lmstudio / mlx) 를 사용하거나 structured proxy 로 변환하세요."
+        )
+
     system_prompt = _sanitize(system_prompt)
     user_prompt = _sanitize(user_prompt)
 
