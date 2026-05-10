@@ -44,10 +44,14 @@ import contextlib
 import json
 import os
 import random
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
 
 
 @contextlib.contextmanager
