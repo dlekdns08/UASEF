@@ -1,65 +1,65 @@
 {
-  "timestamp": "2026-05-09T14:54:38.467471",
+  "timestamp": "2026-05-10T15:21:24.138024",
   "config": {
     "n_trials": 5000,
     "n_cal": 200,
     "alpha": 0.05,
-    "seed": 43
+    "seed": 46
   },
   "rows": [
     {
       "method": "v1: len(triggers) > 0 (naive OR)",
       "dependence": "independent",
-      "empirical_fwer": 0.1196,
+      "empirical_fwer": 0.1068,
       "target": 0.05,
       "ok": false
     },
     {
       "method": "v2: bonferroni",
       "dependence": "independent",
-      "empirical_fwer": 0.0462,
+      "empirical_fwer": 0.0384,
       "target": 0.05,
       "ok": true
     },
     {
       "method": "v2: harmonic",
       "dependence": "independent",
-      "empirical_fwer": 0.0218,
+      "empirical_fwer": 0.0046,
       "target": 0.05,
       "ok": true
     },
     {
       "method": "v2: e_value",
       "dependence": "independent",
-      "empirical_fwer": 0.0476,
+      "empirical_fwer": 0.0392,
       "target": 0.05,
       "ok": true
     },
     {
       "method": "v1: len(triggers) > 0 (naive OR)",
       "dependence": "correlated",
-      "empirical_fwer": 0.167,
+      "empirical_fwer": 0.1464,
       "target": 0.05,
       "ok": false
     },
     {
       "method": "v2: bonferroni",
       "dependence": "correlated",
-      "empirical_fwer": 0.0738,
+      "empirical_fwer": 0.07,
       "target": 0.05,
-      "ok": false
+      "ok": true
     },
     {
       "method": "v2: harmonic",
       "dependence": "correlated",
-      "empirical_fwer": 0.0348,
+      "empirical_fwer": 0.015,
       "target": 0.05,
       "ok": true
     },
     {
       "method": "v2: e_value",
       "dependence": "correlated",
-      "empirical_fwer": 0.0794,
+      "empirical_fwer": 0.0728,
       "target": 0.05,
       "ok": false
     }
