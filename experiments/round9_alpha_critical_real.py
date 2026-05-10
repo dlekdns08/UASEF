@@ -82,6 +82,12 @@ def evaluate_one_seed(backend: str, seed: int, n_critical: int, alphas: dict, ve
     cal_scores, cal_labels, cal_strata = collect_scores(backend, cal, verbose)
     test_scores, test_labels, test_strata = collect_scores(backend, test, verbose)
 
+    if not cal_scores:
+        raise RuntimeError(
+            f"backend={backend!r} 로 cal score 가 0개 수집되었습니다. "
+            f"API 키 / 백엔드 가용성을 확인하세요 (UASEF/.env)."
+        )
+
     crc = StratifiedConformalRiskControl(alphas=alphas)
     crc.fit(cal_scores, cal_labels, cal_strata)
 
