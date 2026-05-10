@@ -1030,7 +1030,17 @@ LLM's single-shot output and is unaffected by this limitation.
 = 0.001$ promise mentioned in §3.3 is an *aspirational* guarantee that
 requires $n_{\text{CRITICAL}} \ge 999$ and is not validated in this
 paper; our empirical evaluation is restricted to $\alpha_s \in [0.05,
-0.20]$.
+0.20]$. *Mitigation in progress (Round 9).* We have begun integration
+of **MIMIC-IV v3.1** [Johnson et al., 2024] under PhysioNet credentialed
+access. Using the `hosp` + `icu` modules, the CRITICAL stratum (defined
+as ICU admission within 24 h ∨ in-hospital mortality ∨
+`admission_type` ∈ {`EMERGENCY`, `URGENT`}) yields
+$n_{\text{CRITICAL}} \approx 4 \times 10^4$, which trivially satisfies
+the $n \ge 999$ threshold. The Round 9 plan
+([improvements/round9_PLAN.md](../improvements/round9_PLAN.md))
+specifies a Table 1c that reports an empirical
+$\alpha_{\text{CRITICAL}} = 0.001$ on real EHR outcomes; the present
+paper retains the conservative MedAbstain-only headline.
 
 **L4 — Single-language evaluation.** All experiments are conducted in
 English; clinical settings frequently involve non-English notes.
@@ -1057,7 +1067,17 @@ results are emitted under `results/run_<ts>/<backend>/table{1,4}_<dataset>.{json
 We do **not** include the supplementary-dataset numbers in the main
 paper (scope control); the MedAbstain headline is the canonical
 result, and any user replicating on the supplementary set is welcome
-to report those numbers as their own contribution. Note that
+to report those numbers as their own contribution.
+*Round 9 follow-up.* We add **MIMIC-IV v3.1** [Johnson et al., 2024]
+as a second, independent evaluation domain (real ICU/EHR data vs the
+QA-derived MedAbstain in the main paper). The Round 9 plan
+([improvements/round9_PLAN.md](../improvements/round9_PLAN.md))
+specifies a Table 4-MIMIC head-to-head with the same baseline
+re-implementations (TECP, Quach 2024 CLM, Semantic Entropy) and
+a structured-data Phase 1 that does not transmit any PHI free text
+to external APIs. This addresses both the single-domain critique
+and the QA-derived-label critique, and is gated by PhysioNet
+credentialing for replication. Note that
 PubMedQA's `final_decision` field maps almost entirely to the MODERATE
 stratum (single-specialty corpus) — the `collect_stratified_data`
 function emits a runtime warning when this happens, so a user running
@@ -1073,6 +1093,16 @@ medicine — will require recalibration. Our framework supports this
 re-calibration but does *not* automatically detect when it is needed;
 production deployment should pair UASEF v2 with a drift-detection layer
 (see `improvements/README.md` issue P-future-1 for the roadmap).
+A synthetic specialty-mismatch sanity is reported in supplementary §G;
+empirical violation ratios of $4$–$10\times$ are observed under
+naive cross-specialty deployment, motivating a weighted-CP
+[Tibshirani et al., 2019] follow-up. **Round 9 strengthens this
+diagnostic with a real-EHR experiment**: the MIMIC-IV `services`
+table provides ground-truth specialty assignments
+(cardiology / neurology / general-medicine / surgery) that allow a
+direct cardiology→{neurology, general-medicine, surgery} transfer
+audit with weighted CP recovery quantification. Plan and runbook
+in [improvements/round9_PLAN.md](../improvements/round9_PLAN.md).
 
 **L9 — Single-seed reporting.** Tables 1 and 4 are reported on a single
 seed (42) per backend. Tables 2 and 3 internally use 5,000 trials so
@@ -1102,6 +1132,18 @@ target at every level.
 
 All artifacts — algorithm modules, baseline adapters, 140-test pytest suite,
 and a single-command shell script — are released for verbatim reproduction.
+
+**Forthcoming Round 9 validation.** A planned follow-up integrates the
+PhysioNet-credentialed **MIMIC-IV v3.1** [Johnson et al., 2024] real-EHR
+dataset to (i) provide an empirical $\alpha_{\text{CRITICAL}} = 0.001$
+result on $n_{\text{CRITICAL}} \approx 4 \times 10^4$ ICU-admission
+outcomes, (ii) extend the head-to-head comparison to a second,
+independent clinical domain, and (iii) replace the synthetic
+specialty-mismatch sanity with a `services`-table-driven distribution
+shift audit. The plan and runbook are in
+[improvements/round9_PLAN.md](../improvements/round9_PLAN.md);
+data access is gated by PhysioNet credentialing and a strict
+PHI-egress guard (raw note text is processed only on local backends).
 
 ---
 
@@ -1136,6 +1178,12 @@ entropy.* Nature, 630(8017), 625–630.
 H., & Szolovits, P. (2021). *What disease does this patient have? A
 large-scale open domain question answering dataset from medical exams.*
 Applied Sciences, 11(14). arXiv:2009.13081.
+
+[**Johnson et al., 2024**] Johnson, A. E. W., Bulgarelli, L., Shen, L.,
+Gayles, A., Shammout, A., Horng, S., Pollard, T. J., Hao, S., Moody, B.,
+Gow, B., Lehman, L. H., Celi, L. A., & Mark, R. G. (2024). *MIMIC-IV
+(version 3.1).* PhysioNet. https://doi.org/10.13026/kpb9-mt58.
+PhysioNet Credentialed Health Data License v1.5.0.
 
 [**Machcha et al., 2026**] Machcha, S., Yerra, S., et al. (2026). *Knowing
 When to Abstain: Medical LLMs Under Clinical Uncertainty.* EACL 2026.

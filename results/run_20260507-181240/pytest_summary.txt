@@ -1,1 +1,0 @@
-/Users/idaun/PoC/UASEF/.venv/bin/python: No module named pytest

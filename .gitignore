@@ -38,6 +38,17 @@ data/processed/
 *.jsonl
 *.parquet
 
+# MIMIC-IV (PhysioNet credentialed; DUA — 절대 커밋 금지)
+# Round 9 추가: hosp/icu/note/ed 모듈 모두 차단
+data/raw/mimic-iv/
+data/raw/mimic4_*.jsonl
+**/mimic-iv-*/
+**/mimic*.csv.gz
+**/discharge.csv*
+**/radiology.csv*
+**/edstays.csv*
+**/triage.csv*
+
 # IDE
 .vscode/
 .idea/

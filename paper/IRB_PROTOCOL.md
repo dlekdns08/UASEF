@@ -157,4 +157,50 @@ camera-ready version with a clear "deviation log" appendix.
 
 ---
 
+## 10. MIMIC-IV addendum (Round 9; PhysioNet credentialed)
+
+The Round 9 plan
+([improvements/round9_PLAN.md](../improvements/round9_PLAN.md))
+extends the evaluation to MIMIC-IV v3.1
+[Johnson et al., 2024], which is **not** in the public domain and
+requires a separate compliance regime in addition to this IRB protocol.
+
+**Credentialing prerequisites for any team replicating Round 9.**
+
+1. PhysioNet account + CITI "Data or Specimens Only Research"
+   certification (or institutional equivalent).
+2. Signed *PhysioNet Credentialed Health Data License v1.5.0* DUA
+   (see `LICENSE.txt` shipped with the MIMIC-IV download).
+3. For the optional Phase-2 free-text experiments, additional
+   credentialing for **MIMIC-IV-Note v2.2** is required.
+
+**Operational obligations enforced by this repository.**
+
+- MIMIC-IV raw data is **never** committed; `.gitignore` blocks
+  `data/raw/mimic-iv/`, `mimic*.csv.gz`, `discharge.csv*`,
+  `radiology.csv*`, `edstays.csv*`, and `triage.csv*` globally.
+- Phase 1 (`hosp` + `icu` only) transmits only **structured features**
+  (de-identified ICD-10 codes, lab abnormality flags, vital quartiles,
+  `admission_type`) through a deterministic template
+  `_MIMIC_NOTE_TEMPLATE`. Free-text discharge summaries are excluded
+  from any external API call.
+- Phase 2 (free-text experiments) is restricted to the local LMStudio
+  backend. The `UASEF_BACKEND_NEVER_SEND_PHI=1` environment guard
+  rejects OpenAI / Anthropic backend calls when the case `source` field
+  is `mimic4_note*`. The guard is unit-tested in
+  `tests/test_mimic4_loader.py`.
+- Re-identification attempts on MIMIC-IV data are forbidden by the
+  DUA. Any suspected re-identification will be reported to
+  `PHI-report@physionet.org` per LICENSE clause 5.
+
+**Cross-reference with §1–§9.** The MedAbstain re-labeling protocol in
+§§1–9 above is *independent* of the MIMIC-IV addendum. The MIMIC-IV
+ground truth is the patient's recorded clinical outcome
+(ICU admission, mortality, sepsis flag, readmission), not a physician
+re-label of an exam vignette. A 100-case overlap audit
+(board-certified physician judgment vs MIMIC-IV outcome label) is
+included in the Round 9 Phase-2 plan as an additional sanity check.
+
+---
+
 **Contact (for IRB review).** [redacted for double-blind]

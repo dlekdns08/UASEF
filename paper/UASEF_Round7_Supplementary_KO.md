@@ -308,3 +308,27 @@ _본 문서의 수치는 `results/run_20260507-182038/` (n_cal = 200, n_test = 1
 n_medabstain = 50, n_pareto = 50, α = 0.10, seed = 42, elapsed 525분) 으로부터
 채워졌다. 동일한 template은 매 실행마다 `run_full_evaluation.sh`에 의해
 `results/run_<ts>/result_supplementary.md`로 자동 재렌더링된다._
+
+---
+
+## J. MIMIC-IV 검증 레시피 (Round 9 보조; 계획)
+
+영문 supplementary §J 와 동일하다. 요약: PhysioNet credentialed
+**MIMIC-IV v3.1** [Johnson et al., 2024] 의 `hosp` + `icu` 모듈을
+사용해 (i) 실 EHR outcome 기반 stratum 라벨로 $n_{\text{CRITICAL}}
+\approx 4 \times 10^4$ 를 확보하여 §7.2 (L3) 의 $\alpha_{\text{CRITICAL}}
+= 0.001$ empirical 검증을 수행하고, (ii) `services` 테이블 기반 실
+specialty transfer 로 §G distribution shift 감사를 강화한다.
+
+데이터·DUA·PHI guard 의무는 영문 §J 참조. 본 저장소는 MIMIC 데이터
+자체를 commit 하지 않으며, structured proxy (ICD/lab/vital flag) 만
+외부 API 로 송신된다 (`UASEF_BACKEND_NEVER_SEND_PHI=1` env guard).
+
+전체 실행:
+```bash
+export MIMIC4_DIR=~/path/to/mimic-iv-3.1
+export UASEF_BACKEND_NEVER_SEND_PHI=1
+bash run_all_round9.sh                 # 약 $80 OpenAI, 약 5h wallclock
+```
+
+plan / runbook: [improvements/round9_PLAN.md](../improvements/round9_PLAN.md).

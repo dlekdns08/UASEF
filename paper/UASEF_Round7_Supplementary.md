@@ -533,3 +533,88 @@ report per-stratum AUROC alongside Table 1 in
 per-stratum AUROC across CRITICAL/HIGH/MODERATE/LOW; very low
 variance is desirable. Results are reported per backend; this audit is
 reported as supplementary diagnostic only, not as a main-paper claim.
+
+---
+
+## J. MIMIC-IV Validation Recipe (round 9 supplementary; planned)
+
+This appendix specifies the recipe for replicating our MIMIC-IV-based
+validation. The full plan is in
+[improvements/round9_PLAN.md](../improvements/round9_PLAN.md);
+this appendix is the camera-ready abstract of that plan, scoped to
+information needed by an independent reproducer.
+
+### J.1 Data and credentialing
+
+We use **MIMIC-IV v3.1** [Johnson et al., 2024], released October 2024
+under the *PhysioNet Credentialed Health Data License v1.5.0*. The
+Round 9 Phase 1 evaluation uses only the `hosp` and `icu` modules
+(structured tables); the optional `note` (discharge summaries,
+radiology reports) and `ed` (ESI level, triage) modules require
+separate PhysioNet applications and are deferred to Phase 2. Replication
+requires (i) PhysioNet credentialing, (ii) CITI "Data or Specimens
+Only Research" certification, and (iii) signing the DUA. **No raw
+PhysioNet data is committed to this repository.**
+
+### J.2 Stratum definition (real-outcome)
+
+Unlike MedAbstain (whose `expected_escalate` is derived from QA-style
+keywords), MIMIC-IV stratum and label are derived from real clinical
+outcomes recorded in the EHR:
+
+- **CRITICAL** ($\approx 4 \times 10^4$ admissions): ICU admission
+  within 24 h of hospital admission, **or** in-hospital mortality,
+  **or** `admission_type` $\in$ {`EMERGENCY`, `URGENT`}.
+- **HIGH** ($\approx 3 \times 10^4$): sepsis-3 SOFA $\Delta\!\ge\!2$
+  within 48 h, **or** 30-day readmission, **or** blood transfusion
+  within 24 h.
+- **MODERATE**: standard inpatient with no ICU transfer and no
+  in-hospital mortality.
+- **LOW**: short admission (LOS $<$ 24 h) discharged home without
+  escalation.
+
+The CRITICAL volume satisfies the $n_{\text{CRITICAL}} \ge 999$
+constraint identified in §7.2 (L3) of the main paper, enabling an
+*empirical* $\alpha_{\text{CRITICAL}} = 0.001$ result.
+
+### J.3 PHI-egress safety
+
+Phase 1 transmits **only structured features** (de-identified ICD-10
+codes, lab abnormality flags, vital-sign quartiles, `admission_type`)
+through a deterministic template `_MIMIC_NOTE_TEMPLATE`. Free-text
+discharge summaries are **never** transmitted to external APIs (e.g.
+OpenAI). The repository ships an environment guard
+`UASEF_BACKEND_NEVER_SEND_PHI=1` that rejects OpenAI/Anthropic backend
+calls when the case `source` field is `mimic4_note*`; Phase 2 free-text
+experiments are restricted to local LMStudio backends. This is
+enforced both at the `models/model_interface.py` boundary and via a
+unit test in `tests/test_mimic4_loader.py`.
+
+### J.4 Planned outputs
+
+The Round 9 plan emits the following supplementary tables:
+
+- **Table 1c** (real-EHR per-stratum coverage): empirical
+  $\alpha_{\text{CRITICAL}} = 0.001$ on $n \approx 1.5 \times 10^3$
+  CRITICAL cases × 5 seeds.
+- **Table 4-MIMIC**: head-to-head v2 vs TECP/Quach 2024 CLM/Semantic
+  Entropy/UASEF-v1 on MIMIC-IV CRITICAL stratum.
+- **Distribution shift (real)**: cardiology calibration evaluated on
+  {neurology, general-medicine, surgery} via the `services` table,
+  with weighted-CP [Tibshirani et al., 2019] recovery measured.
+- **Temporal shift**: 2008–2014 calibration vs 2015–2019 test split.
+- **Demographic equity**: per-stratum miss rate stratified by
+  race / sex / age bucket.
+
+### J.5 Reproduction
+
+```bash
+export MIMIC4_DIR=~/path/to/mimic-iv-3.1
+export UASEF_BACKEND_NEVER_SEND_PHI=1
+bash run_all_round9.sh                         # ~$80 OpenAI, ~5 h wallclock
+```
+
+The pre-processing script is deterministic (seeded pandas chunked CSV
+read); the LLM-call-based tables are reported with mean ± std over
+5 seeds and a percentile-bootstrap 95 % CI, matching the protocol
+established in Round 8 (§6.6 of the main paper).
