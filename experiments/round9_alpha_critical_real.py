@@ -28,6 +28,9 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+from dotenv import load_dotenv
+load_dotenv(ROOT / ".env")
+
 from data.loader import load_mimic4_by_stratum
 from models.uqm import UQM, compute_nonconformity_score
 from models.model_interface import query_model
