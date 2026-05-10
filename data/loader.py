@@ -878,6 +878,188 @@ def load_mimic_scenarios(
     return result
 
 
+# ── MIMIC-IV (Round 9) ────────────────────────────────────────────────────────
+#
+# Round 9 통합 (improvements/round9_PLAN.md). hosp + icu 모듈로 preprocessing
+# 한 JSONL 한 줄 = 한 hadm_id. stratum 라벨은 임상 outcome 기반:
+#   CRITICAL = ICU<24h ∨ in-hospital mortality ∨ admission_type∈{EMERGENCY,URGENT}
+#   HIGH     = sepsis-3 ∨ 30d readmission ∨ blood transfusion<24h
+#   MODERATE = standard inpatient (no ICU, no death)
+#   LOW      = short LOS<24h discharged home
+#
+# expected_escalate = (stratum != "LOW") AND (escalation outcome 발생).
+# 외부 API 송신 시 PHI guard 적용 — query_model 의 phi_taint 인자 참조.
+
+_MIMIC4_DEFAULT_PATH = _RAW_DIR / "mimic-iv" / "mimic4_cases.jsonl"
+
+
+def _load_mimic4_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
+    """
+    MIMIC-IV preprocessed JSONL 로드.
+
+    예상 한 줄 schema (round9_mimic4_preprocess.py 산출):
+        {
+          "hadm_id": "20000123",
+          "subject_id": "10000032",
+          "stratum": "CRITICAL",
+          "expected_escalate": true,
+          "specialty": "cardiology",
+          "admission_type": "EMERGENCY",
+          "admit_year": 2015,
+          "demographics": {"sex": "F", "race": "WHITE", "age_bucket": "65-79"},
+          "outcome": {
+              "icu_within_24h": true, "in_hospital_mortality": false,
+              "sepsis": false, "readmit_30d": false, "transfusion_24h": false
+          },
+          "structured": {
+              "icd_primary": "I50.9",
+              "icd_codes": ["I50.9", "N18.3"],
+              "lab_flags": ["lactate_high", "creatinine_high"],
+              "vital_quartiles": ["HR_Q4", "BP_Q1"],
+              "los_days": 4.2,
+              "service": "CMED"
+          },
+          "note_text": null              # Phase 1 미사용; Phase 2 옵션
+        }
+
+    Returns: list[MedQACase] with `source="mimic4_struct"` (structured proxy).
+    """
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"[DataLoader] MIMIC-IV JSONL 파싱 오류 (line {lineno}): {e}")
+                continue
+
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    rows = rows[:min(n, len(rows))]
+
+    cases: list[MedQACase] = []
+    for row in rows:
+        struct = row.get("structured", {}) or {}
+        demo = row.get("demographics", {}) or {}
+        question = _MIMIC4_STRUCT_TEMPLATE.format(
+            age_bucket=demo.get("age_bucket", "unknown"),
+            admission_type=row.get("admission_type", "unknown"),
+            service=struct.get("service", "unknown"),
+            icd_primary=struct.get("icd_primary", "unknown"),
+            icd_codes=", ".join(struct.get("icd_codes", []))[:200],
+            lab_flags=", ".join(struct.get("lab_flags", []))[:200],
+            vital_quartiles=", ".join(struct.get("vital_quartiles", []))[:200],
+            los_days=struct.get("los_days", "unknown"),
+        )
+        meta = (
+            f"hadm_id={row.get('hadm_id', '?')} stratum={row.get('stratum', '?')} "
+            f"admit_year={row.get('admit_year', '?')} "
+            f"sex={demo.get('sex', '?')} race={demo.get('race', '?')}"
+        )
+        cases.append(MedQACase(
+            question=question,
+            options={},
+            answer_idx="",
+            answer="",
+            meta_info=meta,
+            expected_escalate=bool(row.get("expected_escalate", False)),
+            source="mimic4_struct",
+            specialty=row.get("specialty", "internal_medicine"),
+            scenario_type=row.get("stratum", "MODERATE").lower(),
+        ))
+    return cases
+
+
+def load_mimic4_cases(
+    n: int = 1500,
+    seed: int = 42,
+    path: Optional[Path] = None,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    MIMIC-IV preprocessed cases 를 무작위 n 개 반환 (stratum 무관).
+
+    데이터 위치: data/raw/mimic-iv/mimic4_cases.jsonl (preprocessing 산출).
+    파일이 없으면 FileNotFoundError 발생 — 호출 측이 graceful skip.
+
+    재현 절차: improvements/round9_RUNBOOK.md §1 Step 1 참조.
+    """
+    p = Path(path) if path is not None else _MIMIC4_DEFAULT_PATH
+    if not p.exists():
+        raise FileNotFoundError(
+            f"MIMIC-IV preprocessed JSONL not found: {p}\n"
+            f"  Run: python experiments/round9_mimic4_preprocess.py "
+            f"--mimic-dir $MIMIC4_DIR --output {p}\n"
+            f"  PhysioNet credentialing required: "
+            f"https://physionet.org/content/mimiciv/3.1/"
+        )
+    cases = _load_mimic4_jsonl(p, n, seed)
+    if verbose:
+        print(f"[DataLoader] MIMIC-IV 로드: {len(cases)}개 ({p.name})")
+    return cases
+
+
+def load_mimic4_by_stratum(
+    n_per_stratum: int = 1500,
+    seed: int = 42,
+    path: Optional[Path] = None,
+    verbose: bool = True,
+) -> dict[str, list[MedQACase]]:
+    """
+    MIMIC-IV cases 를 stratum 별로 분류해 반환.
+    Round 9 R9.1 (α=0.001) / R9.2 (Table 4-MIMIC) 의 입력.
+    """
+    p = Path(path) if path is not None else _MIMIC4_DEFAULT_PATH
+    if not p.exists():
+        raise FileNotFoundError(
+            f"MIMIC-IV preprocessed JSONL not found: {p}"
+        )
+    # Load all then bucket — preprocessing 이 stratum 균형을 이미 맞춰 줬다고 가정.
+    all_cases = _load_mimic4_jsonl(p, n=10**9, seed=seed)
+    buckets: dict[str, list[MedQACase]] = {
+        "CRITICAL": [], "HIGH": [], "MODERATE": [], "LOW": [],
+    }
+    for c in all_cases:
+        s = c.scenario_type.upper()
+        if s in buckets:
+            buckets[s].append(c)
+    rng = random.Random(seed)
+    out: dict[str, list[MedQACase]] = {}
+    for stratum, cs in buckets.items():
+        rng.shuffle(cs)
+        out[stratum] = cs[:n_per_stratum]
+        if verbose:
+            esc = sum(1 for c in out[stratum] if c.expected_escalate)
+            print(f"  MIMIC-IV {stratum:<9}: {len(out[stratum])}개 (escalate={esc})")
+    return out
+
+
+def load_mimic4_by_specialty(
+    specialty: str,
+    n: int = 500,
+    seed: int = 42,
+    path: Optional[Path] = None,
+    verbose: bool = True,
+) -> list[MedQACase]:
+    """
+    MIMIC-IV cases 중 특정 specialty 만 반환 (Round 9 R9.3 distribution shift).
+    """
+    p = Path(path) if path is not None else _MIMIC4_DEFAULT_PATH
+    if not p.exists():
+        raise FileNotFoundError(f"MIMIC-IV preprocessed JSONL not found: {p}")
+    all_cases = _load_mimic4_jsonl(p, n=10**9, seed=seed)
+    matched = [c for c in all_cases if c.specialty == specialty]
+    rng = random.Random(seed)
+    rng.shuffle(matched)
+    out = matched[:n]
+    if verbose:
+        print(f"[DataLoader] MIMIC-IV specialty={specialty}: {len(out)}개")
+    return out
+
+
 def load_pubmedqa(
     n: int = 100,
     split: str = "test",
@@ -1104,6 +1286,13 @@ def load_dataset_for_stratification(
             if verbose:
                 print(f"[DataLoader] MIMIC-III 로드 실패 (PHIRR/credentialed access 필요): {e}")
             return []
+    if name == "mimic4":
+        try:
+            return load_mimic4_cases(n=n, seed=seed, verbose=verbose)
+        except FileNotFoundError as e:
+            if verbose:
+                print(f"[DataLoader] MIMIC-IV 미준비 (Round 9 preprocessing 필요): {e}")
+            return []
     raise ValueError(f"알 수 없는 dataset: {name!r}")
 
 
@@ -1114,6 +1303,7 @@ SUPPORTED_DATASETS = (
     "medqa_usmle_full",
     "pubmedqa",
     "medmcqa",
+    "mimic4",
 )
 
 
