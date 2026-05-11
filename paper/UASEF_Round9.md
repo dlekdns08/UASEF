@@ -659,6 +659,17 @@ add new MIMIC-IV-specific limitations.
 - **L14 — Demographic skew.** Per §6.6, MIMIC-IV demographics do not
   represent the global patient population; Round 9's equity audit
   describes the cohort, not the universe.
+- **L15 — Local-only backend in headline.** As argued in §5.3, the
+  Round 9 headline numbers are produced by LMStudio LLaMA-3.1-8B-Instruct
+  only. The choice is deliberate (clinical deployability + DUA
+  conservatism), but it does mean the headline does not characterize
+  the *upper bound* of v2 performance: a frontier closed model
+  (gpt-4o, Claude 4.5 Sonnet) could in principle achieve higher
+  CRITICAL-stratum safety recall before the conformal adjustment.
+  The supplementary §J capability-ceiling reference quantifies the
+  gap; we read that gap as a hospital-deployment realism check, not
+  as a deficiency of the framework. A reader who disagrees should
+  consult §J for the alternative numbers.
 
 ---
 
