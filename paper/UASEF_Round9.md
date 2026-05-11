@@ -60,7 +60,8 @@ Phase 1 evaluates only **structured features** (de-identified ICD-10
 codes, lab abnormality flags, vital quartiles) processed through a
 deterministic templated prompt, and runs inference on a **local
 LMStudio backend (`openai/gpt-oss-120b`, an open-weight 120B-parameter
-GGUF model served from a Mac Studio with 192 GB unified memory)**.
+mixture-of-experts model in its native MXFP4 4-bit quantization,
+served from a Mac Studio with 96 GB unified memory)**.
 **No MIMIC-IV-derived information of any kind — neither free text nor
 structured proxy — is transmitted to OpenAI, Anthropic, Gemini, or any
 other third-party API** in the headline numbers. This is a deliberate
@@ -188,8 +189,8 @@ framework. Its contributions are:
 6. **A deliberately local-only headline experiment.** All R9.1–R9.5
    numbers reported as the *primary* Round 9 result are produced by a
    single LMStudio backend (`openai/gpt-oss-120b`, a 120B-parameter
-   open-weight GGUF model, served from a Mac Studio with 192 GB
-   unified memory). We argue this is
+   open-weight mixture-of-experts model in MXFP4 4-bit quantization,
+   served from a Mac Studio with 96 GB unified memory). We argue this is
    more representative of real hospital deployment than a frontier
    closed-model evaluation: hospitals subject to HIPAA / PhysioNet
    DUA / institutional data-residency rules **cannot** send patient
@@ -500,15 +501,27 @@ scenario this work is meant to support — a hospital integrating a
 conformal-risk-controlled escalation layer over its existing LLM
 inference stack — the relevant model class is the one the hospital
 can actually run, not the one the research community can rent on
-demand. Modern open-weight models (LLaMA-3, Mistral, Qwen, gpt-oss)
-served on commodity Apple Silicon or single-GPU hardware are the
-realistic bedside substrate. We therefore report:
+demand. The specific model we use, **`openai/gpt-oss-120b`** [OpenAI,
+2025], is OpenAI's open-weight 120B-parameter mixture-of-experts
+release distributed under the Apache 2.0 license. In its native
+MXFP4 4-bit quantization the model fits in **$\sim 65$ GB** of
+unified memory, which is well within the 96 GB headroom of the
+Mac Studio used for this evaluation and is also achievable on a
+single H100 (80 GB) or two consumer-grade GPUs. Together with
+LMStudio's OpenAI-compatible `/v1/responses` endpoint, this gives us
+full token-level log-prob extraction (required for the UQM logprob
+nonconformity score, Round 7 §3.4) on a model whose weights, prompt,
+and inference trace never leave the local machine — the operational
+condition every HIPAA-bound hospital deployment must satisfy.
+
+We therefore report:
 
 - **Headline (R9.1–R9.5, default `BACKENDS="lmstudio"`).** All numbers
-  produced by the LMStudio backend, no external API calls. The
-  resulting paper claim is *immediately reproducible by any group
-  with credentialed MIMIC-IV access and a single Mac Studio*, with
-  zero cloud bill and zero data-egress risk.
+  produced by the LMStudio backend running `openai/gpt-oss-120b`, no
+  external API calls. The resulting paper claim is *immediately
+  reproducible by any group with credentialed MIMIC-IV access and a
+  single Mac Studio (96 GB unified memory or higher)*, with zero
+  cloud bill and zero data-egress risk.
 - **Supplementary §J capability-ceiling reference (opt-in via
   `BACKENDS="openai lmstudio"`).** A side-by-side comparison against
   gpt-4o. Reported to *quantify the gap* between a clinically-deployable
@@ -738,6 +751,10 @@ Prediction in MIMIC-IV.* (cf. round9 plan §2 for comparison.)
 [**Machcha et al., 2026**] Machcha, S., Yerra, S., et al. (2026).
 *Knowing When to Abstain: Medical LLMs Under Clinical Uncertainty.*
 EACL 2026. arXiv:2601.12471.
+
+[**OpenAI, 2025**] OpenAI. (2025). *gpt-oss: open-weight reasoning
+models for local deployment* (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`).
+Hugging Face / OpenAI Releases. Apache 2.0 license.
 
 [**Quach et al., 2024**] Quach, V., Fisch, A., Schuster, T., Yala, A.,
 Sohn, J. H., Jaakkola, T. S., & Barzilay, R. (2024). *Conformal
