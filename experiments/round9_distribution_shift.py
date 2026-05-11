@@ -205,7 +205,7 @@ def main():
     ap.add_argument("--targets", nargs="+", default=["neurology", "internal_medicine", "surgery"])
     ap.add_argument("--n-per-spec", type=int, default=300)
     ap.add_argument("--seeds", type=int, nargs="+", default=[42])
-    ap.add_argument("--backends", nargs="+", default=["openai", "lmstudio"])
+    ap.add_argument("--backends", nargs="+", default=["lmstudio"])
     ap.add_argument("--alpha", type=float, default=0.05)
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "round9" / "dist_shift_real")
     args = ap.parse_args()
