@@ -58,11 +58,23 @@ patient cohorts.
 
 Phase 1 evaluates only **structured features** (de-identified ICD-10
 codes, lab abnormality flags, vital quartiles) processed through a
-deterministic templated prompt; **no MIMIC-IV free-text discharge
-summary or radiology report is transmitted to any third-party API**.
-A repository-level environment guard (`UASEF_BACKEND_NEVER_SEND_PHI=1`)
-enforces this constraint at the model-interface boundary and is unit
-tested.
+deterministic templated prompt, and runs inference on a **local
+LMStudio backend (LLaMA-3.1-8B-Instruct served from a Mac Studio)**.
+**No MIMIC-IV-derived information of any kind — neither free text nor
+structured proxy — is transmitted to OpenAI, Anthropic, Gemini, or any
+other third-party API** in the headline numbers. This is a deliberate
+methodological choice rather than a technical necessity: the
+PhysioNet DUA (LICENSE.txt §3, §6, §7) is permissive about derived
+structured features, but we adopt the most conservative interpretation
+to make the resulting protocol immediately deployable in real
+hospital environments where data egress to public LLM vendors is
+generally prohibited. A repository-level environment guard
+(`UASEF_BACKEND_NEVER_SEND_PHI=1`) enforces this constraint at the
+model-interface boundary, and all MIMIC-IV cases are PHI-tainted at
+the loader (`source = "mimic4_struct"`) so that any future code path
+attempting to route them through an external API fails closed with
+`PHIGuardViolation`. The mechanism is unit tested in
+[tests/test_mimic4_loader.py](../tests/test_mimic4_loader.py).
 
 This paper *does not* claim algorithmic novelty beyond Round 7. Its
 contribution is the *first real-EHR empirical validation* that the
