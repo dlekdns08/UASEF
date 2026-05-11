@@ -517,17 +517,27 @@ realistic bedside substrate. We therefore report:
   hospital deployability; if the gap is small (< 0.05), §J becomes
   evidence that the open-weight headline is robust.
 
-### 5.3 Single-command reproduction
+### 5.4 Single-command reproduction
 
 ```bash
 export MIMIC4_DIR=~/path/to/mimic-iv-3.1
 export UASEF_BACKEND_NEVER_SEND_PHI=1
-bash run_all_round9.sh
+bash run_all_round9.sh                          # default: lmstudio only
 ```
 
-The script runs P0 preprocessing (≈ 2 h) then R9.1 → R9.5 sequentially.
-Any sub-step can be skipped via `SKIP_R9_1=1`, etc.; a `DRY_RUN=1`
-mode prints the planned commands without executing.
+The script runs P0 preprocessing (≈ 2 h) then R9.1 → R9.5 sequentially
+on the local LMStudio backend. Any sub-step can be skipped via
+`SKIP_R9_1=1`, etc.; a `DRY_RUN=1` mode prints the planned commands
+without executing. To additionally produce the supplementary §J
+capability-ceiling reference, run a second time with the openai
+backend (this requires *both* unsetting the PHI guard and consenting
+to the OpenAI DUA-interpretation discussion in §5.3):
+
+```bash
+unset UASEF_BACKEND_NEVER_SEND_PHI                 # only if you've
+                                                    # reviewed §5.3
+BACKENDS="openai" bash run_all_round9.sh
+```
 
 ### 5.4 IRB
 
