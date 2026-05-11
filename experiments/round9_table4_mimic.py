@@ -256,7 +256,7 @@ def main():
     ap.add_argument("--n-cal-per-stratum", type=int, default=200)
     ap.add_argument("--n-test-per-stratum", type=int, default=100)
     ap.add_argument("--alpha", type=float, default=0.10)
-    ap.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44, 45, 46])
+    ap.add_argument("--seeds", type=int, nargs="+", default=[42])
     ap.add_argument("--backends", nargs="+", default=["openai", "lmstudio"])
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "round9" / "table4_mimic")
     args = ap.parse_args()
