@@ -23,7 +23,11 @@
 #   ALPHA_CRITICAL  default 0.001  R9.1 헤드라인
 #   SEEDS           default "42"   (단일 시드, 비용 절감)
 #                   여러 seed 부트스트랩 필요 시: SEEDS="42 43 44 45 46"
-#   BACKENDS        default "openai lmstudio"
+#   BACKENDS        default "lmstudio"   (PhysioNet DUA 준수 — 로컬 전용)
+#                   외부 API 비교 필요 시: BACKENDS="openai lmstudio"
+#                   ⚠️ openai 추가 시 structured proxy 만 송신되지만,
+#                      "어떤 MIMIC 정보도 외부로 안 나가도록" 보수적 보호 차원에서
+#                      default 는 lmstudio only.
 #   UASEF_QUERY_TIMEOUT_S    default 60   (per-LLM-call timeout 초)
 #
 # Skip 플래그 (1로 설정 시 해당 단계 생략)
@@ -57,7 +61,7 @@ N_TEST_PER="${N_TEST_PER:-100}"
 ALPHA="${ALPHA:-0.10}"
 ALPHA_CRITICAL="${ALPHA_CRITICAL:-0.001}"
 SEEDS="${SEEDS:-42}"
-BACKENDS="${BACKENDS:-openai lmstudio}"
+BACKENDS="${BACKENDS:-lmstudio}"
 
 # Round 9: per-LLM-call timeout (s) — httpx 무한 hang 방지
 export UASEF_QUERY_TIMEOUT_S="${UASEF_QUERY_TIMEOUT_S:-60}"
@@ -151,7 +155,8 @@ run_step P0 "preprocessing → $JSONL" "$SKIP_PREPROCESS" -- \
         --n-per-stratum "$N_PER_STRATUM" --seed 42
 
 # ── R9.1: α=0.001 empirical ────────────────────────────────────────────────
-banner "[R9.1] α_CRITICAL=$ALPHA_CRITICAL empirical (n=$N_PER_STRATUM × 5 seeds)"
+N_SEEDS=$(echo $SEEDS | wc -w | tr -d ' ')
+banner "[R9.1] α_CRITICAL=$ALPHA_CRITICAL empirical (n=$N_PER_STRATUM × $N_SEEDS seed(s))"
 run_step R9.1 "alpha_critical_real (Table 1c)" "$SKIP_R9_1" -- \
     "$PYTHON" experiments/round9_alpha_critical_real.py \
         --n-critical "$N_PER_STRATUM" \
@@ -195,10 +200,12 @@ run_step R9.4 "temporal_shift" "$SKIP_R9_4" -- \
 
 # ── R9.5: equity audit ─────────────────────────────────────────────────────
 banner "[R9.5] Demographic equity audit"
-run_step R9.5 "equity_audit_real (single seed)" "$SKIP_R9_5" -- \
+# PhysioNet DUA: R9.5 도 default backend 는 lmstudio (로컬).
+R9_5_BACKEND="${R9_5_BACKEND:-lmstudio}"
+run_step R9.5 "equity_audit_real (single seed, $R9_5_BACKEND)" "$SKIP_R9_5" -- \
     "$PYTHON" experiments/round9_equity_real.py \
         --n-cal 800 --n-test 600 \
-        --seed 42 --backend openai \
+        --seed 42 --backend "$R9_5_BACKEND" \
         --out "${ROOT}/results/round9/equity_audit_real"
 
 # ── Aggregate ──────────────────────────────────────────────────────────────
