@@ -41,9 +41,13 @@ ALPHAS_R9 = {"CRITICAL": 0.001, "HIGH": 0.01, "MODERATE": 0.05, "LOW": 0.10}
 
 
 def collect_scores(backend: str, cases: list, verbose: bool = False) -> tuple[list[float], list[bool], list[str]]:
+    import sys as _sys
+    import time as _time
     sys_prompt = UQM.SYSTEM_PROMPT
     scores, labels, strata = [], [], []
     skipped = 0
+    t_start = _time.perf_counter()
+    log_every = max(1, len(cases) // 40)  # ~40 log lines per pass
     for i, case in enumerate(cases):
         try:
             resp = query_model(backend, sys_prompt, case.question, temperature=0.0)
@@ -51,15 +55,19 @@ def collect_scores(backend: str, cases: list, verbose: bool = False) -> tuple[li
         except Exception as e:
             skipped += 1
             if verbose and skipped <= 3:
-                print(f"  [skip] {e}")
+                print(f"  [skip {i}] {type(e).__name__}: {str(e)[:120]}", flush=True)
             continue
         scores.append(sc)
         labels.append(case.expected_escalate)
         strata.append(case.scenario_type.upper())
-        if verbose and (i + 1) % 50 == 0:
-            print(f"  scored {i+1}/{len(cases)}")
+        if verbose and ((i + 1) % log_every == 0 or i + 1 == len(cases)):
+            elapsed = _time.perf_counter() - t_start
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            eta = (len(cases) - i - 1) / rate if rate > 0 else 0
+            print(f"  [{backend}] {i+1}/{len(cases)} cases ({rate:.2f}/s, ETA {eta/60:.1f}min, skipped={skipped})", flush=True)
+            _sys.stdout.flush()
     if skipped:
-        print(f"  skipped {skipped}/{len(cases)} cases")
+        print(f"  total skipped: {skipped}/{len(cases)} cases", flush=True)
     return scores, labels, strata
 
 
