@@ -59,7 +59,8 @@ patient cohorts.
 Phase 1 evaluates only **structured features** (de-identified ICD-10
 codes, lab abnormality flags, vital quartiles) processed through a
 deterministic templated prompt, and runs inference on a **local
-LMStudio backend (LLaMA-3.1-8B-Instruct served from a Mac Studio)**.
+LMStudio backend (`openai/gpt-oss-120b`, an open-weight 120B-parameter
+GGUF model served from a Mac Studio with 192 GB unified memory)**.
 **No MIMIC-IV-derived information of any kind — neither free text nor
 structured proxy — is transmitted to OpenAI, Anthropic, Gemini, or any
 other third-party API** in the headline numbers. This is a deliberate
@@ -186,8 +187,9 @@ framework. Its contributions are:
    [tests/test_mimic4_loader.py](../tests/test_mimic4_loader.py).
 6. **A deliberately local-only headline experiment.** All R9.1–R9.5
    numbers reported as the *primary* Round 9 result are produced by a
-   single LMStudio backend (LLaMA-3.1-8B-Instruct, 4-bit GGUF, served
-   from a Mac Studio with 192 GB unified memory). We argue this is
+   single LMStudio backend (`openai/gpt-oss-120b`, a 120B-parameter
+   open-weight GGUF model, served from a Mac Studio with 192 GB
+   unified memory). We argue this is
    more representative of real hospital deployment than a frontier
    closed-model evaluation: hospitals subject to HIPAA / PhysioNet
    DUA / institutional data-residency rules **cannot** send patient
@@ -345,7 +347,7 @@ $\mathbb{E}[\ell_{\text{CRITICAL}}] \le 0.001$ on a held-out test
 set, with the empirical 2σ upper bound below $1.2 \times 0.001$.
 
 **Protocol.** For each seed $s \in \{42, 43, 44, 45, 46\}$ and each
-backend $b \in \{\texttt{openai gpt-4o}, \texttt{lmstudio LLaMA-3.1-8B}\}$:
+backend $b \in \{\texttt{lmstudio openai/gpt-oss-120b}\}$ (headline) — with $\texttt{openai gpt-4o}$ available as an opt-in supplementary §J reference:
 
 1. Load the preprocessed JSONL.
 2. Stratum-balanced split: 80 % calibration, 20 % test.
@@ -660,7 +662,7 @@ add new MIMIC-IV-specific limitations.
   represent the global patient population; Round 9's equity audit
   describes the cohort, not the universe.
 - **L15 — Local-only backend in headline.** As argued in §5.3, the
-  Round 9 headline numbers are produced by LMStudio LLaMA-3.1-8B-Instruct
+  Round 9 headline numbers are produced by LMStudio `openai/gpt-oss-120b`
   only. The choice is deliberate (clinical deployability + DUA
   conservatism), but it does mean the headline does not characterize
   the *upper bound* of v2 performance: a frontier closed model
