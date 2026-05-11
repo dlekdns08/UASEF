@@ -21,8 +21,10 @@
 #   N_TEST_PER      default 100    Table 4-MIMIC test per stratum
 #   ALPHA           default 0.10
 #   ALPHA_CRITICAL  default 0.001  R9.1 헤드라인
-#   SEEDS           default "42 43 44 45 46"
+#   SEEDS           default "42"   (단일 시드, 비용 절감)
+#                   여러 seed 부트스트랩 필요 시: SEEDS="42 43 44 45 46"
 #   BACKENDS        default "openai lmstudio"
+#   UASEF_QUERY_TIMEOUT_S    default 60   (per-LLM-call timeout 초)
 #
 # Skip 플래그 (1로 설정 시 해당 단계 생략)
 # ──────────────────────────────────────
