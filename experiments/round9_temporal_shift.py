@@ -55,8 +55,11 @@ def _scores(backend: str, cases, verbose: bool = True):
     t_start = _time.perf_counter()
     log_every = max(1, len(cases) // 20)
     for i, c in enumerate(cases):
+        # MIMIC-IV case 는 PHI taint — env guard 가 외부 API 송신 차단.
+        phi_taint = (c.source or "").startswith("mimic4")
         try:
-            resp = query_model(backend, sys_prompt, c.question, temperature=0.0)
+            resp = query_model(backend, sys_prompt, c.question, temperature=0.0,
+                                phi_taint=phi_taint)
             sc = compute_nonconformity_score(resp)
         except Exception as e:
             skipped += 1
