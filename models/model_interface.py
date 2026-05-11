@@ -96,10 +96,17 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
     audit 6.9: 'anthropic' 백엔드는 별도 함수 _query_anthropic을 사용하므로 여기서 제외.
     'gemini'는 Google의 OpenAI-compatible 엔드포인트를 OpenAI 클라이언트로 사용.
     """
+    # Round 9: per-request timeout 으로 httpx 무한 hang 차단.
+    # UASEF_QUERY_TIMEOUT_S 환경변수 (default 60s) — 한 케이스 처리 한계.
+    timeout_s = float(os.environ.get("UASEF_QUERY_TIMEOUT_S", "60"))
+    max_retries = int(os.environ.get("UASEF_QUERY_MAX_RETRIES", "2"))
+
     if backend == "lmstudio":
         client = OpenAI(
             base_url="http://localhost:1234/v1",
             api_key="lm-studio",           # LMStudio는 키 불필요, 아무 문자열
+            timeout=timeout_s,
+            max_retries=max_retries,
         )
         model_name = os.getenv("LMSTUDIO_MODEL", "meta-llama-3.1-8b-instruct")
     elif backend == "openai":
@@ -108,12 +115,14 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
             raise RuntimeError(
                 "Missing OPENAI_API_KEY. Set `OPENAI_API_KEY` in your shell or in `UASEF/.env`."
             )
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
     elif backend == "mlx":
         client = OpenAI(
             base_url=os.getenv("MLX_BASE_URL", "http://localhost:8080/v1"),
             api_key="mlx",
+            timeout=timeout_s,
+            max_retries=max_retries,
         )
         model_name = os.getenv("MLX_MODEL", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
     elif backend == "gemini":
@@ -131,6 +140,8 @@ def get_client(backend: str) -> tuple[OpenAI, str]:
                 "GEMINI_BASE_URL",
                 "https://generativelanguage.googleapis.com/v1beta/openai/",
             ),
+            timeout=timeout_s,
+            max_retries=max_retries,
         )
         model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     else:
@@ -192,8 +203,10 @@ def _query_lmstudio_responses(
         method="POST",
     )
 
+    # Round 9: per-request timeout (LMStudio 가 큰 모델로 느려도 60s 안에 응답)
+    timeout_s = float(os.environ.get("UASEF_QUERY_TIMEOUT_S", "60"))
     t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
         raw = json.loads(resp.read().decode("utf-8"))
     latency_ms = (time.perf_counter() - t0) * 1000
 
@@ -263,7 +276,9 @@ def _query_anthropic(
             "Missing ANTHROPIC_API_KEY. Get key at console.anthropic.com and set in `.env`."
         )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    timeout_s = float(os.environ.get("UASEF_QUERY_TIMEOUT_S", "60"))
+    max_retries = int(os.environ.get("UASEF_QUERY_MAX_RETRIES", "2"))
+    client = anthropic.Anthropic(api_key=api_key, timeout=timeout_s, max_retries=max_retries)
     model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
     t0 = time.perf_counter()
