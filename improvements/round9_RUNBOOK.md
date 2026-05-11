@@ -1,11 +1,18 @@
 # Round 9 — Execution Runbook (MIMIC-IV Integration)
 
-> **TL;DR**
+> **TL;DR — local-only headline**
 > ```bash
 > export MIMIC4_DIR=~/Downloads/mimic-iv-3.1
 > export UASEF_BACKEND_NEVER_SEND_PHI=1
-> bash run_all_round9.sh                  # Phase 1, ~$80, ~5h wallclock
+> bash run_all_round9.sh                  # default: lmstudio only, $0, ~3-5h
 > ```
+>
+> **변경 (2026-05-11)**: BACKENDS default 가 `"lmstudio"` 만 (외부 API 제외).
+> PhysioNet DUA 보수적 해석 + 실 병원 deployment 와 일치하는 framing.
+> OpenAI 비교 필요 시: `BACKENDS="openai lmstudio" bash run_all_round9.sh`
+> (단, `UASEF_BACKEND_NEVER_SEND_PHI=1` 도 unset 해야 송신 가능 — guard 가
+> MIMIC-IV case 의 외부 API 송신을 차단).
+>
 > 자세한 plan: [round9_PLAN.md](round9_PLAN.md)
 
 ---
