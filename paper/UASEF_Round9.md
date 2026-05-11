@@ -184,6 +184,19 @@ framework. Its contributions are:
    PHI-tainted prompt would otherwise be transmitted to OpenAI,
    Anthropic, or Gemini; tested in
    [tests/test_mimic4_loader.py](../tests/test_mimic4_loader.py).
+6. **A deliberately local-only headline experiment.** All R9.1–R9.5
+   numbers reported as the *primary* Round 9 result are produced by a
+   single LMStudio backend (LLaMA-3.1-8B-Instruct, 4-bit GGUF, served
+   from a Mac Studio with 192 GB unified memory). We argue this is
+   more representative of real hospital deployment than a frontier
+   closed-model evaluation: hospitals subject to HIPAA / PhysioNet
+   DUA / institutional data-residency rules **cannot** send patient
+   data to OpenAI in production, so reporting headline numbers on a
+   model that can in fact be deployed at the bedside is the
+   epistemically honest framing. An OpenAI gpt-4o comparison is
+   available via the `BACKENDS="openai lmstudio"` env-var override
+   and is reported in supplementary §J as a *capability ceiling*
+   reference, not as a deployment recommendation.
 
 We are explicit that we do not claim multi-center or international
 validation: MIMIC-IV is a single tertiary care center in Boston, and
@@ -445,7 +458,7 @@ We **do not** redistribute any MIMIC-IV byte. The repository's
 `.gitignore` blocks `data/raw/mimic-iv/`, `mimic*.csv.gz`,
 `discharge.csv*`, `radiology.csv*`, `edstays.csv*`, and `triage.csv*`.
 
-### 5.2 PHI-egress guard
+### 5.2 PHI-egress guard and the local-only headline
 
 A repository-level environment variable
 `UASEF_BACKEND_NEVER_SEND_PHI=1` activates a guard inside
@@ -456,11 +469,53 @@ backends (`lmstudio`, `mlx`) remain reachable. This guard is unit
 tested in
 [tests/test_mimic4_loader.py](../tests/test_mimic4_loader.py).
 
-In Phase 1 we set `phi_taint=False` because the structured prompt
-template (§3.5) contains no free text; the guard's main role is to
-block accidental Phase-2 contamination, where the discharge-summary
-free text would be sent to `query_model(..., phi_taint=True)` and
-must therefore be rejected by the external-API backends.
+**All MIMIC-IV cases set `phi_taint=True` automatically.** The
+data-loader emits each MIMIC-IV admission with `source = "mimic4_struct"`
+([data/loader.py](../data/loader.py)), and the round 9 experiment
+scripts inspect this source field and propagate `phi_taint=True` to
+`query_model`. Concretely:
+
+```python
+# experiments/round9_*.py
+phi_taint = (case.source or "").startswith("mimic4")
+resp = query_model(backend, sys_prompt, case.question,
+                   phi_taint=phi_taint, ...)
+```
+
+The combined effect is: under the default `BACKENDS="lmstudio"`
+configuration, MIMIC-IV experiments are local-only by construction;
+under the `BACKENDS="openai lmstudio"` opt-in override, MIMIC-IV
+prompts are PHI-tainted and therefore *also* rejected by the openai
+client unless the user additionally unsets
+`UASEF_BACKEND_NEVER_SEND_PHI`. This two-key requirement is intentional
+— a single mis-typed flag should not exfiltrate hospital data.
+
+### 5.3 Why local-only is the headline, not a limitation
+
+A natural reviewer question is: *why not report frontier closed-model
+numbers as the headline*? Our position is that for the deployment
+scenario this work is meant to support — a hospital integrating a
+conformal-risk-controlled escalation layer over its existing LLM
+inference stack — the relevant model class is the one the hospital
+can actually run, not the one the research community can rent on
+demand. Modern open-weight models (LLaMA-3, Mistral, Qwen, gpt-oss)
+served on commodity Apple Silicon or single-GPU hardware are the
+realistic bedside substrate. We therefore report:
+
+- **Headline (R9.1–R9.5, default `BACKENDS="lmstudio"`).** All numbers
+  produced by the LMStudio backend, no external API calls. The
+  resulting paper claim is *immediately reproducible by any group
+  with credentialed MIMIC-IV access and a single Mac Studio*, with
+  zero cloud bill and zero data-egress risk.
+- **Supplementary §J capability-ceiling reference (opt-in via
+  `BACKENDS="openai lmstudio"`).** A side-by-side comparison against
+  gpt-4o. Reported to *quantify the gap* between a clinically-deployable
+  open-weight model and a frontier closed model, **not** as a
+  recommendation. If the gap is large (e.g. CRITICAL recall delta
+  > 0.10), §J becomes evidence that frontier-model headlines in
+  conformal-prediction-for-LLM papers may be misleading about real
+  hospital deployability; if the gap is small (< 0.05), §J becomes
+  evidence that the open-weight headline is robust.
 
 ### 5.3 Single-command reproduction
 
