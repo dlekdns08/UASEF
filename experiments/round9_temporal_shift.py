@@ -133,7 +133,7 @@ def main():
     ap.add_argument("--test-years", nargs=2, type=int, default=[2015, 2019])
     ap.add_argument("--n-cal", type=int, default=600)
     ap.add_argument("--n-test", type=int, default=300)
-    ap.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44, 45, 46])
+    ap.add_argument("--seeds", type=int, nargs="+", default=[42])
     ap.add_argument("--backends", nargs="+", default=["openai", "lmstudio"])
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "round9" / "temporal_shift")
     args = ap.parse_args()
