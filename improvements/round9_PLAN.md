@@ -7,8 +7,11 @@
 > **착수 일시**: 2026-05-10
 > **선행 조건**: Round 8 P1.3 (LLM-judge κ) 패치 완료, 5-시드 부트스트랩 완료 (run_20260509-013417_aggregate)
 
-**Headline 백엔드 (2026-05-11 결정)**: **LMStudio LLaMA-3.1-8B-Instruct 만** (Mac Studio 192GB).
-- 동기: PhysioNet DUA 보수적 해석 + 실 병원 deployment (HIPAA 환경) 가 외부 API 송신 불가 → headline 수치는 hospital-deployable 모델에서 측정해야 정직.
+**Headline 백엔드 (2026-05-11 결정)**: **LMStudio `openai/gpt-oss-120b` 만** (Mac Studio 96 GB unified memory).
+- 모델: OpenAI gpt-oss-120b — Apache 2.0 오픈웨이트, 120B MoE, native MXFP4 4-bit 양자화 (~65 GB), logprobs 지원.
+- 하드웨어: Mac Studio 96 GB unified memory (모델 로드 후 inference 헤드룸 ~30 GB).
+- 환경변수: `LMSTUDIO_MODEL=openai/gpt-oss-120b` (이미 `.env` 에 설정됨).
+- 동기: PhysioNet DUA 보수적 해석 + 실 병원 deployment (HIPAA 환경) 가 외부 API 송신 불가 → headline 수치는 hospital-deployable 모델에서 측정해야 정직. 또한 OpenAI 자체가 같은 회사의 closed model (gpt-4o) 와 open-weight (gpt-oss-120b) 양쪽에서 conformal guarantee 가 살아남는지 정직히 보일 수 있음 — 동일 vendor 비교라 "open vs closed" 의 다른 변인 (학습 데이터 분포, RLHF protocol) 영향이 최소화됨.
 - OpenAI gpt-4o 비교는 supplementary §J 옵션 (`BACKENDS="openai lmstudio"`) 으로 capability-ceiling 참조 — 배포 권고가 아님.
 - 비용: $0 (로컬 only). 시간: Mac Studio LMStudio 처리량에 의존 (~3–5h wallclock for R9.1–R9.5 single seed).
 
