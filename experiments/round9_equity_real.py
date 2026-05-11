@@ -41,17 +41,28 @@ def _parse_demo(meta_info: str):
     return out
 
 
-def _scores(backend: str, cases):
+def _scores(backend: str, cases, verbose: bool = True):
+    import time as _time
     sys_prompt = UQM.SYSTEM_PROMPT
     s_, l_, st_, demos = [], [], [], []
-    for c in cases:
+    skipped = 0
+    t_start = _time.perf_counter()
+    log_every = max(1, len(cases) // 20)
+    for i, c in enumerate(cases):
         try:
             resp = query_model(backend, sys_prompt, c.question, temperature=0.0)
             sc = compute_nonconformity_score(resp)
-        except Exception:
+        except Exception as e:
+            skipped += 1
+            if verbose and skipped <= 2:
+                print(f"  [skip {i}] {type(e).__name__}: {str(e)[:100]}", flush=True)
             continue
         s_.append(sc); l_.append(c.expected_escalate); st_.append(c.scenario_type.upper())
         demos.append(_parse_demo(c.meta_info))
+        if verbose and ((i + 1) % log_every == 0 or i + 1 == len(cases)):
+            elapsed = _time.perf_counter() - t_start
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            print(f"    [{backend}] {i+1}/{len(cases)} ({rate:.2f}/s, skipped={skipped})", flush=True)
     return s_, l_, st_, demos
 
 
