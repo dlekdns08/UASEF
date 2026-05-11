@@ -7,6 +7,11 @@
 > **착수 일시**: 2026-05-10
 > **선행 조건**: Round 8 P1.3 (LLM-judge κ) 패치 완료, 5-시드 부트스트랩 완료 (run_20260509-013417_aggregate)
 
+**Headline 백엔드 (2026-05-11 결정)**: **LMStudio LLaMA-3.1-8B-Instruct 만** (Mac Studio 192GB).
+- 동기: PhysioNet DUA 보수적 해석 + 실 병원 deployment (HIPAA 환경) 가 외부 API 송신 불가 → headline 수치는 hospital-deployable 모델에서 측정해야 정직.
+- OpenAI gpt-4o 비교는 supplementary §J 옵션 (`BACKENDS="openai lmstudio"`) 으로 capability-ceiling 참조 — 배포 권고가 아님.
+- 비용: $0 (로컬 only). 시간: Mac Studio LMStudio 처리량에 의존 (~3–5h wallclock for R9.1–R9.5 single seed).
+
 ---
 
 ## 0. 왜 MIMIC-IV 인가 (Round 8 까지의 갭과의 직접 매핑)
