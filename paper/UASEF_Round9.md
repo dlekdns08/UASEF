@@ -539,7 +539,7 @@ unset UASEF_BACKEND_NEVER_SEND_PHI                 # only if you've
 BACKENDS="openai" bash run_all_round9.sh
 ```
 
-### 5.4 IRB
+### 5.5 IRB
 
 Round 9 work falls under the same ethics protocol as Round 7
 ([paper/IRB_PROTOCOL.md](IRB_PROTOCOL.md)) extended by a §10
