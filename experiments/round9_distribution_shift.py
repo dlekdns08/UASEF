@@ -42,16 +42,27 @@ from models.model_interface import query_model
 ALPHAS_R9 = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
 
 
-def _scores(backend: str, cases):
+def _scores(backend: str, cases, verbose: bool = True):
+    import time as _time
     sys_prompt = UQM.SYSTEM_PROMPT
     out_s, out_l, out_st = [], [], []
-    for c in cases:
+    skipped = 0
+    t_start = _time.perf_counter()
+    log_every = max(1, len(cases) // 20)
+    for i, c in enumerate(cases):
         try:
             resp = query_model(backend, sys_prompt, c.question, temperature=0.0)
             sc = compute_nonconformity_score(resp)
-        except Exception:
+        except Exception as e:
+            skipped += 1
+            if verbose and skipped <= 2:
+                print(f"  [skip {i}] {type(e).__name__}: {str(e)[:100]}", flush=True)
             continue
         out_s.append(sc); out_l.append(c.expected_escalate); out_st.append(c.scenario_type.upper())
+        if verbose and ((i + 1) % log_every == 0 or i + 1 == len(cases)):
+            elapsed = _time.perf_counter() - t_start
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            print(f"    [{backend}] {i+1}/{len(cases)} ({rate:.2f}/s, skipped={skipped})", flush=True)
     return out_s, out_l, out_st
 
 
