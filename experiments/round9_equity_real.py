@@ -71,7 +71,7 @@ def main():
     ap.add_argument("--n-cal", type=int, default=800)
     ap.add_argument("--n-test", type=int, default=600)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--backend", default="openai")
+    ap.add_argument("--backend", default="lmstudio")
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "round9" / "equity_audit_real")
     args = ap.parse_args()
 
