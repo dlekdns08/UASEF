@@ -136,6 +136,7 @@ note "PHI guard    : ${UASEF_BACKEND_NEVER_SEND_PHI:-not set}"
 note "N_PER_STRATUM: $N_PER_STRATUM"
 note "Backends     : $BACKENDS"
 note "Seeds        : $SEEDS"
+note "Query timeout: ${UASEF_QUERY_TIMEOUT_S}s × ${UASEF_QUERY_MAX_RETRIES} retries"
 
 # ── P0: preprocessing ──────────────────────────────────────────────────────
 banner "[P0] Preprocessing — MIMIC-IV hosp+icu → JSONL"
