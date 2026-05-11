@@ -192,7 +192,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-critical", type=int, default=1500)
     ap.add_argument("--alpha-critical", type=float, default=0.001)
-    ap.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44, 45, 46])
+    ap.add_argument("--seeds", type=int, nargs="+", default=[42])
     ap.add_argument("--backends", nargs="+", default=["openai", "lmstudio"])
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "round9" / "alpha_critical_real")
     ap.add_argument("--verbose", action="store_true", default=True)
