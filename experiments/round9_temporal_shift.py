@@ -32,17 +32,29 @@ from models.model_interface import query_model
 
 ALPHAS = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
 
+# MIMIC-IV calendar era groups (실 calendar; patients.anchor_year_group).
+ALL_ANCHOR_GROUPS = ["2008 - 2010", "2011 - 2013", "2014 - 2016", "2017 - 2019", "2020 - 2022"]
 
-def _split_by_year(cases, cal_range, test_range):
+
+def _parse_anchor_group(meta_info: str) -> str | None:
+    """Loader 가 'anchor_year_group=2008_-_2010' 형태로 인코딩 (공백→언더스코어)."""
+    for p in meta_info.split():
+        if p.startswith("anchor_year_group="):
+            v = p.split("=", 1)[1].replace("_", " ")
+            return None if v in ("?", "None") else v
+    return None
+
+
+def _split_by_anchor_group(cases, cal_groups: set[str], test_groups: set[str]):
+    """MIMIC-IV deidentified admit dates 우회 — patients.anchor_year_group 으로 split."""
     cal, test = [], []
     for c in cases:
-        try:
-            year = int(c.meta_info.split("admit_year=")[1].split()[0])
-        except Exception:
-            year = 0
-        if cal_range[0] <= year <= cal_range[1]:
+        grp = _parse_anchor_group(c.meta_info)
+        if grp is None:
+            continue
+        if grp in cal_groups:
             cal.append(c)
-        elif test_range[0] <= year <= test_range[1]:
+        elif grp in test_groups:
             test.append(c)
     return cal, test
 
@@ -74,19 +86,26 @@ def _scores(backend: str, cases, verbose: bool = True):
     return s_, l_, st_
 
 
-def evaluate(backend: str, seed: int, cal_range, test_range,
+def evaluate(backend: str, seed: int, cal_groups, test_groups,
              n_cal: int, n_test: int, verbose: bool):
-    if verbose: print(f"\n── {backend} seed={seed} cal={cal_range} test={test_range} ──")
+    """anchor_year_group 기반 split (MIMIC-IV deidentified dates 우회)."""
+    if verbose:
+        print(f"\n── {backend} seed={seed} cal_groups={cal_groups} test_groups={test_groups} ──")
     if not _MIMIC4_DEFAULT_PATH.exists():
         raise FileNotFoundError(_MIMIC4_DEFAULT_PATH)
     all_cases = _load_mimic4_jsonl(_MIMIC4_DEFAULT_PATH, n=10**9, seed=seed)
-    cal_pool, test_pool = _split_by_year(all_cases, cal_range, test_range)
+    cal_pool, test_pool = _split_by_anchor_group(all_cases, set(cal_groups), set(test_groups))
     rng = random.Random(seed)
     rng.shuffle(cal_pool); rng.shuffle(test_pool)
     cal_cases = cal_pool[:n_cal]
     test_cases = test_pool[:n_test]
     if verbose:
         print(f"  cal pool {len(cal_pool)}, test pool {len(test_pool)} → cal {len(cal_cases)} test {len(test_cases)}")
+    if not cal_cases or not test_cases:
+        raise RuntimeError(
+            f"빈 cal/test pool — anchor_year_group 이 JSONL 에 비어있을 수 있음. "
+            f"`python experiments/round9_patch_anchor_year.py` 로 patch 하세요."
+        )
 
     cs, cl, cst = _scores(backend, cal_cases)
     ts, tl, tst = _scores(backend, test_cases)
@@ -114,7 +133,8 @@ def evaluate(backend: str, seed: int, cal_range, test_range,
 def write_md(report: dict, out_md: Path):
     lines = ["# Round 9 R9.4 — Temporal distribution shift on MIMIC-IV\n"]
     lines.append(f"- Generated: {report['timestamp']}")
-    lines.append(f"- Calibration years: {report['cal_range']}, test years: {report['test_range']}")
+    lines.append(f"- Calibration anchor_year_groups: {report['cal_groups']}")
+    lines.append(f"- Test anchor_year_groups: {report['test_groups']}")
     lines.append(f"- Backends: {', '.join(report['backends'])}\n")
     for backend, agg in report["per_backend"].items():
         lines.append(f"## backend = {backend}\n")
@@ -134,6 +154,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cal-years", nargs=2, type=int, default=[2008, 2014])
     ap.add_argument("--test-years", nargs=2, type=int, default=[2015, 2019])
+    # MIMIC-IV anchor_year_group 기반 split (default: 2008-2016 calibrate vs 2017-2022 test)
+    ap.add_argument("--cal-groups", nargs="+",
+                    default=["2008 - 2010", "2011 - 2013", "2014 - 2016"])
+    ap.add_argument("--test-groups", nargs="+",
+                    default=["2017 - 2019", "2020 - 2022"])
     ap.add_argument("--n-cal", type=int, default=600)
     ap.add_argument("--n-test", type=int, default=300)
     ap.add_argument("--seeds", type=int, nargs="+", default=[42])
@@ -143,7 +168,7 @@ def main():
 
     report = {
         "timestamp": datetime.now().isoformat(),
-        "cal_range": args.cal_years, "test_range": args.test_years,
+        "cal_groups": args.cal_groups, "test_groups": args.test_groups,
         "n_cal": args.n_cal, "n_test": args.n_test,
         "seeds": args.seeds, "backends": args.backends,
         "per_seed": {}, "per_backend": {},
@@ -152,7 +177,7 @@ def main():
         per_seed = []
         for seed in args.seeds:
             try:
-                r = evaluate(backend, seed, args.cal_years, args.test_years,
+                r = evaluate(backend, seed, args.cal_groups, args.test_groups,
                              args.n_cal, args.n_test, True)
             except FileNotFoundError as e:
                 print(f"[R9.4] preprocessed MIMIC-IV missing: {e}"); sys.exit(2)
