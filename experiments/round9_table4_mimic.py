@@ -29,7 +29,7 @@ load_dotenv(ROOT / ".env")
 from data.loader import load_mimic4_by_stratum
 from models.uqm import UQM, ConformalCalibrator, compute_nonconformity_score
 from models.stratified_crc import StratifiedConformalRiskControl
-from models.cost_aware_calibration import sweep_cost_aware_per_stratum, DEFAULT_COST_MATRIX
+from models.cost_aware_calibration import DEFAULT_COST_MATRIX
 from models.model_interface import query_model
 
 from experiments.baselines.tecp import TECPBaseline
@@ -172,16 +172,13 @@ def run_one_seed(backend: str, seed: int, n_cal_per: int, n_test_per: int, alpha
     methods.append(evaluate_stratum_aware("UASEF Round 6 (heuristic multiplier)", r6_thr,
                                            test_scores, test_labels, test_strata))
 
-    # --- UASEF Round 7 v2 (Stratified CRC + cost-aware sweep) ---
+    # --- UASEF Round 7 v2 (Stratified CRC, threshold-only) ---
+    # round7_table4_baseline.py 의 reference 구현과 동일: cost-aware sweep 은
+    # Round 7 paper 의 §6.4 (Table 4) 컨텍스트에서 별도로 보고되며, 본 R9.2
+    # 헤드라인 비교는 순수 stratified-CRC threshold 만 사용.
     crc = StratifiedConformalRiskControl(alphas=ALPHAS_TABLE4)
     crc.fit(cal_scores, cal_labels, cal_strata)
-    cost_sweep = sweep_cost_aware_per_stratum(
-        cal_scores, cal_labels, cal_strata, crc.lambdas,
-        cost_matrix=DEFAULT_COST_MATRIX,
-    )
-    def r7_thr(s):
-        chosen = cost_sweep["per_stratum"].get(s, {})
-        return chosen.get("lambda_chosen", crc.threshold_for(s))
+    def r7_thr(s): return crc.threshold_for(s)
     methods.append(evaluate_stratum_aware(
         "UASEF Round 7 (Stratified CRC + MTC + Cost-Aware)", r7_thr,
         test_scores, test_labels, test_strata))
