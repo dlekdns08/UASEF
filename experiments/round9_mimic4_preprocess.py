@@ -159,6 +159,11 @@ def build_cases(mimic_dir: Path, n_per_stratum: int, seed: int, verbose: bool = 
     # MIMIC-IV: anchor_age 가 anchor_year 기준의 age — 그대로 age proxy 로 사용
     age_map = dict(zip(pat["subject_id"], pat["anchor_age"]))
     sex_map = dict(zip(pat["subject_id"], pat["gender"]))
+    # anchor_year_group: 실 calendar era ("2008 - 2010" 등). R9.4 temporal split 의 ground truth.
+    anchor_year_group_map = (
+        dict(zip(pat["subject_id"], pat["anchor_year_group"]))
+        if "anchor_year_group" in pat.columns else {}
+    )
 
     if verbose: print(f"[3/6] Loading icu/icustays.csv.gz ...")
     icustays = _read_csv(icu / "icustays.csv.gz", pd, parse_dates=["intime"])
@@ -283,6 +288,7 @@ def build_cases(mimic_dir: Path, n_per_stratum: int, seed: int, verbose: bool = 
             "specialty": specialty,
             "admission_type": admit_type or "ELECTIVE",
             "admit_year": admit_year,
+            "anchor_year_group": anchor_year_group_map.get(sid),
             "demographics": {
                 "sex": sex, "race": str(a.get("race", "UNKNOWN")),
                 "age_bucket": _age_bucket(age),
