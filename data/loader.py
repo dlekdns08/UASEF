@@ -957,6 +957,7 @@ def _load_mimic4_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
         meta = (
             f"hadm_id={row.get('hadm_id', '?')} stratum={row.get('stratum', '?')} "
             f"admit_year={row.get('admit_year', '?')} "
+            f"anchor_year_group={(row.get('anchor_year_group') or '?').replace(' ', '_')} "
             f"sex={demo.get('sex', '?')} race={demo.get('race', '?')}"
         )
         cases.append(MedQACase(
