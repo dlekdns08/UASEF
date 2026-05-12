@@ -188,11 +188,13 @@ run_step R9.3 "dist_shift_real" "$SKIP_R9_3" -- \
         --out "${ROOT}/results/round9/dist_shift_real"
 
 # ── R9.4: temporal shift ───────────────────────────────────────────────────
-banner "[R9.4] Temporal shift (2008-14 → 2015-19)"
-run_step R9.4 "temporal_shift" "$SKIP_R9_4" -- \
+banner "[R9.4] Temporal shift (anchor_year_group: 2008-16 → 2017-22)"
+# MIMIC-IV 의 admit dates 는 deidentified shift 되어 있어 admit_year 직접
+# 사용 불가. patients.anchor_year_group (실 calendar era) 으로 split.
+run_step R9.4 "temporal_shift (anchor_year_group split)" "$SKIP_R9_4" -- \
     "$PYTHON" experiments/round9_temporal_shift.py \
-        --cal-years 2008 2014 \
-        --test-years 2015 2019 \
+        --cal-groups "2008 - 2010" "2011 - 2013" "2014 - 2016" \
+        --test-groups "2017 - 2019" "2020 - 2022" \
         --n-cal 600 --n-test 300 \
         --seeds $SEEDS \
         --backends $BACKENDS \
