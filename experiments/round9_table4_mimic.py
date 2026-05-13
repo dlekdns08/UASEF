@@ -135,6 +135,31 @@ def evaluate_stratum_aware(name, threshold_for_stratum, scores, labels, strata) 
     return {"name": name, "per_stratum": per_stratum, "total_cost": total_cost}
 
 
+def evaluate_with_stratum_predict(name, predict_with_stratum, scores, labels, strata) -> dict:
+    """For predictors that expose `predict(score, stratum) -> bool` (Round 7 reference pattern)."""
+    per_stratum = {}
+    total_cost = 0.0
+    for stratum in ["CRITICAL", "HIGH", "MODERATE", "LOW"]:
+        idx = [i for i, s in enumerate(strata) if s == stratum]
+        if not idx:
+            per_stratum[stratum] = {"n": 0, "skipped": True}; continue
+        n_pos = sum(labels[i] for i in idx)
+        n_neg = sum(1 for i in idx if not labels[i])
+        tp = sum(labels[i] and predict_with_stratum(scores[i], stratum) for i in idx)
+        fn = sum(labels[i] and not predict_with_stratum(scores[i], stratum) for i in idx)
+        fp = sum((not labels[i]) and predict_with_stratum(scores[i], stratum) for i in idx)
+        recall = tp / (tp + fn) if (tp + fn) else None
+        over = fp / n_neg if n_neg else None
+        cm = DEFAULT_COST_MATRIX[stratum]
+        cost = cm["miss"] * fn + cm["over_esc"] * fp
+        total_cost += cost
+        per_stratum[stratum] = {"n": len(idx), "n_pos": n_pos,
+                                 "tp": tp, "fn": fn, "fp": fp,
+                                 "safety_recall": recall, "over_esc_rate": over,
+                                 "cost": cost}
+    return {"name": name, "per_stratum": per_stratum, "total_cost": total_cost}
+
+
 def run_one_seed(backend: str, seed: int, n_cal_per: int, n_test_per: int, alpha: float, verbose: bool):
     if verbose:
         print(f"\n── {backend} seed={seed} ──")
@@ -184,25 +209,33 @@ def run_one_seed(backend: str, seed: int, n_cal_per: int, n_test_per: int, alpha
         test_scores, test_labels, test_strata))
 
     # --- TECP-stratified ablation ---
+    # round7 reference 와 동일하게 predict(score, stratum) 직접 사용
+    # (TECPStratifiedBaseline 의 thresholds 는 self.thresholds dict 이지만
+    #  predict() 가 stratum-aware 로 이미 wrapping 되어 있음).
     tecp_s = TECPStratifiedBaseline(alphas=ALPHAS_TABLE4)
     tecp_s.fit(cal_scores, cal_labels, cal_strata)
-    methods.append(evaluate_stratum_aware(
+    methods.append(evaluate_with_stratum_predict(
         "TECP-stratified (this work, Round 9 ablation)",
-        lambda s: tecp_s.threshold_for(s),
+        tecp_s.predict,
         test_scores, test_labels, test_strata))
 
     # --- Cost-Sensitive single-α ablation ---
-    cs = CostSensitiveBaseline(alpha=alpha, miss_cost=1000, fp_cost=1.0)
+    # round7 reference: HIGH stratum cost ratio 를 대표값으로 사용 (Elkan 2001).
+    cm_high = DEFAULT_COST_MATRIX["HIGH"]
+    cs = CostSensitiveBaseline(c_miss=cm_high["miss"], c_over=cm_high["over_esc"])
     cs.fit(cal_scores, cal_labels)
     methods.append(evaluate_predictor("Cost-Sensitive single-α (this work, Round 9 ablation)",
                                        cs.predict, test_scores, test_labels, test_strata))
 
     # --- UASEF v1-cost-aware ablation ---
+    # threshold = q_hat × tuned_multiplier[stratum] (Round 6 heuristic, cost-tuned).
+    # predict() 가 stratum-aware 로 이 계산을 내부 캡슐화.
     v1c = UASEFv1CostAwareBaseline(alpha=alpha)
     v1c.fit(cal_scores, cal_labels, cal_strata)
-    methods.append(evaluate_stratum_aware("UASEF v1-cost-aware (this work, Round 9 ablation)",
-                                           lambda s: v1c.threshold_for(s),
-                                           test_scores, test_labels, test_strata))
+    methods.append(evaluate_with_stratum_predict(
+        "UASEF v1-cost-aware (this work, Round 9 ablation)",
+        v1c.predict,
+        test_scores, test_labels, test_strata))
 
     return {"seed": seed, "n_cal": len(cal_cases), "n_test": len(test_cases),
             "methods": methods}
