@@ -222,7 +222,10 @@ expected_escalate = y_outcome = ( ICU transfer ≤ 24h ∨ in-hospital mortality
 
 - Round 9 결과를 paper §6 (Table 1c, Table 4-MIMIC), §7.2 (L3 제거), §8 (L7 약화, L8 강화) 에 반영
 - Supplementary §J (MIMIC-IV preprocessing recipe) 신규
-- Abstract 1줄 추가: "We further validate v2 on MIMIC-IV v3.1 (n_CRITICAL ≈ 40k from real ICU admission outcomes), confirming the per-stratum guarantee holds at α_CRITICAL = 0.001 on real EHR data."
+- ✏️ Abstract 1줄 (톤다운): "We evaluate v2 on MIMIC-IV v3.1 under a **leakage-safe** decision-time
+  formulation (risk group $G(X_{t_0})$ separated from future outcome $Y$), reporting a **non-vacuous**
+  $\alpha_{\text{CRITICAL}} = 0.001$ calibration with an exact binomial held-out bound — not a
+  statistically certified $\le 0.1\%$ miss rate." (구 "guarantee holds at α=0.001" 주장 폐기.)
 
 ---
 
@@ -237,10 +240,12 @@ expected_escalate = y_outcome = ( ICU transfer ≤ 24h ∨ in-hospital mortality
 - [ ] `experiments/round9_table4_mimic.py` (신규) — Table 4-MIMIC
 - [ ] `experiments/round9_distribution_shift.py` (신규) — `services` specialty transfer + weighted CP
 - [ ] `experiments/round9_temporal_shift.py` (신규) — 2008–14 vs 2015–19
-- [ ] `experiments/round9_equity_real.py` (신규) — demographic equity
-- [ ] `run_all_round9.sh` (신규) — Round 8 와 동일 구조
-- [ ] `tests/test_mimic4_loader.py` (신규) — graceful skip + schema validation
-- [ ] `tests/test_paper_claims.py` — Round 9 regression guard 추가
+- [ ] `experiments/round9_equity_real.py` (신규) — demographic subgroup safety audit
+- [x] ✏️ `experiments/baselines/tabular.py` + `experiments/round9_tabular_baseline.py` (신규) — tabular baseline (R9.6)
+- [x] ✏️ `experiments/metrics_utils.py` — `clopper_pearson_upper` / `n_for_zero_miss_upper` / `patient_level_split`
+- [ ] `run_all_round9.sh` (신규) — Round 8 와 동일 구조 (✏️ R9.6 step 포함)
+- [ ] `tests/test_mimic4_loader.py` (신규) — graceful skip + schema validation (✏️ leakage 어서션 포함)
+- [ ] `tests/test_paper_claims.py` — Round 9 regression guard 추가 (✏️ exact-bound 기반)
 
 ### 문서 (paper/)
 - [ ] `paper/UASEF_Round7.md` — Abstract 마지막 caveat 문단에 Round 9 한 줄 추가, §7.2 (L3 약화), §8 L7 (multi-domain), §8 L8 (real distribution shift), §9 (Conclusion future work 단락)
