@@ -654,8 +654,17 @@ single H100 (80 GB) or two consumer-grade GPUs. Together with
 LMStudio's OpenAI-compatible `/v1/responses` endpoint, this gives us
 full token-level log-prob extraction (required for the UQM logprob
 nonconformity score, Round 7 §3.4) on a model whose weights, prompt,
-and inference trace never leave the local machine — the operational
-condition every HIPAA-bound hospital deployment must satisfy.
+and inference trace never leave the local machine — a
+**data-residency-preserving design**.
+
+> **Compliance disclaimer.** We describe the pipeline as
+> *data-residency-preserving* and report **zero external API calls in the
+> evaluation logs** under the default configuration; we do **not** assert
+> legal compliance with HIPAA, GDPR, the Korean PIPA, or the PhysioNet
+> DUA. Formal compliance depends on institutional governance and legal
+> review at the deployment site. Statements below about what HIPAA-bound
+> hospitals "cannot" do are summaries of common institutional policy, not
+> legal conclusions.
 
 We therefore report:
 
@@ -697,6 +706,32 @@ unset UASEF_BACKEND_NEVER_SEND_PHI                 # only if you've
 BACKENDS="openai" bash run_all_round9.sh
 ```
 
+### 5.4b Reproducibility details (appendix)
+
+For full method reproducibility we report (and will pin in the released
+artifact):
+
+- **Model.** `openai/gpt-oss-120b`, MXFP4 4-bit quantization; exact
+  LMStudio model revision/checkpoint hash and tokenizer version pinned
+  in `results/round9/env.json` at run time.
+- **Serving backend.** LMStudio version + `/v1/responses` endpoint;
+  hardware (Mac Studio, 96 GB unified memory).
+- **Decoding.** `temperature = 0.0`, `top_p = 1.0`, deterministic;
+  `max_tokens` per call recorded.
+- **Score $s(x)$.** UQM logprob nonconformity = **mean negative
+  log-likelihood over all generated response tokens**
+  ($-\frac{1}{T}\sum_t \log p_t$, [models/uqm.py](../models/uqm.py)
+  `compute_nonconformity_score`). We state explicitly that this is the
+  *full-response* mean, **not** a single answer-token or forced-choice
+  margin, so replications use the same definition.
+- **Prompt template.** The exact leakage-safe template
+  (`_MIMIC4_STRUCT_TEMPLATE`, [data/loader.py](../data/loader.py)) is
+  reproduced verbatim in supplementary §K.
+- **Seeds.** Headline runs use seeds {42, 43, 44, 45, 46}; single-seed
+  audits note seed=42 and are flagged exploratory.
+- **Run accounting.** Total LLM calls and wall-clock per experiment are
+  written to the `*.json` outputs.
+
 ### 5.5 IRB
 
 Round 9 work falls under the same ethics protocol as Round 7
@@ -715,35 +750,51 @@ This section will be updated post-run with the actual numerical
 findings. Below are the *expected* findings under the hypotheses of
 §4 and the falsification criteria.
 
-### 6.1 If R9.1 confirms $\alpha_{\text{CRITICAL}} = 0.001$
+### 6.1 If R9.1's held-out evidence is favorable
 
-The headline change to Round 7 §8 L3 will read:
-"We empirically validate $\alpha_{\text{CRITICAL}} = 0.001$ on
-$n_{\text{cal}} \approx 1200$ MIMIC-IV CRITICAL admissions, with 2σ
-upper bound on $\mathbb{E}[\ell_{\text{CRITICAL}}]$ below $1.2 \times
-0.001$ across 5 seeds × 2 backends. The aspirational caveat in the
-Round 7 paper is now an empirical result." This collapses L3 from a
-limitation to a confirmed claim.
+The honest headline change to Round 7 §8 L3 will read:
+"We perform a **non-vacuous** $\alpha_{\text{CRITICAL}} = 0.001$
+calibration on $n_{\text{cal}} \ge 999$ MIMIC-IV CRITICAL admissions and
+observe $k$ held-out misses out of $n_{\text{pos}}$ positives, an exact
+one-sided 95 % Clopper–Pearson upper bound of $U$." We **do not** state
+that a $\le 0.1\%$ miss rate has been statistically validated: if
+$n_{\text{pos}} < 2995$ the bound $U$ cannot reach $0.001$ even at zero
+observed misses (rule-of-three: $U \approx 3/n_{\text{pos}}$). The Round 7
+aspirational caveat becomes "non-vacuous calibration with favorable but
+sample-size-limited held-out evidence," not "confirmed claim." Achieving
+a certified $\le 0.001$ bound requires the larger test cohort and is
+flagged as deployment-scale future work.
 
-### 6.2 If R9.1 fails
+### 6.2 If R9.1's held-out evidence is unfavorable
 
-The honest framing falls back to: "We report that $\alpha = 0.001$
-**does not** survive the QA→EHR distribution shift unmodified;
-the empirical 2σ upper bound is X. Accordingly the headline guarantee
-is reported at the calibrated regime $\alpha_{\text{CRITICAL}} = X$."
-This would *not* invalidate Round 7 — Round 7's claim is conditional
-on calibration distribution and is itself $\alpha \in [0.05, 0.20]$.
-But it would close one source of optimistic future-work language.
+The fallback reads: "$\alpha = 0.001$ **does not** survive the QA→EHR
+distribution shift unmodified; the exact upper bound on the conditional
+miss rate is $U > 0.001$. Accordingly the headline guarantee is reported
+at the calibrated regime $\alpha_{\text{CRITICAL}} = U$." This would
+*not* invalidate Round 7 — Round 7's claim is conditional on calibration
+distribution and is itself $\alpha \in [0.05, 0.20]$. Either way, the
+exact-binomial reporting closes the previous optimistic "2σ = 0.000"
+language.
 
 ### 6.3 R9.2 — expected behaviour
 
 Under the same logprob-based nonconformity score, the v2 framework
 should retain its CRITICAL safety-recall lead over single-α baselines.
-The cost gap may narrow if MIMIC-IV's natural CRITICAL prevalence
-($\approx 47\,\%$ of the preprocessing pool) makes single-α
-"escalate-everything" less wasteful than on MedAbstain.
+The cost gap may narrow if MIMIC-IV's natural CRITICAL prevalence makes
+single-α "escalate-everything" less wasteful than on MedAbstain.
 *This is an empirical question the paper will answer; we do not commit
 to the headline cost ratio in advance.*
+
+> **Balanced vs prevalence-weighted reporting.** The preprocessing pool
+> is balanced (≈1500/stratum) for fair per-stratum *method comparison*,
+> which inflates the apparent share of high-acuity cases. Any
+> *deployment-cost* claim must additionally report results **reweighted
+> to the natural MIMIC-IV stratum prevalence** (or the target deployment
+> distribution). Table 4-MIMIC therefore reports two cost columns —
+> `total cost (balanced)` and `total cost (prevalence-weighted)` — and
+> the v1-cost-aware "cost = 0" cell is explained alongside its confusion
+> matrix (it escalates everything in its stratum, so it incurs zero
+> *miss* cost but maximal over-escalation count).
 
 ### 6.4 R9.3 — known result direction
 
