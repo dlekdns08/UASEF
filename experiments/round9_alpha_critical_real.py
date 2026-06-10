@@ -94,16 +94,13 @@ def evaluate_one_seed(backend: str, seed: int, n_critical: int, alphas: dict, ve
         print(f"\n── backend={backend} seed={seed} ──")
     bucket = load_mimic4_by_stratum(n_per_stratum=n_critical, seed=seed, verbose=False)
     # ── PATIENT-LEVEL split (REVISION_PLAN P0-3) ──
-    # 같은 subject_id 의 여러 admission 이 cal/test 양쪽에 들어가지 않도록 환자
-    # 단위로 분할. stratum 별로 분할해 stratum 균형을 유지하되 그룹 키는 subject_id.
-    cal: list = []
-    test: list = []
-    for stratum, cases in bucket.items():
-        c_cal, c_test = patient_level_split(
-            cases, group_of=_subject_id, cal_frac=0.8, seed=seed,
-        )
-        cal.extend(c_cal)
-        test.extend(c_test)
+    # ⚠️ GLOBAL patient split: 한 subject_id 가 여러 stratum 에 걸쳐 있을 수 있으므로
+    # stratum 별로 따로 나누면 같은 환자가 양쪽에 새어 들어간다. 전 case 를 모아
+    # subject_id 단위로 한 번만 분할한 뒤 stratum 은 각 case 에서 복원한다.
+    all_cases = [c for cases in bucket.values() for c in cases]
+    cal, test = patient_level_split(
+        all_cases, group_of=_subject_id, cal_frac=0.8, seed=seed,
+    )
     if verbose:
         cal_subj = {_subject_id(c) for c in cal}
         test_subj = {_subject_id(c) for c in test}
