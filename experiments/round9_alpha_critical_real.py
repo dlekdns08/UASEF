@@ -35,9 +35,24 @@ from data.loader import load_mimic4_by_stratum
 from models.uqm import UQM, compute_nonconformity_score
 from models.model_interface import query_model
 from models.stratified_crc import StratifiedConformalRiskControl
+from experiments.metrics_utils import (
+    patient_level_split, clopper_pearson_upper, n_for_zero_miss_upper,
+)
 
 
 ALPHAS_R9 = {"CRITICAL": 0.001, "HIGH": 0.01, "MODERATE": 0.05, "LOW": 0.10}
+
+
+def _subject_id(case) -> str:
+    """meta_info 의 `subject_id=...` 토큰 추출 (patient-level split key)."""
+    for tok in (case.meta_info or "").split():
+        if tok.startswith("subject_id="):
+            return tok.split("=", 1)[1]
+    # fallback: hadm_id 단위(=admission 단위). 구버전 JSONL 호환.
+    for tok in (case.meta_info or "").split():
+        if tok.startswith("hadm_id="):
+            return "h:" + tok.split("=", 1)[1]
+    return id(case).__str__()
 
 
 def collect_scores(backend: str, cases: list, verbose: bool = False) -> tuple[list[float], list[bool], list[str]]:
@@ -78,17 +93,23 @@ def evaluate_one_seed(backend: str, seed: int, n_critical: int, alphas: dict, ve
     if verbose:
         print(f"\n── backend={backend} seed={seed} ──")
     bucket = load_mimic4_by_stratum(n_per_stratum=n_critical, seed=seed, verbose=False)
-    cal_frac = 0.8
+    # ── PATIENT-LEVEL split (REVISION_PLAN P0-3) ──
+    # 같은 subject_id 의 여러 admission 이 cal/test 양쪽에 들어가지 않도록 환자
+    # 단위로 분할. stratum 별로 분할해 stratum 균형을 유지하되 그룹 키는 subject_id.
     cal: list = []
     test: list = []
-    rng = random.Random(seed)
     for stratum, cases in bucket.items():
-        rng.shuffle(cases)
-        cut = int(len(cases) * cal_frac)
-        cal.extend(cases[:cut])
-        test.extend(cases[cut:])
+        c_cal, c_test = patient_level_split(
+            cases, group_of=_subject_id, cal_frac=0.8, seed=seed,
+        )
+        cal.extend(c_cal)
+        test.extend(c_test)
     if verbose:
-        print(f"  cal={len(cal)} test={len(test)}")
+        cal_subj = {_subject_id(c) for c in cal}
+        test_subj = {_subject_id(c) for c in test}
+        overlap = cal_subj & test_subj
+        print(f"  cal={len(cal)} test={len(test)} "
+              f"(patient-level; subject overlap={len(overlap)})")
 
     cal_scores, cal_labels, cal_strata = collect_scores(backend, cal, verbose)
     test_scores, test_labels, test_strata = collect_scores(backend, test, verbose)
@@ -125,6 +146,7 @@ def evaluate_one_seed(backend: str, seed: int, n_critical: int, alphas: dict, ve
         per_stratum_result[s] = {
             "n": n,
             "n_pos": positives,
+            "misses": misses,
             "lambda_hat": lam,
             "alpha_target": alphas[s],
             "empirical_E_loss": per_example_loss_sum / n,
@@ -135,34 +157,46 @@ def evaluate_one_seed(backend: str, seed: int, n_critical: int, alphas: dict, ve
 
 
 def aggregate(results_per_seed: list[dict], alphas: dict) -> dict:
-    """Across seeds: mean ± std + 2σ upper for E[ℓ] + bootstrap 95% CI."""
+    """
+    Across seeds: pooled exact binomial(Clopper-Pearson) upper bound 가 핵심 통계.
+
+    ⚠️ 이전 'mean + 2σ' 상한은 0 miss 관측 시 std=0 → upper=0 으로 vacuous 였음
+    (REVISION_PLAN P0-4). 0/N 관측은 true rate≤α 를 *증명하지 않으며*, 정직한
+    상한은 1-(1-conf)**(1/N). 따라서 satisfies_alpha 는 단측 exact 상한 기준.
+    """
     out = {}
     for s in alphas:
-        E_vals = [r[s]["empirical_E_loss"] for r in results_per_seed if r.get(s)]
-        if not E_vals:
+        rows = [r[s] for r in results_per_seed if r.get(s)]
+        if not rows:
             out[s] = None; continue
+        E_vals = [r["empirical_E_loss"] for r in rows]
+        # seed 전체에 걸쳐 conditional miss 를 pool (independence 가정 하 보수적).
+        pooled_misses = sum(r.get("misses", 0) for r in rows)
+        pooled_pos = sum(r.get("n_pos", 0) for r in rows)
+        pooled_n = sum(r.get("n", 0) for r in rows)
+        cond_upper = clopper_pearson_upper(pooled_misses, pooled_pos, conf=0.95) \
+            if pooled_pos > 0 else 1.0
         mean = st.mean(E_vals)
         std = st.stdev(E_vals) if len(E_vals) > 1 else 0.0
-        upper_2s = mean + 2 * std
-        # percentile bootstrap 95% CI on the mean
-        rng = random.Random(42)
-        means = []
-        n = len(E_vals)
-        for _ in range(2000):
-            sample = [E_vals[rng.randrange(n)] for _ in range(n)]
-            means.append(sum(sample) / n)
-        means.sort()
-        ci_lo = means[int(0.025 * len(means))]
-        ci_hi = means[int(0.975 * len(means)) - 1]
         out[s] = {
             "alpha_target": alphas[s],
             "n_seeds": len(E_vals),
             "values": [round(v, 5) for v in E_vals],
             "mean":   round(mean, 5),
             "std":    round(std, 5),
-            "two_sigma_upper":  round(upper_2s, 5),
-            "ci95":  [round(ci_lo, 5), round(ci_hi, 5)],
-            "satisfies_alpha": upper_2s <= alphas[s],
+            "pooled_n": pooled_n,
+            "pooled_n_pos": pooled_pos,
+            "pooled_misses": pooled_misses,
+            "cond_miss_rate": round(pooled_misses / pooled_pos, 6) if pooled_pos else None,
+            "exact_upper95": round(cond_upper, 6),
+            "n_needed_for_alpha": (n_for_zero_miss_upper(alphas[s]) if pooled_misses == 0 else None),
+            # 정직한 판정: 0/N 은 'α 실증'이 아니라 'α 이하와 양립(non-vacuous)'.
+            "compatible_with_alpha": cond_upper <= alphas[s],
+            "note": (
+                "0 miss observed; upper bound limited by test n — "
+                "NOT a proof that true miss rate ≤ alpha"
+                if pooled_misses == 0 else "miss observed"
+            ),
         }
     return out
 
@@ -172,22 +206,32 @@ def write_md(report: dict, out_md: Path) -> None:
     lines.append(f"- Generated: {report['timestamp']}")
     lines.append(f"- Backends: {', '.join(report['backends'])}")
     lines.append(f"- Seeds: {report['seeds']}\n")
-    lines.append("Each cell: `mean ± std  [2σ upper]  (95% CI)`. ✓ if 2σ upper ≤ α.\n")
+    lines.append(
+        "각 셀: pooled `misses/n_pos`, 단측 exact(Clopper-Pearson) 95% 상한.\n"
+        "✓ = 관측이 α 와 **양립(non-vacuous)**. ⚠️ 0 miss 는 true rate ≤ α 의 *증명이 아님* "
+        "— 상한은 test n 으로 제한됨.\n")
     for backend, agg in report["per_backend"].items():
         lines.append(f"## backend={backend}\n")
-        lines.append("| stratum | α | n_seeds | E[ℓ] mean ± std | 2σ upper | 95% CI | satisfies? |")
-        lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+        lines.append("| stratum | α | n_seeds | E[ℓ] mean±std | misses/n_pos | exact 95% upper | compat? | n needed (α) |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
         for s, r in agg.items():
             if r is None:
-                lines.append(f"| {s} | {ALPHAS_R9[s]} | 0 | — | — | — | — |")
+                lines.append(f"| {s} | {ALPHAS_R9[s]} | 0 | — | — | — | — | — |")
                 continue
-            ok = "✓" if r["satisfies_alpha"] else "✗"
+            ok = "✓" if r["compatible_with_alpha"] else "✗"
+            need = r.get("n_needed_for_alpha")
+            need_s = str(need) if need else "—"
             lines.append(
                 f"| {s} | {r['alpha_target']} | {r['n_seeds']} | "
-                f"{r['mean']:.5f} ± {r['std']:.5f} | {r['two_sigma_upper']:.5f} | "
-                f"[{r['ci95'][0]:.5f}, {r['ci95'][1]:.5f}] | {ok} |"
+                f"{r['mean']:.5f} ± {r['std']:.5f} | {r['pooled_misses']}/{r['pooled_n_pos']} | "
+                f"{r['exact_upper95']:.5f} | {ok} | {need_s} |"
             )
         lines.append("")
+        lines.append(
+            "> 해석: CRITICAL 에서 0 miss 가 관측되어도 95% 단측 상한이 α=0.001 이하가 "
+            "되려면 n_pos ≥ ~2995 필요. 현재 표본에서의 0 miss 는 'α=0.001 실증'이 아니라 "
+            "'α=0.001 calibration 이 non-vacuous 하고 held-out 관측이 우호적' 이라는 주장만 "
+            "지지함 (REVISION_PLAN P0-4).\n")
     out_md.write_text("\n".join(lines))
 
 
