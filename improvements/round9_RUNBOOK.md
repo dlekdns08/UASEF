@@ -199,8 +199,8 @@ bash run_all_round9.sh --phase2
 ```
 
 추가 단계:
-- R9.6 LLM-judge κ on MIMIC discharge note (n=100, lmstudio only)
-- R9.7 ESI proxy validation — Phase 1 의 CRITICAL=ICU<24h 가정이 ESI≤2 와 얼마나 일치하는지
+- R9.7 LLM-judge κ on MIMIC discharge note (n=100, lmstudio only) ✏️ (구 R9.6 → R9.6 은 tabular 로 재배치)
+- R9.8 ESI proxy validation — Phase 1 의 risk-group 가정이 ESI≤2 와 얼마나 일치하는지
 
 ---
 
