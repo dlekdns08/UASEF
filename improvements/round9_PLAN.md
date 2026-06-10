@@ -1,5 +1,13 @@
 # Round 9 — MIMIC-IV Integration Plan
 
+> ⚠️ **개정 (2026-06-10) — leakage-safe 재설계로 일부 내용이 SUPERSEDED 됨.**
+> 본 PLAN 의 §2.1 stratum 정의와 `expected_escalate` 정의는 **label leakage** 가
+> 있었다(σ 를 미래 outcome 으로 정의 → Y=σ∈{CRIT,HIGH} 결정적 + 미래 필드를 프롬프트
+> 투입). 현재 코드/논문은 **decision-time 위험군 G(X_t0) 과 독립적 미래 outcome Y** 를
+> 분리하고 patient-level split·exact 이항 상한을 쓴다. 정정 내용은 본 문서에 inline
+> 으로 반영했으며, 전체 변경 근거·체크리스트는 [paper/REVISION_PLAN.md](../paper/REVISION_PLAN.md),
+> 정식 정의는 논문 §3.2 참조. 아래 ✏️ 표시가 정정된 부분이다.
+
 > **목표**: PhysioNet credentialed dataset (**MIMIC-IV v3.1**, 2024-10) 을 UASEF 평가 파이프라인에 도입.
 > Round 8 까지의 핵심 한계 — **L3 (n_CRITICAL<999 → α=0.001 미검증)**, **L7 (single-dataset)**, **L8 (calibration distribution shift 직접 증거 부재)** — 를 한 번에 해소하고, 합성·QA-derived 라벨이 아닌 **실제 임상 outcome 라벨**로 paper claim 을 보강.
 >
@@ -24,9 +32,9 @@
 | **L3** n_CRITICAL < 999 → α=0.001 은 합성에서만 알고리즘-레벨 검증 | MIMIC-IV ED 모듈 (`hosp/triage` 또는 `ed/edstays`) 의 ESI=1 only 만 해도 ≈27k cases. **n_CRITICAL ≥ 999 가 trivial 하게 충족** → α=0.001 의 **실데이터 empirical 검증** 가능. |
 | **L7** Single-dataset (MedAbstain n=50/variant) | MedAbstain (QA-derived) ↔ MIMIC-IV (real EHR) **두 개의 서로 독립적인 도메인**. 같은 v2 framework 가 양쪽에서 작동함을 보이면 generalization claim 의 강도 ↑. |
 | **L8** Calibration distribution shift — `dist_shift_smoke` 가 합성 specialty 라벨 기반 | MIMIC-IV `services` 테이블 (~100 service code) 로 **진짜 specialty transfer** 실험 가능. weighted CP (Tibshirani 2019) 검증의 직접 증거. |
-| **L1** Heuristic ground-truth labels | MIMIC-IV outcome 라벨 (ICU admission / in-hospital mortality / 30-day readmission) 은 **휴리스틱이 아닌 실제 임상 outcome**. LLM-judge κ 와 별개로 ground-truth quality 자체가 한 단계 위. |
+| **L1** Heuristic ground-truth labels | ✏️ **정정:** 라벨 Y(=ICU 24h ∨ in-hospital mortality)는 structured EHR event 에서 유도한 **operational proxy outcome** 이다 — annotation heuristic 보다는 낫지만 "완벽한 ground truth" 는 아니다. 위험군 G 는 라벨이 아니라 decision-time 조건화 변수다. 소규모 clinician κ 검증을 §7 에 계획. |
 
-⚠️ **하지만 데이터셋 변경 자체는 알고리즘 신규성 추가가 아님** — Round 9 의 contribution framing 은 "v2 가 합성·QA 도메인에서 보였던 guarantee 가 **real-EHR 데이터에서도 성립함을 처음으로 검증**" 으로 갑니다.
+⚠️ **하지만 데이터셋 변경 자체는 알고리즘 신규성 추가가 아님** — Round 9 의 contribution framing 은 ✏️ "v2 가 합성·QA 도메인에서 보였던 guarantee 가 **real-EHR 데이터에서도 어떻게 동작하는지를, leakage-safe 정식화 하에서, 우리가 아는 한 최초기 평가로 검증/특성화**" 로 갑니다 (cost 최소화가 아니라 per-stratum risk control + 정직한 failure 분석).
 
 ---
 
@@ -72,40 +80,59 @@
 
 ## 2. 라벨 스키마 (UASEF MedQACase 매핑)
 
-### 2.1 stratum 정의 (real-outcome 기반, 임상 표준)
+### 2.1 위험군 G(X_t0) 과 라벨 Y 정의 ✏️ SUPERSEDED → leakage-safe 재설계
 
-| Stratum | MIMIC-IV 라벨 정의 | 예상 n (single-center, 2008–2019) |
-|---|---|---|
-| **CRITICAL** | (a) ICU admission within 24h of hospital admission ∨ (b) in-hospital mortality ∨ (c) `admission_type='EMERGENCY'` AND ESI≤2 (proxy if ED unavailable) | ≈ **40k–60k** (≫ 999) |
-| **HIGH** | (a) sepsis-3 criteria (SOFA Δ≥2 within 48h) ∨ (b) 30-day readmission ∨ (c) blood transfusion within 24h | ≈ 30k |
-| **MODERATE** | standard inpatient admission, no ICU, no mortality | ≈ 200k |
-| **LOW** | discharged from ED without admission (proxy: short hospital LOS < 24h, discharge home) | ≈ 100k |
+> ⚠️ **아래 원안 표는 누수가 있었다.** stratum 을 미래 outcome(ICU/사망/LOS/재입원)으로
+> 정의하고 `expected_escalate = stratum∈{CRITICAL,HIGH}` 로 라벨을 outcome 의 결정적
+> 함수로 둔 데다, los/discharge-ICD/전체-lab 을 프롬프트에 넣었다. 현재 코드는 다음처럼
+> 분리한다(정식: 논문 §3.2).
 
-**CRITICAL 라벨 산출 SQL pseudocode**:
-```sql
-expected_escalate = TRUE IFF (
-    EXISTS (SELECT 1 FROM icustays WHERE hadm_id=A.hadm_id
-            AND intime <= A.admittime + INTERVAL '24 hours')
-    OR A.hospital_expire_flag = 1
-    OR (A.admission_type IN ('EMERGENCY', 'URGENT'))
-)
+**✏️ 현행 — 위험군 $G(X_{t_0})$ (decision-time only, per-stratum α 의 조건화 변수):**
+
+| Stratum | $G$ 정의 (입원 시점/첫 6h 만) |
+|---|---|
+| **CRITICAL** | emergency/urgent 입원 ∧ (첫 6h severe lab[lactate_high/acidemia/hyperkalemia/leukocytosis] ∨ age≥80) |
+| **HIGH** | emergency/urgent 입원 ∨ 첫 6h severe lab |
+| **MODERATE** | 첫 6h lab abnormality 존재 ∨ age≥80 |
+| **LOW** | 그 외 |
+
+**✏️ 현행 — 라벨 $Y$ (미래 outcome, $G$ 와 독립; 프롬프트에 절대 미포함):**
+```text
+expected_escalate = y_outcome = ( ICU transfer ≤ 24h ∨ in-hospital mortality )
 ```
+30일 재입원·전체-입원 sepsis proxy 는 secondary outcome 으로 `outcome` 블록에만 보관.
+
+<details><summary>원안 (SUPERSEDED — 참고용, 사용 금지)</summary>
+
+| Stratum | (구) MIMIC-IV 라벨 정의 | 예상 n |
+|---|---|---|
+| CRITICAL | ICU<24h ∨ mortality ∨ EMERGENCY/URGENT | ≈40k–60k |
+| HIGH | sepsis-3 ∨ 30d readmission ∨ transfusion<24h | ≈30k |
+| MODERATE | standard inpatient | ≈200k |
+| LOW | LOS<24h discharge home | ≈100k |
+
+구 `expected_escalate = stratum∈{CRITICAL,HIGH}` (← 누수: 라벨이 stratum 의 결정적 함수).
+</details>
 
 ### 2.2 case → MedQACase 변환
 
 이미 [data/loader.py:728](data/loader.py#L728) 에 `_load_mimic_jsonl` 가 있고 `_MIMIC_NOTE_TEMPLATE` 가 있으니, 그 형식을 그대로 따라 `data/raw/mimic4_cases.jsonl` 을 만듦. 한 줄 = 한 입원:
 
+✏️ **현행 schema (leakage-safe):**
 ```jsonl
-{"hadm_id":"...","note_type":"discharge_summary_OR_structured_proxy",
- "text":"<free text OR structured proxy>",
- "icd_codes":["I50.9","N18.3"],
- "specialty":"cardiology",
- "expected_escalate":true,
- "stratum":"CRITICAL",
- "outcome":{"icu_within_24h":true,"in_hospital_mortality":false,"sepsis":false,"readmit_30d":false}}
+{"hadm_id":"...","subject_id":"...",
+ "stratum":"CRITICAL","risk_group":"CRITICAL",
+ "expected_escalate":true,"y_outcome":true,
+ "specialty":"cardiology","admission_type":"EMERGENCY","anchor_year_group":"2014 - 2016",
+ "demographics":{"sex":"F","race":"WHITE","age_bucket":"65-79"},
+ "outcome":{"icu_within_24h":true,"in_hospital_mortality":false,"deterioration_composite":true,
+            "sepsis":false,"readmit_30d":false},
+ "structured":{"early_lab_flags":["lactate_high"],"early_vital_quartiles":[],"service":"CMED"},
+ "_audit_postoutcome":{"icd_primary":"I50.9","icd_codes":["I50.9","N18.3"],
+                       "lab_flags_full":["lactate_high","creatinine_high"],"los_days":4.2}}
 ```
 
-**Phase 1 (structured proxy)**: text 필드는 `_MIMIC_NOTE_TEMPLATE` 로 ICD-10 + 주요 lab abnormality + chief complaint (admissions 의 `diagnosis` 컬럼) 를 합성한 **구조화 텍스트**. PhysioNet DUA 7 항 OpenAI 송신 issue 회피.
+**Phase 1 (structured proxy)**: 프롬프트 text 는 `_MIMIC4_STRUCT_TEMPLATE` 로 ✏️ **decision-time 필드만**(age bracket·admission type·service·첫 6h early_lab_flags) 합성한 구조화 텍스트. discharge ICD·LOS·전체-lab·미래 outcome 은 `_audit_postoutcome` 로 격리되어 프롬프트에 들어가지 않음. PhysioNet DUA 송신 issue 회피 + label leakage 방지.
 
 **Phase 2 (free text, 옵션)**: `note/discharge.csv.gz` 첫 800 chars 를 사용. **lmstudio backend 전용**. OpenAI 로는 송신 안 함.
 
@@ -172,10 +199,14 @@ expected_escalate = TRUE IFF (
 **Week 3 — Equity audit + 통합 실행**
 - [R9-P1-4] `experiments/round9_equity_real.py` — demographic × stratum × miss
   - race/sex/age_bucket 마다 per-stratum miss 측정. paper §I 의 합성 → 실데이터 버전.
-  - 출력: `results/round9/equity_audit_real.{json,md}`
-- 신규 `run_all_round9.sh` — Round 8 와 동일한 구조, 실행 단계: P0 (preprocess) → R9.1 (α=0.001) → R9.2 (Table 4-MIMIC) → R9.3 (dist shift) → R9.4 (temporal) → R9.5 (equity) → 통합 보고서
+  - 출력: `results/round9/equity_audit_real.{json,md}` (✏️ subgroup safety audit, exploratory)
+- ✏️ [R9-P1-5] `experiments/round9_tabular_baseline.py` (신규) — decision-time feature 만으로
+  LogReg/GBDT + trivial(admission-type / high-risk) baseline → 동일 CRC. LLM 필요성 검증.
+  출력: `results/round9/tabular_baseline.{json,md}`.
+- 신규 `run_all_round9.sh` — 실행 단계: P0 (preprocess) → R9.1 (α=0.001) → R9.2 (Table 4-MIMIC)
+  → R9.3 (dist shift) → R9.4 (temporal) → R9.5 (subgroup audit) → ✏️ R9.6 (tabular baseline) → 통합 보고서
 - `tests/test_paper_claims.py` 에 Round 9 regression guard 추가:
-  - α_CRITICAL=0.001 empirical: miss ≤ 0.0012 (2σ upper)
+  - ✏️ α_CRITICAL=0.001: **exact 이항 상한 보고** (vacuous 2σ guard 폐기 → `..._exact_bound_reported`)
   - Table 4-MIMIC: v2 CRITICAL recall ≥ 0.90
   - dist shift: weighted CP 후 violation ratio ≤ 1.5×
 
