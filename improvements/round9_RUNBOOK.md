@@ -1,5 +1,12 @@
 # Round 9 — Execution Runbook (MIMIC-IV Integration)
 
+> ⚠️ **개정 (2026-06-10) — leakage-safe 재설계.** preprocessing 이 decision-time 위험군
+> $G(X_{t_0})$ 과 독립적 미래 outcome $Y$ 를 분리하도록 바뀌었으므로 **반드시 JSONL 을 새로
+> 생성**해야 한다(구 JSONL 폐기: `rm -f data/raw/mimic-iv/mimic4_cases.jsonl` 후 Step 1).
+> split 은 patient-level(subject_id), α=0.001 은 exact 이항 상한으로 보고된다.
+> 근거: [paper/REVISION_PLAN.md](../paper/REVISION_PLAN.md). 신규 단계 **R9.6 = tabular baseline**
+> (LLM 무관, 아래 §1 Step 3b). (구 RUNBOOK 의 "R9.6 LLM-judge κ" 는 Phase 2 의 R9.7 로 재배치.)
+
 > **TL;DR — local-only headline**
 > ```bash
 > export MIMIC4_DIR=~/Downloads/mimic-iv-3.1
