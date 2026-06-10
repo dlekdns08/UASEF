@@ -724,18 +724,19 @@ _MIMIC_NOTE_TEMPLATE = (
     "Based on this note, what is the most appropriate immediate clinical management decision?"
 )
 
-# Round 9: structured-proxy template (no free text) — safe to send to external APIs.
+# Round 9: structured-proxy template (no free text).
+# ⚠️ LEAKAGE-SAFE (REVISION_PLAN P0-1): decision-time 가용 필드만 포함.
+#   제외됨 — los_days(퇴원 후), discharge ICD(사후 coding), 전체-입원 lab,
+#            mortality/ICU/readmission(미래 outcome). 이들은 라벨 Y 정의에만 쓰임.
 _MIMIC4_STRUCT_TEMPLATE = (
-    "Patient summary (MIMIC-IV de-identified):\n"
+    "Patient summary at admission (MIMIC-IV de-identified, decision-time only):\n"
     "  Age bracket: {age_bucket}\n"
     "  Admission type: {admission_type}\n"
-    "  Service: {service}\n"
-    "  Primary ICD-10: {icd_primary}\n"
-    "  Active ICD-10 codes: {icd_codes}\n"
-    "  Lab abnormalities: {lab_flags}\n"
-    "  Vital quartiles: {vital_quartiles}\n"
-    "  Length of stay (days): {los_days}\n\n"
-    "Should this admission be escalated to a senior clinician for review?"
+    "  Service at admission: {service}\n"
+    "  Early lab abnormalities (first 6h): {early_lab_flags}\n"
+    "  Early vital quartiles (first 6h): {early_vital_quartiles}\n\n"
+    "At this admission decision point, should this patient be escalated to a "
+    "senior clinician for review?"
 )
 
 
@@ -880,14 +881,13 @@ def load_mimic_scenarios(
 
 # ── MIMIC-IV (Round 9) ────────────────────────────────────────────────────────
 #
-# Round 9 통합 (improvements/round9_PLAN.md). hosp + icu 모듈로 preprocessing
-# 한 JSONL 한 줄 = 한 hadm_id. stratum 라벨은 임상 outcome 기반:
-#   CRITICAL = ICU<24h ∨ in-hospital mortality ∨ admission_type∈{EMERGENCY,URGENT}
-#   HIGH     = sepsis-3 ∨ 30d readmission ∨ blood transfusion<24h
-#   MODERATE = standard inpatient (no ICU, no death)
-#   LOW      = short LOS<24h discharged home
-#
-# expected_escalate = (stratum != "LOW") AND (escalation outcome 발생).
+# Round 9 통합 (improvements/round9_PLAN.md). hosp + icu 모듈로 preprocessing.
+# 한 JSONL 한 줄 = 한 hadm_id.
+#   stratum = risk_group G(X_t0): decision-time 위험군 (admission_type, age,
+#             첫 6h lab) — per-stratum α 의 조건화 변수.
+#   expected_escalate = Y: 미래 outcome (ICU<24h ∨ in-hospital mortality),
+#             G 와 독립. 입력(prompt)에는 절대 들어가지 않음.
+# ⚠️ leakage-safe: los/discharge-ICD/mortality/ICU/readmission 은 prompt 에 미포함.
 # 외부 API 송신 시 PHI guard 적용 — query_model 의 phi_taint 인자 참조.
 
 _MIMIC4_DEFAULT_PATH = _RAW_DIR / "mimic-iv" / "mimic4_cases.jsonl"
@@ -897,29 +897,33 @@ def _load_mimic4_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
     """
     MIMIC-IV preprocessed JSONL 로드.
 
-    예상 한 줄 schema (round9_mimic4_preprocess.py 산출):
+    예상 한 줄 schema (round9_mimic4_preprocess.py 산출, leakage-safe):
         {
           "hadm_id": "20000123",
           "subject_id": "10000032",
-          "stratum": "CRITICAL",
-          "expected_escalate": true,
+          "stratum": "CRITICAL",          # = risk_group G(X_t0), decision-time
+          "risk_group": "CRITICAL",
+          "expected_escalate": true,      # = Y, 미래 outcome (G 와 독립)
+          "y_outcome": true,
           "specialty": "cardiology",
           "admission_type": "EMERGENCY",
           "admit_year": 2015,
           "demographics": {"sex": "F", "race": "WHITE", "age_bucket": "65-79"},
-          "outcome": {
+          "outcome": {                    # 평가용 미래 outcome
               "icu_within_24h": true, "in_hospital_mortality": false,
+              "deterioration_composite": true,
               "sepsis": false, "readmit_30d": false, "transfusion_24h": false
           },
-          "structured": {
-              "icd_primary": "I50.9",
-              "icd_codes": ["I50.9", "N18.3"],
-              "lab_flags": ["lactate_high", "creatinine_high"],
-              "vital_quartiles": ["HR_Q4", "BP_Q1"],
-              "los_days": 4.2,
+          "structured": {                 # prompt 입력 — decision-time 만
+              "early_lab_flags": ["lactate_high"],
+              "early_vital_quartiles": [],
               "service": "CMED"
           },
-          "note_text": null              # Phase 1 미사용; Phase 2 옵션
+          "_audit_postoutcome": {         # prompt 미전달 — 사후 정보 (평가/분석 전용)
+              "icd_primary": "I50.9", "icd_codes": ["I50.9", "N18.3"],
+              "lab_flags_full": ["lactate_high", "creatinine_high"], "los_days": 4.2
+          },
+          "note_text": null
         }
 
     Returns: list[MedQACase] with `source="mimic4_struct"` (structured proxy).
@@ -944,18 +948,20 @@ def _load_mimic4_jsonl(path: Path, n: int, seed: int) -> list[MedQACase]:
     for row in rows:
         struct = row.get("structured", {}) or {}
         demo = row.get("demographics", {}) or {}
+        # decision-time 필드만 prompt 로. 구버전 JSONL 의 leaky 필드(lab_flags 등)는
+        # 의도적으로 무시 — early_lab_flags 가 없으면 빈 값으로 처리(누수 0).
+        early_labs = struct.get("early_lab_flags", [])
+        early_vitals = struct.get("early_vital_quartiles", [])
         question = _MIMIC4_STRUCT_TEMPLATE.format(
             age_bucket=demo.get("age_bucket", "unknown"),
             admission_type=row.get("admission_type", "unknown"),
             service=struct.get("service", "unknown"),
-            icd_primary=struct.get("icd_primary", "unknown"),
-            icd_codes=", ".join(struct.get("icd_codes", []))[:200],
-            lab_flags=", ".join(struct.get("lab_flags", []))[:200],
-            vital_quartiles=", ".join(struct.get("vital_quartiles", []))[:200],
-            los_days=struct.get("los_days", "unknown"),
+            early_lab_flags=", ".join(early_labs)[:200] or "none",
+            early_vital_quartiles=", ".join(early_vitals)[:200] or "none",
         )
         meta = (
-            f"hadm_id={row.get('hadm_id', '?')} stratum={row.get('stratum', '?')} "
+            f"hadm_id={row.get('hadm_id', '?')} subject_id={row.get('subject_id', '?')} "
+            f"stratum={row.get('stratum', '?')} "
             f"admit_year={row.get('admit_year', '?')} "
             f"anchor_year_group={(row.get('anchor_year_group') or '?').replace(' ', '_')} "
             f"sex={demo.get('sex', '?')} race={demo.get('race', '?')}"
