@@ -82,16 +82,22 @@ def _subject_id(case) -> str:
 
 
 def _split_cal_test(buckets, n_cal_per: int, n_test_per: int, seed: int):
-    """PATIENT-LEVEL split (REVISION_PLAN P0-3): subject_id 단위로 분할 후
-    stratum 별 cal/test 상한 적용 — 같은 환자가 양쪽에 들어가지 않음."""
+    """PATIENT-LEVEL split (REVISION_PLAN P0-3): GLOBAL subject_id 분할 후
+    stratum 별 cal/test 상한 적용 — 한 환자가 여러 stratum 에 걸쳐도 양쪽에
+    새지 않음 (전 case 를 한 번만 환자 단위로 분할)."""
+    from collections import defaultdict
     from experiments.metrics_utils import patient_level_split
-    cal, test = [], []
-    for s, cs in buckets.items():
-        c_cal, c_test = patient_level_split(cs, group_of=_subject_id,
+    all_cases = [c for cs in buckets.values() for c in cs]
+    cal_all, test_all = patient_level_split(all_cases, group_of=_subject_id,
                                             cal_frac=0.8, seed=seed)
-        cal.extend(c_cal[:n_cal_per])
-        test.extend(c_test[:n_test_per])
-    return cal, test
+    def _cap(cases, per):
+        out, seen = [], defaultdict(int)
+        for c in cases:
+            s = (c.scenario_type or "").upper()
+            if seen[s] < per:
+                out.append(c); seen[s] += 1
+        return out
+    return _cap(cal_all, n_cal_per), _cap(test_all, n_test_per)
 
 
 def evaluate_predictor(name, predictor_fn, scores, labels, strata) -> dict:
