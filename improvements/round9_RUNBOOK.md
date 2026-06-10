@@ -125,7 +125,7 @@ split 은 patient-level(subject_id).
     --out results/round9/temporal_shift
 ```
 
-### Step 7: R9.5 — Demographic equity
+### Step 7: R9.5 — Demographic subgroup safety audit ✏️
 
 ```bash
 .venv/bin/python experiments/round9_equity_real.py \
@@ -134,7 +134,21 @@ split 은 patient-level(subject_id).
     --out results/round9/equity_audit_real
 ```
 
-1 시드 (단일 분포 보고), demographic stratification 만 변동.
+1 시드 (단일 분포 보고), exploratory. small-cell 은 Wilson CI 와 함께 보고하며
+"equity 달성" 을 주장하지 않음 (subgroup safety audit).
+
+### Step 7b: R9.6 — Tabular baselines ✏️ (LLM 호출 없음, $0)
+
+```bash
+.venv/bin/python experiments/round9_tabular_baseline.py \
+    --n-per-stratum 1500 --seed 42 \
+    --out results/round9/tabular_baseline
+# 필요: scikit-learn (xgboost 있으면 GBDT 자동 사용)
+```
+
+decision-time feature 만으로 LogReg/GBDT + admission-type/high-risk trivial → 동일 CRC.
+patient-level split. "LLM 이 tabular 대비 필요한가" 검증 (약한 주장: CRC framework 는
+score source 에 불변하게 안전 적용).
 
 ### Step 8: 통합 보고서
 
@@ -155,8 +169,8 @@ bash run_all_round9.sh
 ```
 
 `run_all_round9.sh` 환경변수:
-- `SKIP_PREPROCESS=1` — JSONL 이미 있으면
-- `SKIP_R9_1=1`, `SKIP_R9_2=1`, ... — 단계별 건너뛰기
+- `SKIP_PREPROCESS=1` — JSONL 이미 있으면 (단, ✏️ leakage-safe 재생성 전이면 끄고 새로 생성)
+- `SKIP_R9_1=1`, `SKIP_R9_2=1`, ... `SKIP_R9_6=1` — 단계별 건너뛰기
 - `STRICT_FAIL=1` — 한 단계라도 실패하면 중단
 - `DRY_RUN=1` — 명령만 출력
 
