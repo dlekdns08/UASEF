@@ -96,11 +96,15 @@ attempting to route them through an external API fails closed with
 [tests/test_mimic4_loader.py](../tests/test_mimic4_loader.py).
 
 This paper *does not* claim algorithmic novelty beyond Round 7. Its
-contribution is the *first real-EHR empirical validation* that the
-Round 7 per-stratum guarantee survives outside the QA-derived
-calibration distribution it was originally tuned on, together with
-a fully reproducible pipeline that any credentialed group can re-run
-with one shell command.
+contribution is, **to our knowledge among the first real-EHR
+evaluations**, a study of whether the Round 7 per-stratum guarantee
+behaves as intended outside the QA-derived calibration distribution it
+was originally tuned on — with an explicit **leakage-safe decision-time
+formulation**, patient-level splits, and transparent failure analysis
+under real distribution shift — together with a fully reproducible
+pipeline that any credentialed group can re-run with one shell command.
+We frame the central value as *per-stratum risk control with honest
+failure characterization*, not cost minimization.
 
 ---
 
