@@ -87,7 +87,10 @@ Phase 1 의 structured proxy (`source=mimic4_struct`) 는 OpenAI 송신 허용.
 # 산출: alpha_critical_real.{json,md}
 ```
 
-목표: per-example loss `E[ℓ_CRITICAL] ≤ 0.001 + 2σ` 만족 확인.
+✏️ 목표: pooled `misses/n_pos` 의 **exact 단측 95% Clopper–Pearson 상한**이 α 와 양립하는지
+(`compatible_with_alpha`). 0 miss 라도 상한이 0.001 에 도달하려면 n_pos ≥ ~2995 — "α=0.001
+실증" 이 아니라 non-vacuous calibration + 우호적 held-out 으로 보고. (구 "2σ 상한" 폐기.)
+split 은 patient-level(subject_id).
 
 ### Step 4: R9.2 — Table 4-MIMIC head-to-head
 
