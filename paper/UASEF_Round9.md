@@ -548,11 +548,19 @@ is intended to capture practice-pattern drift; sepsis-3 criteria
 were adopted in 2016 and electronic-alert deployment intensified in
 the second half of the decade.
 
+> **Framing — stress test, not guarantee.** CRC's finite-sample validity
+> holds under **exchangeability** of calibration and test points. A temporal
+> split deliberately violates exchangeability, so this experiment evaluates
+> the *empirical degradation* of the guarantee under distribution shift; it
+> does **not** assert that CRC "guarantees safety under temporal shift."
+
 **Reporting.** Per-stratum mean miss rate over five seeds; we report
 the violation ratio relative to the per-stratum α. The ratio is
 **not** required to be ≤ 1 — temporal drift is real and the result
 itself is a paper finding. Drift > 2× would motivate the recalibration
-discussion in Round 7 §8 L8.
+discussion in Round 7 §8 L8. The split is performed at the **patient
+level** so that a patient's admissions do not straddle the calibration
+and test eras.
 
 ### 4.5 R9.5 — Demographic equity audit
 
