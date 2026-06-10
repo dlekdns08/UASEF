@@ -459,38 +459,47 @@ machine-readable output to `results/round9/*.{json,md}`.
 
 ### 4.1 R9.1 — Empirical $\alpha_{\text{CRITICAL}} = 0.001$ (Table 1c)
 
-**Hypothesis.** On the MIMIC-IV CRITICAL stratum, with
-$n_{\text{cal}} \ge 1200$ CRITICAL positives, the per-stratum CRC
-threshold $\hat{\lambda}_{\text{CRITICAL}}$ satisfies
-$\mathbb{E}[\ell_{\text{CRITICAL}}] \le 0.001$ on a held-out test
-set, with the empirical 2σ upper bound below $1.2 \times 0.001$.
+**Hypothesis (revised).** On the MIMIC-IV CRITICAL stratum, with
+$n_{\text{cal}} \ge 999$ CRITICAL positives, the per-stratum CRC
+threshold $\hat{\lambda}_{\text{CRITICAL}}$ produces a held-out
+conditional miss rate whose **exact one-sided 95 % Clopper–Pearson upper
+bound is compatible with $\alpha = 0.001$**. We explicitly do **not**
+hypothesize that the test set certifies a true miss rate $\le 0.001$:
+with $k$ held-out misses out of $n_{\text{pos}}$ positives, the upper
+bound is limited by $n_{\text{pos}}$ (for $k = 0$ it equals
+$1 - 0.05^{1/n_{\text{pos}}}$, so $n_{\text{pos}} \gtrsim 2995$ is needed
+for the bound to reach $0.001$).
 
 **Protocol.** For each seed $s \in \{42, 43, 44, 45, 46\}$ and each
 backend $b \in \{\texttt{lmstudio openai/gpt-oss-120b}\}$ (headline) — with $\texttt{openai gpt-4o}$ available as an opt-in supplementary §J reference:
 
 1. Load the preprocessed JSONL.
-2. Stratum-balanced split: 80 % calibration, 20 % test.
+2. **Patient-level split** (group by `subject_id`): 80 % calibration,
+   20 % test, so no patient's repeated admissions straddle the split.
 3. Score each calibration case via UQM logprob nonconformity (Round 7 §3.4).
 4. Fit `StratifiedConformalRiskControl` with
    $\alpha = (0.001, 0.01, 0.05, 0.10)$.
-5. Compute test-set per-example loss $\mathbb{E}[\ell_s]$ for each
-   stratum.
-6. Aggregate across seeds: percentile-bootstrap 95 % CI (Round 8 §6.6
-   protocol).
+5. Compute test-set per-example loss $\mathbb{E}[\ell_s]$ and **pooled
+   misses / positives** for each stratum.
+6. Aggregate across seeds: pooled **exact Clopper–Pearson** one-sided
+   95 % upper bound on the conditional miss rate.
 
 **Reporting (Table 1c, results/round9/alpha_critical_real.md).**
+🔴 **재실행 대기 (PENDING RE-RUN)** — regenerate with the leakage-safe,
+patient-level pipeline before citing.
 
-| Stratum  | $\alpha$ | $n_{\text{seeds}}$ | $\bar{\mathbb{E}}[\ell]$ ± std | 2σ upper | 95 % CI | Satisfies α? |
-|----------|----------|--------------------|---------------------------------|----------|---------|--------------|
-| CRITICAL | 0.001    | 5                  | _to be filled_                  | _tbf_    | _tbf_   | _tbf_        |
-| HIGH     | 0.01     | 5                  | _tbf_                           | _tbf_    | _tbf_   | _tbf_        |
-| MODERATE | 0.05     | 5                  | _tbf_                           | _tbf_    | _tbf_   | _tbf_        |
-| LOW      | 0.10     | 5                  | _tbf_                           | _tbf_    | _tbf_   | _tbf_        |
+| Stratum  | $\alpha$ | $n_{\text{seeds}}$ | $\bar{\mathbb{E}}[\ell]$ ± std | misses/$n_{\text{pos}}$ | exact 95 % upper | Compatible with α? | $n$ needed |
+|----------|----------|--------------------|--------------------------------|--------------------------|------------------|---------------------|------------|
+| CRITICAL | 0.001    | 5                  | _재실행 대기_                   | _tbf_                    | _tbf_            | _tbf_               | ~2995      |
+| HIGH     | 0.01     | 5                  | _재실행 대기_                   | _tbf_                    | _tbf_            | _tbf_               | ~299       |
+| MODERATE | 0.05     | 5                  | _재실행 대기_                   | _tbf_                    | _tbf_            | _tbf_               | ~59        |
+| LOW      | 0.10     | 5                  | _재실행 대기_                   | _tbf_                    | _tbf_            | _tbf_               | ~29        |
 
-A regression guard in
-[tests/test_paper_claims.py](../tests/test_paper_claims.py)
-(`test_r9_alpha_critical_within_2sigma`) fails the suite if the
-2σ upper bound exceeds $1.2 \alpha_{\text{CRITICAL}}$ post-run.
+The previous regression guard `test_r9_alpha_critical_within_2sigma`
+tied to a Gaussian "2σ" upper bound is **deprecated** (the 2σ proxy
+collapses to 0 whenever 0 misses are observed and therefore certifies
+nothing); the run now reports the exact binomial bound and a
+`compatible_with_alpha` flag instead.
 
 ### 4.2 R9.2 — Table 4-MIMIC head-to-head
 
