@@ -184,7 +184,8 @@ results/round9/
 ├── table4_mimic.{json,md}               # R9.2 — Table 4-MIMIC
 ├── dist_shift_real.{json,md}            # R9.3 — §G 강화
 ├── temporal_shift.{json,md}             # R9.4
-├── equity_audit_real.{json,md}          # R9.5 — §I 강화
+├── equity_audit_real.{json,md}          # R9.5 — subgroup safety audit
+├── tabular_baseline.{json,md}           # R9.6 — tabular baselines (no LLM) ✏️
 └── round9_report.md                     # 통합
 
 data/raw/mimic-iv/                       # ⚠️ commit 금지
