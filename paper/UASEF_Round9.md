@@ -300,39 +300,97 @@ The optional `note` (discharge summaries, radiology reports) and `ed`
 (ESI level, triage) modules require *separate* PhysioNet applications
 and are deferred to Phase 2 (§7.4).
 
-### 3.2 Stratum definition
+### 3.2 Decision-time risk group $G(X_{t_0})$ and future outcome $Y$ (leakage-safe)
 
-Each admission $a$ (uniquely identified by `hadm_id`) is mapped to one
-of four risk strata based on recorded outcomes. Notation:
-$T_{\text{ICU}}(a)$ is the first ICU intime,
-$T_{\text{adm}}(a)$ the admission timestamp,
-$M(a) \in \{0,1\}$ the in-hospital mortality flag, $\text{Type}(a)$ the
-admission type, and $L(a)$ the length of stay in hours.
+> **Why this section was rewritten.** The original Round 9 defined a single
+> "stratum" σ(a) from *future* outcomes (ICU-24h, mortality, LOS, 30-day
+> readmission) and set the label as `expected_escalate(a) = σ(a) ∈ {CRITICAL,
+> HIGH}` — a **deterministic function of the label-defining outcomes** — while
+> the prompt simultaneously fed LOS, discharge ICD, and full-admission lab
+> abnormalities to the model. At the admission decision point none of those
+> outcomes is observable, so the design leaked the answer into the input. We
+> now separate two distinct objects.
+
+**Decision-time covariates $X_{t_0}$.** The information available at the
+admission decision point $t_0$: admission type, age bracket, service at
+admission, and lab abnormalities measured within the **first 6 hours**
+(`labevents.charttime` $\le T_{\text{adm}} + 6\,\text{h}$). Discharge ICD
+codes, length of stay, and full-admission labs are *excluded* (they are
+post-hoc / future), and are stored only in a non-prompt `_audit_postoutcome`
+block for analysis.
+
+**Risk group $G(X_{t_0})$** (the conditioning variable for per-stratum
+$\alpha$; field `risk_group`/`stratum`). With
+$\text{Emerg} = \text{Type}(a) \in \{\text{EMERGENCY},\text{URGENT},\text{DIRECT EMER.},\text{EW EMER.}\}$,
+$\text{Eld} = \text{age}(a) \ge 80$, and early-window lab acuity flags
+$E(a)$ ($E_{\text{sev}}$ = any of lactate-high / acidemia / hyperkalemia /
+leukocytosis in the first 6 h):
 
 $$
-\text{stratum}(a) =
+G(X_{t_0}) =
 \begin{cases}
-\text{CRITICAL} & \text{if } T_{\text{ICU}}(a) - T_{\text{adm}}(a) \le 24\,\text{h} \\
-                & \quad\lor\; M(a) = 1 \\
-                & \quad\lor\; \text{Type}(a) \in \{\text{EMERGENCY}, \text{URGENT}\} \\
-\text{HIGH}     & \text{else if } \text{sepsis\_proxy}(a) \\
-                & \quad\lor\; \text{readmit}_{30d}(a) \\
-                & \quad\lor\; \text{transfusion}_{24h}(a) \\
-\text{LOW}      & \text{else if } L(a) < 24\,\text{h} \\
-\text{MODERATE} & \text{otherwise.}
+\text{CRITICAL} & \text{if } \text{Emerg} \land (E_{\text{sev}}(a) \lor \text{Eld}(a)) \\
+\text{HIGH}     & \text{else if } \text{Emerg} \lor E_{\text{sev}}(a) \\
+\text{MODERATE} & \text{else if } |E(a)| > 0 \lor \text{Eld}(a) \\
+\text{LOW}      & \text{otherwise.}
 \end{cases}
 $$
 
-The `sepsis_proxy(a)` flag is true when the admission has a
-`labevents.valuenum > 2.0` for any `d_labitems.label` matching
-"lactate" within the admission window, an established lactate-based
-sepsis surrogate. The `readmit_30d` flag is true when the same
-`subject_id` has another admission within 30 days of discharge.
+**Future outcome $Y$** (the label; field `expected_escalate`/`y_outcome`),
+observed only *after* $t_0$ and **independent of $G$ by construction**:
 
-The `expected_escalate(a)` field is set to True iff
-$\text{stratum}(a) \in \{\text{CRITICAL}, \text{HIGH}\}$, capturing
-the operational decision rule of "this admission warrants senior
-review" without further heuristic.
+$$
+Y(a) = \mathbb{1}\!\left[\,T_{\text{ICU}}(a) - T_{\text{adm}}(a) \le 24\,\text{h} \;\lor\; M(a) = 1\,\right]
+$$
+
+i.e. a deterioration composite (ICU transfer within 24 h **or** in-hospital
+mortality). 30-day readmission and full-admission sepsis proxy are retained
+in the `outcome` block for secondary analysis but are **not** part of the
+primary $Y$. Because $G$ uses only decision-time signals and $Y$ uses only
+post-decision outcomes, the previous σ→label determinism is removed and the
+label genuinely varies within each risk stratum.
+
+**Loss and guarantee (unchanged from Round 7).** Escalation uses score
+$s(x)$ with rule "escalate iff $s(x) > \lambda$". CRC controls the
+missed-escalation loss
+$\ell_\lambda(x,y) = \mathbb{1}\{\,s(x) \le \lambda \land y = 1\,\}$,
+i.e. $\Pr[\text{not escalate} \land Y = 1]$, with bound $B = 1$ and
+$n_{\min} = \lceil (1-\alpha)/\alpha \rceil$ (which assumes $B = 1$). The
+1000:1 cost matrix is used **only** as a separate downstream evaluation
+metric and does **not** enter the CRC bound (§4.3, §6.5).
+
+**Table 0 — Feature availability (leakage audit).**
+
+| Variable | Source | Timestamp | Decision-time? | In prompt? | In label $Y$? | In $G$? |
+| --- | --- | --- | --- | --- | --- | --- |
+| Admission type | `admissions` | $t_0$ | ✔ | ✔ | ✘ | ✔ |
+| Age bracket | `patients` | $t_0$ | ✔ | ✔ | ✘ | ✔ |
+| Service at admission | `services` (first) | $t_0$ | ✔ | ✔ | ✘ | ✘ |
+| Early lab flags (≤6 h) | `labevents` | $t_0{+}6\text{h}$ | ✔ | ✔ | ✘ | ✔ |
+| ICU transfer ≤24 h | `icustays` | future | ✘ | ✘ | ✔ | ✘ |
+| In-hospital mortality | `admissions` | future | ✘ | ✘ | ✔ | ✘ |
+| Length of stay | `admissions` | discharge | ✘ | ✘ (removed) | ✘ | ✘ |
+| 30-day readmission | `admissions` | future | ✘ | ✘ | ✘ (secondary) | ✘ |
+| Discharge ICD-10 | `diagnoses_icd` | discharge | ✘ | ✘ (removed) | ✘ | ✘ |
+
+**Figure 2 — Leakage-safe timeline.**
+
+```
+        decision point t0
+              │
+  ┌───────────┴───────────┐                    ┌─────────────────────────┐
+  │  allowed features X_t0 │   ── decide ──▶    │   future outcome Y       │
+  │  age, admit type,      │   escalate?        │   ICU≤24h ∨ mortality    │
+  │  service, labs ≤6h     │                    │   (never seen by model)  │
+  └────────────────────────┘                    └─────────────────────────┘
+   t0 ─────────────────────▶ t0+6h ─────────────────────────────▶ discharge
+```
+
+**Label validity.** We do **not** claim $Y$ is perfect clinical ground
+truth; it is an **operational proxy outcome** derived from structured EHR
+events. A small clinician-validation study (≈100 cases, 2–3 reviewers,
+Cohen's/Fleiss' κ) is planned to quantify agreement between $Y$ and expert
+escalation judgement (§7).
 
 ### 3.3 Specialty assignment
 
