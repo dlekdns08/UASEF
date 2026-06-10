@@ -231,37 +231,54 @@ Phase 1 은 MIMIC-IV v3.1 의 `hosp` 와 `icu` 모듈만 사용한다.
 triage) 모듈은 *별도* PhysioNet 신청을 요구하며 Phase 2 (§7.4) 로
 연기한다.
 
-### 3.2 Stratum 정의
+### 3.2 Decision-time 위험군 $G(X_{t_0})$ 과 미래 outcome $Y$ (leakage-safe)
 
-각 admission $a$ (`hadm_id` 로 unique 식별) 는 기록된 outcome 기반으로
-네 risk stratum 중 하나로 매핑된다. 표기:
-$T_{\text{ICU}}(a)$ 는 첫 ICU intime, $T_{\text{adm}}(a)$ 는 admission
-timestamp, $M(a) \in \{0,1\}$ 는 원내 사망 flag, $\text{Type}(a)$ 는
-admission type, $L(a)$ 는 length of stay (시간 단위).
+> **재작성 사유.** 구버전은 단일 "stratum" σ(a) 를 *미래* outcome(ICU-24h, 사망,
+> LOS, 30일 재입원)으로 정의하고 `expected_escalate(a)=σ(a)∈{CRITICAL,HIGH}` 로
+> 라벨을 **outcome 의 결정적 함수**로 두면서, 동시에 LOS·discharge ICD·전체-입원 lab
+> 을 프롬프트에 투입했다. admission 결정 시점에는 그 outcome 들을 관측할 수 없으므로
+> 입력에 정답이 새어 들어갔다. 이제 둘을 분리한다. (정식 표기·표·timeline 은 영문 §3.2.)
+
+**Decision-time 공변량 $X_{t_0}$.** admission type, age bracket, service,
+그리고 입원 후 **첫 6시간** 이내(`labevents.charttime` $\le T_{\text{adm}}+6\text{h}$)
+lab abnormality 만. discharge ICD, LOS, 전체-입원 lab 은 *제외*(사후/미래)하고
+prompt 가 아닌 `_audit_postoutcome` 블록에만 보관.
+
+**위험군 $G(X_{t_0})$** (per-stratum α 의 조건화 변수; `risk_group`/`stratum`).
+$\text{Emerg}=\text{Type}\in\{\text{EMERGENCY,URGENT,DIRECT EMER.,EW EMER.}\}$,
+$\text{Eld}=\text{age}\ge 80$, $E_{\text{sev}}$=첫 6h 의 lactate-high/acidemia/
+hyperkalemia/leukocytosis 중 하나:
 
 $$
-\text{stratum}(a) =
+G(X_{t_0}) =
 \begin{cases}
-\text{CRITICAL} & T_{\text{ICU}}(a) - T_{\text{adm}}(a) \le 24\,\text{h} \\
-                & \quad\lor\; M(a) = 1 \\
-                & \quad\lor\; \text{Type}(a) \in \{\text{EMERGENCY}, \text{URGENT}\} \\
-\text{HIGH}     & \text{else if } \text{sepsis\_proxy}(a) \\
-                & \quad\lor\; \text{readmit}_{30d}(a) \\
-                & \quad\lor\; \text{transfusion}_{24h}(a) \\
-\text{LOW}      & \text{else if } L(a) < 24\,\text{h} \\
-\text{MODERATE} & \text{otherwise.}
+\text{CRITICAL} & \text{Emerg} \land (E_{\text{sev}} \lor \text{Eld}) \\
+\text{HIGH}     & \text{else if } \text{Emerg} \lor E_{\text{sev}} \\
+\text{MODERATE} & \text{else if } |E| > 0 \lor \text{Eld} \\
+\text{LOW}      & \text{otherwise.}
 \end{cases}
 $$
 
-`sepsis_proxy(a)` flag 는 admission window 내에 "lactate" 와 매칭되는
-`d_labitems.label` 에 대해 `labevents.valuenum > 2.0` 이 있을 때 True
-— 표준 lactate 기반 sepsis surrogate. `readmit_30d` flag 는 동일
-`subject_id` 가 퇴원 30 일 내 다른 admission 을 가질 때 True.
+**미래 outcome $Y$** (라벨; `expected_escalate`/`y_outcome`), $t_0$ 이후에만 관측,
+**구성상 $G$ 와 독립**:
 
-`expected_escalate(a)` 필드는
-$\text{stratum}(a) \in \{\text{CRITICAL}, \text{HIGH}\}$ 일 때 True 로
-설정 — 추가 휴리스틱 없이 "이 admission 은 senior review 가 필요" 의
-운영 결정 규칙을 캡처.
+$$
+Y(a) = \mathbb{1}[\,T_{\text{ICU}}(a) - T_{\text{adm}}(a) \le 24\,\text{h} \;\lor\; M(a)=1\,]
+$$
+
+즉 deterioration composite (ICU 24h 내 전입 **또는** 원내 사망). 30일 재입원과
+전체-입원 sepsis proxy 는 `outcome` 블록에 secondary 로 보관하되 primary $Y$ 에는
+포함하지 않는다. $G$ 는 decision-time 신호만, $Y$ 는 사후 outcome 만 쓰므로 이전
+σ→라벨 결정성이 제거되고 각 위험군 내에서 라벨이 실제로 변동한다.
+
+**Loss·보장 (Round 7 과 동일).** escalate iff $s(x)>\lambda$. CRC 는
+$\ell_\lambda(x,y)=\mathbb{1}\{s(x)\le\lambda \land y=1\}$ (= $\Pr[\text{not escalate}\land Y=1]$)
+를 통제, $B=1$, $n_{\min}=\lceil(1-\alpha)/\alpha\rceil$ (B=1 전제). 1000:1 cost
+matrix 는 **별도** downstream 평가 metric 일 뿐 CRC bound 에 들어가지 않는다.
+
+**Label validity.** $Y$ 가 완벽한 임상 ground truth 라고 주장하지 않는다 —
+structured EHR event 에서 유도한 **operational proxy outcome** 이다. ≈100 case,
+reviewer 2–3 명, Cohen's/Fleiss' κ 의 소규모 clinician 검증을 §7 에 계획한다.
 
 ### 3.3 Specialty 할당
 
@@ -275,8 +292,8 @@ MIMIC-IV `services` 테이블은 임상 service (CMED, NMED, MED, SURG, …)
 projection 한다.
 
 specialty 할당은 R9.3 (distribution shift) **에만** 사용되며, §3.2 의
-stratum 할당은 specialty 와 독립적이고 전적으로 기록된 outcome 에
-의해 결정된다.
+위험군 $G$ 할당은 specialty 와 독립적이고 전적으로 **decision-time 신호**
+(admission type·age·첫 6h lab) 로 결정된다. (라벨 $Y$ 는 별개의 미래 outcome.)
 
 ### 3.4 Stratum 코호트 크기 (실측)
 
