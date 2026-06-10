@@ -1,4 +1,16 @@
-# Real-EHR Validation of Stratified Conformal Risk Control for Safe Clinical LLM Escalation: A MIMIC-IV Extension of UASEF v2
+# Risk-Stratified Conformal Risk Control for Local LLM-Based Clinical Escalation on Real EHR Outcomes: A MIMIC-IV Extension of UASEF v2
+
+> ⚠️ **REVISION IN PROGRESS (2026-06-10, see [REVISION_PLAN.md](REVISION_PLAN.md)).**
+> A pre-writing audit found a **label-leakage** flaw in the original Round 9
+> design: the risk stratum σ(a) was defined from *future outcomes* (ICU-24h,
+> mortality, LOS, readmission) and the label was a deterministic function of it,
+> while the prompt fed those same future fields to the model. The pipeline has
+> been redesigned (code) to separate a **decision-time risk group G(X_t0)** from
+> an **independent future outcome Y**, with a patient-level split and an exact
+> binomial bound replacing the vacuous "2σ" upper bound. **All numeric result
+> tables below are from the *pre-fix* pipeline and are marked `재실행 대기
+> (PENDING RE-RUN)`; do not cite them until regenerated.** Claim wording in this
+> draft has been toned down accordingly.
 
 **Authors.** *[Author Name]*<sup>1</sup>, *[Co-author]*<sup>2</sup>
 <sup>1</sup>*[Affiliation 1]*; <sup>2</sup>*[Affiliation 2]*
@@ -38,12 +50,15 @@ extension on **MIMIC-IV v3.1** [Johnson et al., 2024], the
 PhysioNet-credentialed inpatient EHR corpus (n ≈ 50,000 admissions,
 2008–2019, single tertiary care hospital).
 
-A deterministic preprocessing pipeline maps each admission to a
-risk stratum based on recorded clinical outcomes — ICU admission
-within 24 h, in-hospital mortality, sepsis-suggestive lactate elevation,
-30-day readmission, and length of stay — yielding
-**274,484 CRITICAL admissions** (≫ 999 threshold), 60,544 HIGH, 128,082
-MODERATE, and 82,918 LOW. We report five complementary experiments:
+A deterministic preprocessing pipeline assigns each admission a
+**decision-time risk group** $G(X_{t_0})$ computed *only* from information
+available at the admission decision point — admission type, age, service,
+and first-6 h lab acuity — and, *separately and independently*, a
+**future adverse-outcome label** $Y$ (ICU transfer within 24 h or
+in-hospital mortality) that is observed only after the decision and is
+**never** placed in the model's input. (The original Round 9 conflated the
+two; see the revision banner and §3.2.) We report five complementary
+experiments:
 *(R9.1)* an empirical $\alpha_{\text{CRITICAL}} = 0.001$ validation on
 real outcome labels, removing Round 7 L3; *(R9.2)* a Table 4-MIMIC
 head-to-head against TECP [Xu & Lu, 2025], Conformal Language
@@ -56,9 +71,11 @@ weighted-CP [Tibshirani et al., 2019] recovery quantification;
 and *(R9.5)* a per-demographic equity audit (sex, race) on actual
 patient cohorts.
 
-Phase 1 evaluates only **structured features** (de-identified ICD-10
-codes, lab abnormality flags, vital quartiles) processed through a
-deterministic templated prompt, and runs inference on a **local
+Phase 1 evaluates only **decision-time structured features**
+(de-identified admission type, age bracket, service, and first-6 h lab
+abnormality flags) processed through a deterministic templated prompt
+— discharge ICD codes, length of stay, and outcome fields are excluded
+from the prompt to avoid label leakage — and runs inference on a **local
 LMStudio backend (`openai/gpt-oss-120b`, an open-weight 120B-parameter
 mixture-of-experts model in its native MXFP4 4-bit quantization,
 served from a Mac Studio with 96 GB unified memory)**.
