@@ -9,7 +9,8 @@
 #   [R9.2] Table 4-MIMIC head-to-head (8 method × 5 seed)
 #   [R9.3] Real-EHR distribution shift (services-table)
 #   [R9.4] Temporal shift (2008-14 cal vs 2015-19 test)
-#   [R9.5] Demographic equity audit
+#   [R9.5] Demographic subgroup safety audit
+#   [R9.6] Tabular baselines (LogReg/GBDT + trivial) — no LLM, decision-time features
 #   [Agg]  통합 보고서
 #
 # 환경변수
@@ -33,7 +34,7 @@
 # Skip 플래그 (1로 설정 시 해당 단계 생략)
 # ──────────────────────────────────────
 #   SKIP_PREPROCESS, SKIP_R9_1, SKIP_R9_2, SKIP_R9_3, SKIP_R9_4, SKIP_R9_5,
-#   SKIP_AGGREGATE
+#   SKIP_R9_6, SKIP_AGGREGATE
 #
 # 사용 예
 # ──────
@@ -73,6 +74,7 @@ SKIP_R9_2="${SKIP_R9_2:-0}"
 SKIP_R9_3="${SKIP_R9_3:-0}"
 SKIP_R9_4="${SKIP_R9_4:-0}"
 SKIP_R9_5="${SKIP_R9_5:-0}"
+SKIP_R9_6="${SKIP_R9_6:-0}"
 SKIP_AGGREGATE="${SKIP_AGGREGATE:-0}"
 
 STRICT_FAIL="${STRICT_FAIL:-0}"
@@ -200,8 +202,8 @@ run_step R9.4 "temporal_shift (anchor_year_group split)" "$SKIP_R9_4" -- \
         --backends $BACKENDS \
         --out "${ROOT}/results/round9/temporal_shift"
 
-# ── R9.5: equity audit ─────────────────────────────────────────────────────
-banner "[R9.5] Demographic equity audit"
+# ── R9.5: subgroup safety audit ────────────────────────────────────────────
+banner "[R9.5] Demographic subgroup safety audit (exploratory)"
 # PhysioNet DUA: R9.5 도 default backend 는 lmstudio (로컬).
 R9_5_BACKEND="${R9_5_BACKEND:-lmstudio}"
 run_step R9.5 "equity_audit_real (single seed, $R9_5_BACKEND)" "$SKIP_R9_5" -- \
@@ -209,6 +211,15 @@ run_step R9.5 "equity_audit_real (single seed, $R9_5_BACKEND)" "$SKIP_R9_5" -- \
         --n-cal 800 --n-test 600 \
         --seed 42 --backend "$R9_5_BACKEND" \
         --out "${ROOT}/results/round9/equity_audit_real"
+
+# ── R9.6: tabular baselines (no LLM) ───────────────────────────────────────
+banner "[R9.6] Tabular baselines (LogReg/GBDT + trivial, decision-time features)"
+# LLM 호출 없음 — scikit-learn(/xgboost) 필요. patient-level split.
+run_step R9.6 "tabular_baseline (LR/GBDT/heuristic + CRC)" "$SKIP_R9_6" -- \
+    "$PYTHON" experiments/round9_tabular_baseline.py \
+        --n-per-stratum "$N_PER_STRATUM" \
+        --seed 42 \
+        --out "${ROOT}/results/round9/tabular_baseline"
 
 # ── Aggregate ──────────────────────────────────────────────────────────────
 banner "[Agg] Aggregate Round 9 보고서"
