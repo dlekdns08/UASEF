@@ -74,14 +74,23 @@ def _collect_scores(backend: str, cases: list, verbose: bool = False):
     return scores, labels, strata
 
 
+def _subject_id(case) -> str:
+    for tok in (case.meta_info or "").split():
+        if tok.startswith("subject_id="):
+            return tok.split("=", 1)[1]
+    return "h:" + str(id(case))
+
+
 def _split_cal_test(buckets, n_cal_per: int, n_test_per: int, seed: int):
-    import random
-    rng = random.Random(seed)
+    """PATIENT-LEVEL split (REVISION_PLAN P0-3): subject_id 단위로 분할 후
+    stratum 별 cal/test 상한 적용 — 같은 환자가 양쪽에 들어가지 않음."""
+    from experiments.metrics_utils import patient_level_split
     cal, test = [], []
     for s, cs in buckets.items():
-        rng.shuffle(cs)
-        cal.extend(cs[:n_cal_per])
-        test.extend(cs[n_cal_per:n_cal_per + n_test_per])
+        c_cal, c_test = patient_level_split(cs, group_of=_subject_id,
+                                            cal_frac=0.8, seed=seed)
+        cal.extend(c_cal[:n_cal_per])
+        test.extend(c_test[:n_test_per])
     return cal, test
 
 
