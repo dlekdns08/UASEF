@@ -38,6 +38,81 @@ def wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return (round(lo, 4), round(hi, 4))
 
 
+def clopper_pearson_upper(k: int, n: int, conf: float = 0.95) -> float:
+    """
+    단측 Clopper-Pearson(exact binomial) 상한.
+
+    관측 miss k/n 에 대한 (1-α) 신뢰수준의 true miss rate 상한을 반환.
+    k=0 의 닫힌형: upper = 1 - (1-conf)**(1/n)  ('rule of three' 의 정확형).
+      예) 0/300, conf=0.95 → 0.00995.  0/2995 → ≈0.001.
+    REVISION_PLAN P0-4: 0/300 에서 'α=0.001 실증' 주장을 막기 위한 정직한 상한.
+    """
+    if n <= 0:
+        return 1.0
+    if k <= 0:
+        return 1.0 - (1.0 - conf) ** (1.0 / n)
+    if k >= n:
+        return 1.0
+    # 일반 케이스: Beta 역함수 = scipy 없으면 이분탐색으로 regularized inc. beta.
+    try:
+        from scipy.stats import beta  # type: ignore
+        return float(beta.ppf(conf, k + 1, n - k))
+    except Exception:
+        # betainc 이분탐색 (scipy 미설치 fallback)
+        lo, hi = k / n, 1.0
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            # P(X<=k | n, mid) via regularized incomplete beta 보수적 근사
+            # binomial 누적은 정규근사로 — fallback 정확도는 제한적.
+            from math import erf, sqrt
+            mean, var = n * mid, n * mid * (1 - mid)
+            z = (k + 0.5 - mean) / sqrt(var) if var > 0 else 0.0
+            cdf = 0.5 * (1 + erf(z / sqrt(2)))
+            if cdf > 1 - conf:
+                lo = mid
+            else:
+                hi = mid
+        return round(hi, 6)
+
+
+def n_for_zero_miss_upper(target_alpha: float, conf: float = 0.95) -> int:
+    """
+    0 miss 관측 시 단측 상한을 target_alpha 이하로 만드는 최소 n.
+    1 - (1-conf)**(1/n) ≤ alpha  ⇒  n ≥ ln(1-conf)/ln(1-alpha).
+      예) alpha=0.001, conf=0.95 → n ≈ 2995.
+    """
+    if not (0 < target_alpha < 1):
+        raise ValueError("target_alpha must be in (0,1)")
+    return math.ceil(math.log(1.0 - conf) / math.log(1.0 - target_alpha))
+
+
+def patient_level_split(
+    items: list,
+    group_of: Callable,
+    cal_frac: float = 0.8,
+    seed: int = 42,
+) -> tuple[list, list]:
+    """
+    환자(그룹) 단위 split — 같은 환자의 여러 admission 이 cal/test 양쪽에
+    들어가는 repeated-admission leakage 를 방지 (REVISION_PLAN P0-3).
+
+    group_of(item) -> 그룹 키(예: subject_id). 그룹을 셔플해 cal_frac 비율로
+    그룹 자체를 나눈 뒤, 그룹에 속한 모든 item 을 해당 분할로 보낸다.
+    """
+    from collections import defaultdict
+    buckets: dict = defaultdict(list)
+    for it in items:
+        buckets[group_of(it)].append(it)
+    groups = list(buckets.keys())
+    random.Random(seed).shuffle(groups)
+    cut = int(len(groups) * cal_frac)
+    cal_groups = set(groups[:cut])
+    cal, test = [], []
+    for g, its in buckets.items():
+        (cal if g in cal_groups else test).extend(its)
+    return cal, test
+
+
 def safe_rate(numer: int, denom: int) -> Optional[float]:
     """
     분모가 0이면 None 반환 (silent zero 방지).
