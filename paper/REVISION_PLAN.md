@@ -129,3 +129,42 @@
 
 주의: P0-1/P0-3/P0-6은 **결과 숫자를 바꾼다**. 재실행 전까지 결과표는 “재실행 대기”로 두고
 숫자를 창작하지 않는다.
+
+---
+
+## 실행 결과 / STATUS (2026-06-10 적용 완료)
+
+### 코드 (완료, 169 tests pass)
+- **P0-1 누수 제거**: `experiments/round9_mimic4_preprocess.py` — `risk_group` G(decision-time:
+  admission_type/age/첫6h lab) 와 `y_outcome` Y(ICU24h∨사망) 분리, σ→Y 결정성 제거.
+  labevents 를 charttime 으로 첫 6h 창 필터. 미래/사후 필드는 `_audit_postoutcome` 로 격리.
+- **P0-1 프롬프트 sanitize**: `data/loader.py` `_MIMIC4_STRUCT_TEMPLATE` — los/discharge-ICD/
+  전체-lab 제거, early_lab_flags 만. subject_id 를 meta_info 로 전파.
+- **P0-3 patient-level split**: `experiments/metrics_utils.py:patient_level_split` (그룹=subject_id).
+  ⚠️ **GLOBAL** 분할(전 stratum 합쳐 1회) — 한 환자가 여러 stratum 에 걸쳐도 누수 0 확인.
+  적용: `round9_alpha_critical_real.py`, `round9_table4_mimic.py`, `round9_equity_real.py`,
+  `round9_tabular_baseline.py`.
+- **P0-4 exact 이항 상한**: `metrics_utils.clopper_pearson_upper` / `n_for_zero_miss_upper`.
+  vacuous `mean+2σ` → pooled Clopper-Pearson 단측 95% 상한 + `compatible_with_alpha` 로 교체
+  (`round9_alpha_critical_real.py`). 검증: 0/300→0.00994, 0/2995→0.001, n_needed(0.001)=2995.
+  deprecated test `test_r9_alpha_critical_within_2sigma` → `..._exact_bound_reported` 로 교체.
+- **P0-6 tabular baseline**: `experiments/baselines/tabular.py` (LR / GBDT(xgboost→sklearn fallback)
+  + admission-type / high-risk trivial) + 드라이버 `experiments/round9_tabular_baseline.py`.
+  end-to-end smoke 통과(scikit-learn 1.9.0 설치됨).
+
+### 산문 (완료)
+- EN `paper/UASEF_Round9.md`, KO `paper/UASEF_Round9_KO.md`: 상단 개정 배너, abstract 재framing,
+  contribution 3개 압축, §3.2 G/Y/X_t0 정식정의 + feature-availability 표 + leakage-safe timeline
+  + CRC loss/B/n_min 명문화 + proxy-label caveat, α=0.001 톤다운(exact bound), prevalence-weighted
+  병기, temporal=stress-test(exchangeability), weighted-CP 실패 해석 하향, fairness→subgroup
+  safety audit(exploratory), PHI→data-residency + compliance disclaimer, reproducibility(logprob
+  추출 방식 명시) appendix, 제목/framing 변경.
+
+### ⚠️ 사용자(재실행) 필요 — TODO
+1. `python experiments/round9_mimic4_preprocess.py --mimic-dir $MIMIC4_DIR ...` 로 **JSONL 재생성**
+   (leakage-safe 스키마). 구 JSONL 폐기.
+2. R9.1 (`round9_alpha_critical_real.py`), R9.2 (`round9_table4_mimic.py`), R9.5
+   (`round9_equity_real.py`), **R9.6 신규** (`round9_tabular_baseline.py`) 재실행.
+3. 두 paper 의 `재실행 대기 (PENDING RE-RUN)` 표를 새 결과로 교체.
+4. (권장) xgboost 설치 시 GBDT baseline 자동 사용; 미설치 시 sklearn GradientBoosting fallback.
+5. (P1-3) 소규모 clinician validation(κ) 추가 — 코드 외 작업.
