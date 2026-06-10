@@ -63,23 +63,27 @@ def test_load_mimic4_with_synthetic_jsonl(tmp_path):
     sample = {
         "hadm_id": "20000001",
         "subject_id": "10000001",
-        "stratum": "CRITICAL",
-        "expected_escalate": True,
+        "stratum": "CRITICAL",            # = risk_group G (decision-time)
+        "risk_group": "CRITICAL",
+        "expected_escalate": True,        # = Y (future outcome, independent of G)
+        "y_outcome": True,
         "specialty": "cardiology",
         "admission_type": "EMERGENCY",
         "admit_year": 2015,
         "demographics": {"sex": "F", "race": "WHITE", "age_bucket": "65-79"},
         "outcome": {
             "icu_within_24h": True, "in_hospital_mortality": False,
+            "deterioration_composite": True,
             "sepsis": False, "readmit_30d": False, "transfusion_24h": False,
         },
         "structured": {
-            "icd_primary": "I50.9",
-            "icd_codes":   ["I50.9", "N18.3"],
-            "lab_flags":   ["lactate_high"],
-            "vital_quartiles": [],
-            "los_days": 4.2,
+            "early_lab_flags": ["lactate_high"],
+            "early_vital_quartiles": [],
             "service": "CMED",
+        },
+        "_audit_postoutcome": {
+            "icd_primary": "I50.9", "icd_codes": ["I50.9", "N18.3"],
+            "lab_flags_full": ["lactate_high", "creatinine_high"], "los_days": 4.2,
         },
         "note_text": None,
     }
@@ -97,8 +101,12 @@ def test_load_mimic4_with_synthetic_jsonl(tmp_path):
         assert c.specialty == "cardiology"
         assert c.expected_escalate is True
         assert "Patient summary" in c.question
-        assert "I50.9" in c.question
+        assert "subject_id=" in c.meta_info
         assert "hadm_id=" in c.meta_info
+        # leakage-safe: 미래/사후 정보가 prompt 에 들어가면 안 된다.
+        assert "I50.9" not in c.question          # discharge ICD 제외
+        assert "Length of stay" not in c.question  # los 제외
+        assert "lactate_high" in c.question        # early lab 는 decision-time 가용
 
 
 def test_load_mimic4_by_stratum_with_synthetic(tmp_path):
@@ -109,15 +117,17 @@ def test_load_mimic4_by_stratum_with_synthetic(tmp_path):
             rows.append({
                 "hadm_id": f"{stratum}_{i}",
                 "subject_id": f"S{i}",
-                "stratum": stratum,
-                "expected_escalate": stratum in ("CRITICAL", "HIGH"),
+                "stratum": stratum,            # = risk_group G (decision-time)
+                "risk_group": stratum,
+                "expected_escalate": (i % 3 == 0),  # = Y, G 와 독립적으로 변동
+                "y_outcome": (i % 3 == 0),
                 "specialty": "cardiology",
                 "admission_type": "EMERGENCY",
                 "admit_year": 2015,
                 "demographics": {"sex": "F", "race": "WHITE", "age_bucket": "65-79"},
-                "outcome": {},
-                "structured": {"icd_primary": "I50.9", "icd_codes": [], "lab_flags": [],
-                               "vital_quartiles": [], "los_days": 1.0, "service": "CMED"},
+                "outcome": {"icu_within_24h": (i % 3 == 0), "in_hospital_mortality": False},
+                "structured": {"early_lab_flags": [], "early_vital_quartiles": [],
+                               "service": "CMED"},
                 "note_text": None,
             })
     with open(p, "w") as f:
