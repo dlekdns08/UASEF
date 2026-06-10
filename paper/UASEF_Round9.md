@@ -800,10 +800,20 @@ to the headline cost ratio in advance.*
 
 Round 7 supplementary §G reported synthetic violation ratios of
 $4$–$10\times$ under specialty mismatch. The real-EHR equivalent on
-MIMIC-IV is expected to be in the same order of magnitude;
-weighted CP should bring the violation back to $\le 1.2\times$. A
-regression test enforces ≥ 30 % recovery; failure of this test
-would substantially weaken the weighted-CP recommendation.
+MIMIC-IV is expected to be in the same order of magnitude; weighted CP
+*may* reduce the violation, but in our finite-sample EHR setting we
+should be prepared for it to **underperform or worsen** when score
+overlap is high and the positive sample is small.
+
+> **Interpreting a weighted-CP failure (careful wording).** If weighted
+> CP does not recover coverage, the correct claim is **not** that
+> "Tibshirani et al. [2019]'s method is wrong." Their guarantee is
+> asymptotic in a known density ratio. The honest statement is: *in our
+> finite-sample EHR regime, the KDE-based density-ratio estimate we used
+> was unstable when source/target score overlap was high and
+> $n_{\text{pos}}$ was small, so the empirical recovery was poor.* This
+> is a property of our estimator under these conditions, reported as a
+> negative empirical finding, not a refutation of weighted CP theory.
 
 ### 6.5 R9.4 — drift expectations
 
