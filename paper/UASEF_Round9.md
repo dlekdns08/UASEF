@@ -562,18 +562,26 @@ discussion in Round 7 §8 L8. The split is performed at the **patient
 level** so that a patient's admissions do not straddle the calibration
 and test eras.
 
-### 4.5 R9.5 — Demographic equity audit
+### 4.5 R9.5 — Demographic subgroup **safety audit** (exploratory)
 
 Round 7 supplementary §I reported a per-stratum AUROC equity audit on
 synthetic-distributed cases. Round 9 R9.5 replaces it with a real
-audit on MIMIC-IV demographics (`gender`, `race`).
+**subgroup safety audit** on MIMIC-IV demographics (`gender`, `race`).
+We deliberately avoid the term "algorithmic fairness": the labels and
+admission pathways are themselves entangled with race, payer, and
+hospital-utilization patterns, so this is a *subgroup safety audit*, not
+a fairness certification.
 
 For each (group × stratum) cell with $n_{\text{pos}} \ge 30$ we report
-miss rate and the deviation from the per-stratum α. The audit is
-single-seed (seed=42), single-backend (openai), reported as
-diagnostic only. The result is *honest framing*: equity violations
-visible in MIMIC-IV reflect documented disparities in the source
-EHR cohort, not framework defects.
+miss rate and the deviation from the per-stratum α, **with Wilson 95 %
+CIs**, and we suppress point claims for small cells. The audit is
+**exploratory** — single-seed (seed=42), single-backend, diagnostic
+only. The honest reading: among sufficiently sized subgroups we did not
+detect a clear disparity, but small-cell estimates (e.g. Hispanic /
+Asian CRITICAL, where $n_{\text{pos}}$ is low) carry CIs too wide for
+definitive claims, and any disparity that is visible may reflect
+documented disparities in the source EHR cohort rather than a framework
+defect. We do **not** claim demographic equity was achieved.
 
 ---
 
