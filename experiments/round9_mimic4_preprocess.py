@@ -5,12 +5,25 @@ Round 9 — MIMIC-IV preprocessing (hosp + icu modules → MedQACase JSONL)
 입력  : $MIMIC4_DIR/{hosp,icu}/*.csv.gz   (PhysioNet credentialed)
 출력  : data/raw/mimic-iv/mimic4_cases.jsonl
 
-라벨 정의 (improvements/round9_PLAN.md §2.1):
-  CRITICAL = ICU<24h ∨ in-hospital mortality ∨ admission_type∈{EMERGENCY,URGENT}
-  HIGH     = sepsis-3 (SOFA Δ≥2 within 48h, proxy: lactate>2 + abx start)
-             ∨ 30-day readmission ∨ blood transfusion within 24h
-  MODERATE = standard inpatient (no ICU, no death)
-  LOW      = LOS<24h, discharged home
+⚠️ LEAKAGE-SAFE 재설계 (REVISION_PLAN P0-1).
+   decision-time 위험군 G(X_t0) 과 미래 outcome Y 를 **완전히 분리**한다.
+   (이전 버전은 σ 가 미래 outcome 으로 정의되고 Y=σ∈{CRIT,HIGH} 로 유도되어
+    label leakage 였음 — 더 이상 사용 금지.)
+
+  G(X_t0) = risk_group, **입원 시점에 알 수 있는 정보만** 사용 (→ stratum, per-stratum α):
+      emergency = admission_type ∈ {EMERGENCY, URGENT, DIRECT EMER., EW EMER.}
+      elderly   = anchor_age ≥ 80
+      early_*   = 입원 후 **첫 6h** 이내 charttime 의 lab abnormality (decision-time 가용)
+      CRITICAL  = emergency ∧ (early_severe ∨ elderly)
+      HIGH      = emergency ∨ early_severe
+      MODERATE  = early_any ∨ elderly
+      LOW       = 그 외
+
+  Y = expected_escalate, **미래 adverse outcome** (decision 이후에만 관측, G 와 독립):
+      Y = ICU transfer within 24h ∨ in-hospital mortality   (deterioration composite)
+
+  ⚠️ 누수 방지: los_days / discharge ICD / 전체-입원 lab / 사망 / 재입원 은
+     prompt 입력에서 제외하고 `_audit_postoutcome` 블록에만 보관(평가용).
 
 CSV.gz chunked read 로 메모리 < 4 GB. CPU bound, ~2h on M-series Mac.
 
@@ -220,57 +233,84 @@ def build_cases(mimic_dir: Path, n_per_stratum: int, seed: int, verbose: bool = 
     target_itemids = set(target_labs.keys())
     if verbose: print(f"      target lab itemids: {len(target_itemids)}")
 
-    # chunked read of labevents
+    # chunked read of labevents — charttime 으로 decision-time(첫 6h) 창 분리.
+    #   early_lab_flags_map : charttime ≤ admittime + 6h  → G(X_t0) & prompt (누수 없음)
+    #   lab_flags_map       : 전체 입원 창               → _audit 전용 (prompt 미사용)
+    EARLY_WINDOW_H = 6.0
+    early_lab_flags_map: dict[int, list[str]] = defaultdict(list)
     lab_path = hosp / "labevents.csv.gz"
     chunk_iter = pd.read_csv(
         lab_path, compression="gzip", chunksize=2_000_000,
-        usecols=["hadm_id", "itemid", "valuenum"],
+        usecols=["hadm_id", "itemid", "valuenum", "charttime"],
+        parse_dates=["charttime"],
     )
     for ci, chunk in enumerate(chunk_iter):
         chunk = chunk[chunk["itemid"].isin(target_itemids)]
         if chunk.empty:
             continue
         chunk = chunk.dropna(subset=["hadm_id", "valuenum"])
-        for hid, iid, val in zip(chunk["hadm_id"], chunk["itemid"], chunk["valuenum"]):
+        for hid, iid, val, ct in zip(chunk["hadm_id"], chunk["itemid"],
+                                     chunk["valuenum"], chunk["charttime"]):
             th, direction, fname = target_labs[int(iid)]
-            if direction == "high" and val > th:
-                if fname not in lab_flags_map[int(hid)]:
-                    lab_flags_map[int(hid)].append(fname)
-            elif direction == "low" and val < th:
-                if fname not in lab_flags_map[int(hid)]:
-                    lab_flags_map[int(hid)].append(fname)
+            abnormal = (direction == "high" and val > th) or (direction == "low" and val < th)
+            if not abnormal:
+                continue
+            hid_i = int(hid)
+            if fname not in lab_flags_map[hid_i]:
+                lab_flags_map[hid_i].append(fname)
+            # decision-time 가용 여부: charttime 이 admittime + 6h 이내인가
+            admit_t = adm_intime.get(hid)
+            if admit_t is not None and ct is not None:
+                try:
+                    dt_h = (ct - admit_t).total_seconds() / 3600.0
+                except (TypeError, ValueError):
+                    dt_h = None
+                if dt_h is not None and -1.0 <= dt_h <= EARLY_WINDOW_H:
+                    if fname not in early_lab_flags_map[hid_i]:
+                        early_lab_flags_map[hid_i].append(fname)
         if verbose and ci % 5 == 0:
             print(f"      labevents chunk {ci} processed (covered hadm_ids: {len(lab_flags_map)})")
 
-    # ── stratum classification ────────────────────────────────────────────────
-    if verbose: print(f"\n[stratum] Classifying admissions ...")
+    # ── G(X_t0) risk-group + Y outcome (LEAKAGE-SAFE) ──────────────────────────
+    # G 는 decision-time 정보만, Y 는 미래 outcome 만. 둘은 독립이며 Y 가 G 로부터
+    # 유도되지 않는다 (이전 expected_escalate = stratum∈{CRIT,HIGH} 누수 제거).
+    EARLY_SEVERE_FLAGS = {"lactate_high", "acidemia", "hyperkalemia", "leukocytosis"}
+    if verbose: print(f"\n[risk_group] Classifying admissions (decision-time only) ...")
     rows_out = []
     for _, a in adm.iterrows():
         hid = int(a["hadm_id"])
         sid = int(a["subject_id"])
         admit_type = str(a.get("admission_type", "")).upper()
+        age = age_map.get(sid)
+
+        # ── decision-time 신호 (입원 시점/첫 6h 가용) ──
+        emergency_admit = admit_type in {"EMERGENCY", "URGENT", "DIRECT EMER.", "EW EMER."}
+        elderly = (age is not None) and (float(age) >= 80)
+        early_flags = early_lab_flags_map.get(hid, [])
+        early_severe = any(f in EARLY_SEVERE_FLAGS for f in early_flags)
+        early_any = len(early_flags) > 0
+
+        # G(X_t0): risk_group (→ stratum, per-stratum α 의 조건화 변수)
+        if emergency_admit and (early_severe or elderly):
+            risk_group = "CRITICAL"
+        elif emergency_admit or early_severe:
+            risk_group = "HIGH"
+        elif early_any or elderly:
+            risk_group = "MODERATE"
+        else:
+            risk_group = "LOW"
+
+        # ── 미래 outcome (decision 이후에만 관측) ──
         died = bool(a.get("hospital_expire_flag", 0))
         los_h = float(a.get("los_hours", 0))
         in_icu24 = hid in icu_within_24h
-        emergency_admit = admit_type in {"EMERGENCY", "URGENT", "DIRECT EMER.", "EW EMER."}
-
-        # sepsis proxy: lactate_high
-        sepsis = "lactate_high" in lab_flags_map.get(hid, [])
+        sepsis = "lactate_high" in lab_flags_map.get(hid, [])   # full-window (audit only)
         has_readmit = hid in readmit_30d
 
-        if in_icu24 or died or emergency_admit:
-            stratum = "CRITICAL"
-        elif sepsis or has_readmit:
-            stratum = "HIGH"
-        elif los_h < 24:
-            stratum = "LOW"
-        else:
-            stratum = "MODERATE"
+        # Y = expected_escalate: deterioration composite (ICU<24h ∨ in-hospital death).
+        # G 와 독립 — escalation 이 사후적으로 정당했는지의 ground truth.
+        y_outcome = bool(in_icu24 or died)
 
-        # expected_escalate: stratum != LOW 인 case 중 실제 escalation 발생
-        expected_escalate = (stratum in ("CRITICAL", "HIGH"))
-
-        age = age_map.get(sid)
         sex = sex_map.get(sid, "?")
         admit_year = a["admittime"].year if isinstance(a["admittime"], (datetime,)) else None
         if admit_year is None:
@@ -283,8 +323,10 @@ def build_cases(mimic_dir: Path, n_per_stratum: int, seed: int, verbose: bool = 
         rows_out.append({
             "hadm_id":  str(hid),
             "subject_id": str(sid),
-            "stratum":  stratum,
-            "expected_escalate": expected_escalate,
+            "stratum":  risk_group,            # = G(X_t0), decision-time
+            "risk_group": risk_group,
+            "expected_escalate": y_outcome,    # = Y, future outcome (G 와 독립)
+            "y_outcome": y_outcome,
             "specialty": specialty,
             "admission_type": admit_type or "ELECTIVE",
             "admit_year": admit_year,
@@ -296,17 +338,23 @@ def build_cases(mimic_dir: Path, n_per_stratum: int, seed: int, verbose: bool = 
             "outcome": {
                 "icu_within_24h": in_icu24,
                 "in_hospital_mortality": died,
+                "deterioration_composite": y_outcome,
                 "sepsis": sepsis,
                 "readmit_30d": has_readmit,
                 "transfusion_24h": False,  # not extracted in Phase 1; reserved for extension
             },
+            # prompt 입력용 — decision-time 가용 필드만.
             "structured": {
+                "early_lab_flags": sorted(early_flags),
+                "early_vital_quartiles": [],   # reserved for first-6h chartevents extension
+                "service":  svc_code or "MED",
+            },
+            # 평가 전용 — prompt 로 절대 전달 금지 (미래/사후 정보).
+            "_audit_postoutcome": {
                 "icd_primary": icd_primary_map.get(hid, "unknown"),
                 "icd_codes":   icd_codes_map.get(hid, []),
-                "lab_flags":   sorted(lab_flags_map.get(hid, [])),
-                "vital_quartiles": [],   # reserved for chartevents extension
+                "lab_flags_full": sorted(lab_flags_map.get(hid, [])),
                 "los_days": round(los_h / 24, 2),
-                "service":  svc_code or "MED",
             },
             "note_text": None,
         })
