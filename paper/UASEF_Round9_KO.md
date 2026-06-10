@@ -317,23 +317,23 @@ free text 가 로컬 환경 외부로 송신되지 않도록, 각 MIMIC-IV admis
 로 결정적 structured prompt 로 렌더링된다:
 
 ```
-Patient summary (MIMIC-IV de-identified):
+Patient summary at admission (MIMIC-IV de-identified, decision-time only):
   Age bracket: {65-79}
   Admission type: {EMERGENCY}
-  Service: {CMED}
-  Primary ICD-10: {I50.9}
-  Active ICD-10 codes: {I50.9, N18.3, ...}
-  Lab abnormalities: {lactate_high, creatinine_high}
-  Vital quartiles: {HR_Q4, BP_Q1}
-  Length of stay (days): {4.2}
+  Service at admission: {CMED}
+  Early lab abnormalities (first 6h): {lactate_high}
+  Early vital quartiles (first 6h): {none}
 
-Should this admission be escalated to a senior clinician for review?
+At this admission decision point, should this patient be escalated to a
+senior clinician for review?
 ```
 
-이 template 은 structured row 가 주어지면 결정적이고 free text 를
-포함하지 않으며 Phase 1 에서 OpenAI / Anthropic / Gemini 로 송신되는
-*유일한* payload 다. Phase 2 (§7.4) 는 선택적으로 discharge summary
-free text 까지 확장하지만 로컬 LMStudio 백엔드로 제한된다.
+이 template 은 **decision-time 필드만** 포함한다 — discharge ICD, 전체-입원 lab,
+LOS, mortality/ICU/readmission 같은 미래·사후 정보는 leakage 방지를 위해 prompt 에서
+제외되고 라벨 $Y$ 정의에만 쓰인다(§3.2). structured row 가 주어지면 결정적이고 free
+text 를 포함하지 않으며 Phase 1 의 로컬 추론에 쓰이는 *유일한* payload 다. Phase 2
+(§7.4) 는 선택적으로 discharge summary free text 까지 확장하지만 로컬 LMStudio
+백엔드로 제한된다.
 
 ---
 
