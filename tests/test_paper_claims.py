@@ -196,26 +196,32 @@ def test_pytest_test_count_matches_paper_claim_within_band():
 # Round 9 — MIMIC-IV regression guards (skipped until results exist)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_r9_alpha_critical_within_2sigma():
-    """Round 9 R9.1: empirical α=0.001 should hold for CRITICAL stratum
-    (2σ upper bound ≤ 0.0012). Skip if not yet run."""
+def test_r9_alpha_critical_exact_bound_reported():
+    """Round 9 R9.1 (REVISION_PLAN P0-4): the run must report an EXACT
+    one-sided binomial upper bound, not the deprecated Gaussian '2σ' proxy
+    (which collapses to 0 at zero observed misses and certifies nothing).
+
+    We do NOT assert the bound is ≤ α — with limited test n that is not
+    statistically achievable and asserting it would re-introduce the
+    overclaim. We only require the exact bound to be present and that the
+    honest 'compatible_with_alpha' flag exists. Skip if not yet run."""
     p = ROOT / "results" / "round9" / "alpha_critical_real.json"
     if not p.exists():
         pytest.skip("R9.1 not yet run")
     data = json.loads(p.read_text())
-    failures = []
     for backend, agg in data.get("per_backend", {}).items():
         crit = agg.get("CRITICAL")
         if crit is None:
             continue
-        ub = crit.get("two_sigma_upper")
-        target = crit.get("alpha_target", 0.001)
-        # allow 1.2× margin (i.e. up to 0.0012 for α=0.001)
-        if ub is None or ub > target * 1.2:
-            failures.append(f"{backend}: 2σ upper {ub} > 1.2 × α {target}")
-    assert not failures, (
-        "Round 9 α=0.001 empirical guarantee violated: " + "; ".join(failures)
-    )
+        assert "two_sigma_upper" not in crit, (
+            "deprecated vacuous 2σ bound resurfaced in R9.1 output"
+        )
+        assert crit.get("exact_upper95") is not None, (
+            f"{backend}: R9.1 must report exact_upper95 (Clopper-Pearson)"
+        )
+        assert "compatible_with_alpha" in crit, (
+            f"{backend}: R9.1 must report honest compatible_with_alpha flag"
+        )
 
 
 def test_r9_table4_mimic_v2_critical_recall_floor():
