@@ -47,11 +47,10 @@ def _subject_id(case) -> str:
 
 
 def _patient_split(bucket: dict, seed: int) -> tuple[list, list]:
-    cal, test = [], []
-    for stratum, cases in bucket.items():
-        c, t = patient_level_split(cases, group_of=_subject_id, cal_frac=0.8, seed=seed)
-        cal.extend(c); test.extend(t)
-    return cal, test
+    # GLOBAL patient split: 한 subject_id 가 여러 stratum 에 걸칠 수 있으므로
+    # 전 case 를 모아 한 번만 환자 단위로 분할 (stratum 은 case 에서 복원).
+    all_cases = [c for cases in bucket.values() for c in cases]
+    return patient_level_split(all_cases, group_of=_subject_id, cal_frac=0.8, seed=seed)
 
 
 def _eval_crc_model(model, cal, test, alphas) -> dict:
