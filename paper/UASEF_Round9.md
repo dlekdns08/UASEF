@@ -158,8 +158,9 @@ empirical substrate for the validation we want:
 
 - **Real outcomes.** ICU admission, mortality, readmission, and
   service transfer events are recorded in the structured EHR with
-  timestamps; we do **not** rely on a labeling heuristic for stratum
-  assignment.
+  timestamps; we use them to define the **future outcome label** $Y$
+  (not the decision-time risk group), so $Y$ is an operational proxy
+  derived from recorded events rather than an annotation heuristic.
 - **Volume.** $\approx 4 \times 10^5$ admissions; the CRITICAL
   stratum alone produces $n \approx 2.7 \times 10^5$, which trivially
   satisfies the $n \ge 999$ threshold for $\alpha = 0.001$.
@@ -181,7 +182,42 @@ care must be taken against re-identification. We address this in
 ### 1.3 Contributions
 
 This paper makes **no algorithmic novelty claim** beyond the Round 7
-framework. Its contributions are:
+framework. We state **three primary contributions** (the remainder are
+implementation detail, deferred to the appendix):
+
+**(C1) A leakage-safe, real-EHR outcome-based risk-stratified CRC
+evaluation framework.** A deterministic MIMIC-IV v3.1 pipeline
+([experiments/round9_mimic4_preprocess.py](../experiments/round9_mimic4_preprocess.py))
+that separates a **decision-time risk group** $G(X_{t_0})$ from an
+**independent future-outcome label** $Y$ (§3.2), evaluates per-stratum
+CRC under that separation, and ships with patient-level splits and a
+one-command reproduction.
+
+**(C2) A *non-vacuous* $\alpha_{\text{CRITICAL}} = 0.001$ calibration
+with held-out safety evaluation.** The large CRITICAL stratum makes the
+$n \ge 999$ calibration requirement attainable; held-out evaluation is
+reported with an **exact one-sided binomial (Clopper–Pearson) upper
+bound** rather than a Gaussian "2σ" proxy. We are explicit that an
+observation of *zero* held-out misses does **not** statistically certify
+a true miss rate $\le 0.001$ (§6.1, §6.8); it supports only that the
+$\alpha = 0.001$ calibration is non-vacuous and the held-out evidence is
+favorable.
+
+**(C3) A stress-test suite under real EHR distribution shift** —
+cross-specialty (R9.3), temporal (R9.4), and demographic-subgroup
+(R9.5) — reported as *empirical robustness/failure analysis* rather than
+as guarantees, since CRC's finite-sample validity holds under
+exchangeability and these experiments deliberately violate it.
+
+*Supporting / implementation items (appendix):* a second-domain
+head-to-head against the Round 7 baselines **plus newly added tabular
+baselines** (Logistic Regression, gradient-boosted trees, and trivial
+admission-type / high-risk rules on the same decision-time features —
+[experiments/round9_tabular_baseline.py](../experiments/round9_tabular_baseline.py))
+to test whether an LLM is necessary at all; the PHI-egress guard; and
+the deliberately local-only headline backend.
+
+The legacy six-item contribution list (kept for diff traceability):
 
 1. **A reproducible MIMIC-IV → MedQACase preprocessing pipeline**
    ([experiments/round9_mimic4_preprocess.py](../experiments/round9_mimic4_preprocess.py))
@@ -189,19 +225,22 @@ framework. Its contributions are:
    stratum-balanced JSONL of admission cases in $\sim 2$ h on commodity
    hardware. The pipeline is deterministic (seeded chunked CSV read)
    and stratum-balanced sampling is documented in §3.
-2. **An empirical $\alpha_{\text{CRITICAL}} = 0.001$ result on real
-   ICU outcomes** (Table 1c), removing the aspirational caveat in
-   Round 7 §8 L3. To the best of our knowledge this is the first
-   empirical CRC result at the $0.001$ level on a real medical EHR.
+2. **A *non-vacuous* $\alpha_{\text{CRITICAL}} = 0.001$ calibration on
+   real ICU outcomes** (Table 1c). To our knowledge this is **among the
+   first** real-EHR CRC evaluations at the $0.001$ level; we do *not*
+   claim to have statistically validated a $\le 0.1\%$ miss rate, only
+   that the calibration is non-vacuous with favorable held-out
+   observations bounded by an exact binomial upper limit.
 3. **A second-domain head-to-head** against the same baselines as
-   Round 7 Table 4 (Table 4-MIMIC), demonstrating that the v2 cost
-   reduction is not an artifact of the MedAbstain calibration
-   distribution.
+   Round 7 Table 4 (Table 4-MIMIC) **and added tabular baselines**,
+   demonstrating that the v2 cost reduction is not an artifact of the
+   MedAbstain calibration distribution and characterizing the LLM-vs-tabular
+   trade-off.
 4. **A real cross-specialty shift experiment** (cardiology calibration,
    tested on neurology / internal-medicine / surgery) with a
    likelihood-ratio-reweighted weighted-CP recovery, replacing the
    synthetic specialty scores of Round 7 supplementary §G with
-   real EHR scores.
+   real EHR scores, reported as a stress test (not a guarantee).
 5. **Operational compliance scaffolding** — a PHI-egress environment
    guard `UASEF_BACKEND_NEVER_SEND_PHI=1` that fails closed when a
    PHI-tainted prompt would otherwise be transmitted to OpenAI,
