@@ -82,9 +82,17 @@ def main():
         sys.exit(f"[R9.5] MIMIC-IV preprocessed JSONL missing: {_MIMIC4_DEFAULT_PATH}")
 
     all_cases = _load_mimic4_jsonl(_MIMIC4_DEFAULT_PATH, n=10**9, seed=args.seed)
-    rng = random.Random(args.seed); rng.shuffle(all_cases)
-    cal = all_cases[:args.n_cal]
-    test = all_cases[args.n_cal:args.n_cal + args.n_test]
+    # PATIENT-LEVEL split (REVISION_PLAN P0-3): subject_id 단위.
+    from experiments.metrics_utils import patient_level_split
+    def _sid(c):
+        for tok in (c.meta_info or "").split():
+            if tok.startswith("subject_id="):
+                return tok.split("=", 1)[1]
+        return "h:" + str(id(c))
+    cal_all, test_all = patient_level_split(all_cases, group_of=_sid,
+                                            cal_frac=0.8, seed=args.seed)
+    cal = cal_all[:args.n_cal]
+    test = test_all[:args.n_test]
 
     cs, cl, cst, _ = _scores(args.backend, cal)
     ts, tl, tst, td = _scores(args.backend, test)
