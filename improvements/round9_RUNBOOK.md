@@ -57,7 +57,9 @@ Phase 1 의 structured proxy (`source=mimic4_struct`) 는 OpenAI 송신 허용.
 ### Step 1: Preprocessing (수동, 한 번만)
 
 ```bash
-# 입력: $MIMIC4_DIR/{hosp,icu}/*.csv.gz
+# ✏️ leakage-safe 재설계 → 구 JSONL 폐기 후 재생성 필수
+rm -f data/raw/mimic-iv/mimic4_cases.jsonl
+# 입력: $MIMIC4_DIR/{hosp,icu}/*.csv.gz  (labevents 는 charttime 으로 첫 6h 창 필터)
 # 출력: data/raw/mimic-iv/mimic4_cases.jsonl  (~50 MB)
 .venv/bin/python experiments/round9_mimic4_preprocess.py \
     --mimic-dir "$MIMIC4_DIR" \
