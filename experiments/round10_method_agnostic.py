@@ -153,13 +153,19 @@ def _make_classifier(name: str):
     if name == "xgboost":
         try:
             from xgboost import XGBClassifier
-        except ImportError:
-            print(f"  [warn] xgboost 미설치, RandomForest 로 fallback")
+        except Exception as e:
+            # ImportError + libomp dlopen 실패 (XGBoostError) 둘 다 catch
+            print(f"  [warn] xgboost 로드 실패 ({type(e).__name__}: {str(e)[:80]}...), "
+                  f"RandomForest 로 fallback. macOS 에서 'brew install libomp' 권장.")
             from sklearn.ensemble import RandomForestClassifier as RF
-            return _SklearnWrap(RF(n_estimators=100, random_state=42), "XGBoost-fallback")
+            return _SklearnWrap(
+                RF(n_estimators=100, random_state=42, n_jobs=-1),
+                "XGBoost-fallback",
+            )
+        # xgboost 3.x: use_label_encoder 제거됨. eval_metric 만 명시.
         return _SklearnWrap(
             XGBClassifier(n_estimators=100, max_depth=6, random_state=42,
-                          use_label_encoder=False, eval_metric="logloss"),
+                          eval_metric="logloss"),
             "XGBoost",
         )
     raise ValueError(f"Unknown classifier: {name}")
@@ -361,6 +367,11 @@ def main():
     print(f"[R10.4] loaded {len(cases)} cases")
     _attach_r10_features(cases, args.jsonl)
 
+    # per-classifier 중간 cache 디렉토리 — LLM 64시간 재실행 회피.
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    cache_dir = args.out.parent / "r10_4_cache"
+    cache_dir.mkdir(exist_ok=True)
+
     report = {
         "timestamp": datetime.now().isoformat(),
         "classifiers": args.classifiers,
@@ -369,18 +380,38 @@ def main():
         "per_seed": {}, "per_classifier": {},
     }
     for clf_name in args.classifiers:
-        per_seed = []
-        for seed in args.seeds:
-            r = evaluate_one_seed(clf_name, cases, seed, args.n_cal, args.n_test)
-            per_seed.append(r)
+        cache_path = cache_dir / f"{clf_name}.json"
+        if cache_path.exists():
+            print(f"\n[CACHE HIT] {clf_name} 결과 로드 ← {cache_path}")
+            cached = json.loads(cache_path.read_text())
+            per_seed = cached["per_seed"]
+        else:
+            per_seed = []
+            for seed in args.seeds:
+                try:
+                    r = evaluate_one_seed(clf_name, cases, seed,
+                                          args.n_cal, args.n_test)
+                except Exception as e:
+                    r = {"classifier": clf_name, "seed": seed,
+                         "error": f"{type(e).__name__}: {str(e)[:200]}"}
+                    print(f"  [seed {seed} error] {r['error']}", flush=True)
+                per_seed.append(r)
+                # per-seed incremental save (LLM 한 seed = ~13시간 — 보호)
+                cache_path.write_text(
+                    json.dumps({"per_seed": per_seed}, indent=2, default=str))
+            print(f"\n[CACHE SAVED] {clf_name} → {cache_path}")
         report["per_seed"][clf_name] = per_seed
-        report["per_classifier"][clf_name] = aggregate_across_seeds(per_seed)
+        try:
+            report["per_classifier"][clf_name] = aggregate_across_seeds(per_seed)
+        except Exception as e:
+            print(f"  [aggregate {clf_name} error] {e}")
+            report["per_classifier"][clf_name] = {"error": str(e)}
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     Path(str(args.out) + ".json").write_text(
         json.dumps(report, indent=2, default=str))
     write_md(report, Path(str(args.out) + ".md"))
     print(f"\n✅ {args.out}.{{json,md}}")
+    print(f"  cache: {cache_dir}/*.json (재실행 시 자동 로드)")
 
 
 if __name__ == "__main__":
