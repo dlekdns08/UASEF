@@ -36,26 +36,36 @@ corrected re-analysis with full transparency.
 
 Five findings emerge from the corrected analysis:
 
-1. **Method-agnosticism with a sharp empirical refinement.** The CRC
-   layer's formal guarantee $\mathbb{E}[\ell_s] \le \alpha_s$ is
-   classifier-independent, yet on MIMIC-IV with leakage-safe
-   decision-time features, only one of five candidate classifiers —
-   **RandomForest** — satisfies the guarantee at CRITICAL (0/1293
-   misses across 5 seeds, exact Clopper-Pearson upper $0.002$ vs
-   $\alpha=0.05$) and HIGH ($0/525$, upper $0.006$ vs $\alpha=0.10$).
-   The 120B-parameter open-weight LLM (`openai/gpt-oss-120b`) is the
-   *worst* candidate (173/1293 = 13.4% CRITICAL miss). This finding
-   inverts the deployment narrative typical in the clinical-LLM safety
-   literature.
+1. **A second leakage-class collapse, fully audited.** R10.4
+   originally reported "RandomForest is the unique CRITICAL winner
+   at 0/1293 vs $\alpha=0.05$"; a pre-camera-ready audit (§5.4.1) +
+   the R11.1 minimal-feature re-run (§5.9) **retract that finding as
+   a leakage artifact**. With the R10.7 leakage suspect features
+   (`charlson`, `specialty_baseline_rate`, `n_vital_flags`) removed
+   from the feature vector, **RandomForest's CRITICAL miss rises
+   from 0/1293 to 176/1293 (13.6%) — *worse than the 120B LLM***
+   ($173/1293 = 13.4\%$). Under truly leakage-safe minimal features
+   (`age, adm_emerg, spec_idx, n_labs`), **LogReg is the best
+   classifier** ($81/1293 = 6.3\%$ CRITICAL miss), still failing
+   $\alpha=0.05$ but substantially better than RF or XGBoost.
+   **No classifier satisfies $\alpha=0.05$ on CRITICAL under truly
+   leakage-safe features.** This is the *second* leakage-induced
+   collapse in our own pipeline (after Round 9 V1) and validates
+   §1.2's framing: strong positive findings in clinical-LLM CP
+   pipelines should be considered guilty until proven innocent.
 
-2. **A calibration-quality explanation.** We measure Expected
-   Calibration Error (ECE), Brier score, and sharpness for all five
-   classifiers on identical features. **RandomForest's ECE is ~68×
-   lower than the LLM's** ($0.0051$ vs $0.3447$); Brier is 6× lower.
-   The LLM's very low sharpness (variance $0.0157$) indicates its
-   probability estimates concentrate in a narrow band, failing to
-   discriminate cases — the direct mechanistic cause of its CRC
-   failure.
+2. **A calibration characterization, but not a causal CRC
+   explanation.** We measure Expected Calibration Error (ECE), Brier
+   score, and sharpness for all five classifiers on identical
+   features. RandomForest's ECE is ~68× lower than the LLM's
+   ($0.0051$ vs $0.3447$); Brier is 6× lower; the LLM's very low
+   sharpness ($0.0157$) indicates compressed probability estimates.
+   These calibration numbers are real, but R11.1 (point 1) shows
+   they do *not* monotonically predict CRC coverage: RandomForest's
+   ECE is lower than LogReg's, yet under leakage-safe features RF
+   miss rate (13.6%) is more than 2× LogReg's (6.3%). The
+   calibration analysis is retained as a classifier characterization
+   in §6, not as the mechanistic explanation we originally proposed.
 
 3. **The leakage discovery.** Our own Round 9 pipeline derived risk
    stratum $\sigma$ from future outcomes (ICU admission within 24 h,
@@ -562,7 +572,61 @@ the target).
 MODERATE/LOW all fail across classifiers (100% miss) — see §5.7 for
 the decision-time-feature limitation analysis.
 
-This is the central empirical result of the paper.
+This was originally presented as the central empirical result of the
+paper, until §5.4.1's post-acceptance audit.
+
+### 5.4.1 R10.4 vacuous-CRC discovery (added 2026-06-23)
+
+A pre-camera-ready audit found two problems with the §5.4 table:
+
+**Problem 1 — vacuous CRC.** Inspecting per-seed over-escalation
+rates: RandomForest, LogReg, GBDT, and XGBoost achieve
+$\text{over\_esc} = 1.000$ on CRITICAL across *all 5 seeds*; the LLM
+achieves $0.90$–$0.96$. RandomForest's "0/1293 miss" is therefore an
+*escalate-all* solution, not a discriminating classifier hitting a
+well-positioned threshold. The CRC fitted $\hat\lambda_s$ collapsed
+to a value such that every test case scores above it. A baseline
+that escalates *all* cases trivially achieves zero misses on
+CRITICAL — and trivially fails any cost-aware deployment.
+
+**Problem 2 — leakage suspect features in R10.4.** The R10.4 feature
+vector
+$$
+\big[\text{age\_idx}, \text{adm\_emerg}, \text{spec\_idx},
+\text{n\_labs}, \mathbf{\text{charlson}}, \text{n\_vital},
+\mathbf{\text{spec\_rate}}\big]
+$$
+includes `charlson_index` and `specialty_baseline_rate` — the same
+two features §7.4 (L25, L26) explicitly identifies as leakage suspect
+in R10.7. R10.4 thus contradicts its own limitation list: the
+"leakage-safe" R10.4 result uses features the paper elsewhere calls
+leakage-contaminated.
+
+**Implication.** The §5.4 RF win is a function of the leakage
+suspect features. R11.1 (§5.9) — executed on tabular classifiers
+within 30 seconds — yields the determinative verdict:
+
+| | R10.4 (with leakage suspects) | **R11.1** (minimal 4-feature, leakage-safe) |
+|---|---|---|
+| Feature set | 7 features incl. charlson, spec_rate | 4 features: age, adm_emerg, spec, n_labs |
+| LogReg CRITICAL miss | 159/1293 (12.3%) ✗ | **81/1293 (6.3%) ✗** (best) |
+| GBDT CRITICAL miss | 92/1293 (7.1%) ✗ | 150/1293 (11.6%) ✗ |
+| **RandomForest CRITICAL miss** | **0/1293 (0.0%) ✓** | **176/1293 (13.6%) ✗** |
+| XGBoost CRITICAL miss | 149/1293 (11.5%) ✗ | 150/1293 (11.6%) ✗ |
+| over_esc reporting | absent from main table | explicit (RF 0.89, LogReg 0.87) |
+| Verdict | "RF unique winner" | **RF win retracted; LogReg best; no classifier satisfies α=0.05** |
+
+The RF "0/1293 win" was an artifact of (1) the calibration-set
+quantile collapsing below all positive scores due to leakage-induced
+score-outcome correlation, and (2) the score distribution being
+manipulated by `charlson` and `specialty_baseline_rate`, both of
+which encode post-decision information. Removing those features
+breaks the artifact — RF becomes the *worst* tabular classifier on
+CRITICAL (13.6%), exceeding even the 120B LLM (13.4%).
+
+LogReg's emergence as the minimal-feature winner is an honest
+empirical finding, *not* a new win claim — LogReg still fails
+$\alpha=0.05$ (exact 95% upper $0.0749$, $50\%$ above target).
 
 ### 5.5 R10.5 — IRB physician audit (deferred to camera-ready)
 
@@ -631,6 +695,56 @@ statistic, and the Charlson uses ICD codes from the current admission
 in our implementation). This is an honest negative finding; the R11
 roadmap (§7.6) addresses it.
 
+### 5.9 R11.1 — R10.4 verification under truly leakage-safe features
+
+Triggered by §5.4.1's audit. Same 5-classifier × 5-seed structure as
+R10.4, with two changes: (1) feature vector reduced to 4 truly
+leakage-safe components (`age_bucket`, `adm_emerg`, `spec_idx`,
+`n_labs`), removing the R10.7 leakage suspects; (2) over-escalation
+rate reported explicitly. Tabular results (executed in 30 seconds on
+a single Mac Studio):
+
+| Classifier | CRITICAL miss / $n_\text{pos}$ | Exact 95% upper | over_esc rate | $\alpha=0.05$? |
+|---|---|---|---|:---:|
+| **LogReg** | **81 / 1293 (6.3%)** | **0.0749** | 0.870 | ✗ (best) |
+| GBDT | 150 / 1293 (11.6%) | 0.1317 | 0.918 | ✗ |
+| RandomForest | 176 / 1293 (13.6%) | 0.1528 | 0.890 | ✗ |
+| XGBoost | 150 / 1293 (11.6%) | 0.1317 | 0.918 | ✗ |
+
+HIGH stratum (all classifiers): miss rates $32.6$–$53.0\%$, all
+failing $\alpha=0.10$. MODERATE/LOW: 100% miss as in R10 (§5.7
+limit).
+
+**Three immediate conclusions:**
+
+1. **R10.4 RF win retracted.** RandomForest's 0/1293 from R10.4 was
+   a leakage-induced calibration artifact. With leakage suspects
+   removed, RF produces 13.6% CRITICAL miss — worse than LogReg
+   (6.3%), GBDT/XGBoost (11.6%), and even the 120B LLM (13.4% from
+   R10.1).
+2. **LogReg is the unexpected winner**, not because it satisfies
+   $\alpha$ (it doesn't), but because it is the most robust under
+   leakage scrub — its CRITICAL miss *improves* from 12.3% (R10.4
+   with leakage) to 6.3% (R11.1 without). The leakage features were
+   *hurting* LogReg while *helping* RF — a pattern explained by
+   tree-based methods exploiting leakage signal more aggressively
+   than linear models.
+3. **No classifier satisfies $\alpha=0.05$ on CRITICAL under
+   genuinely leakage-safe features.** The honest empirical finding
+   is that 4 admission-time features are insufficient to provide
+   formal CRC guarantees at any nontrivial $\alpha$; this is a
+   *feature-availability* limit, not a framework or classifier limit.
+
+LLM R11.1 (gpt_oss_120b under minimal features) is deferred — a 64h
+wallclock investment — but the tabular result alone is sufficient to
+retract §5.4 and reframe the paper.
+
+Infrastructure:
+- [experiments/round11_method_agnostic_minimal.py](../experiments/round11_method_agnostic_minimal.py)
+- [run_round11.sh](../run_round11.sh)
+- [improvements/round11_PLAN.md](../improvements/round11_PLAN.md)
+- [results/round11/r11_1_smoke_tabular.{json,md}](../results/round11/)
+
 ### 5.8 MOD/LOW coverage failure across all settings
 
 Every R10 setting (5 classifiers × 5 seeds × multiple experiments)
@@ -646,12 +760,24 @@ clinical features.
 
 ---
 
-## 6. Why RandomForest Wins: Calibration Analysis
+## 6. Calibration Analysis: an Interpretation Reversed by R11.1
 
-The R10.4 headline finding raises a mechanistic question: the formal
-CRC guarantee is classifier-independent, yet only one of five
-candidates satisfies it. The answer lies in *probability calibration
-quality*.
+> **Note (revised 2026-06-23):** This section was originally written
+> to explain *why RandomForest wins* (R10.4). After the R11.1
+> finding that RF's win was a leakage artifact (§5.4.1, §5.9), the
+> calibration analysis is retained as a *characterization of the
+> R10.4 classifiers* but not as a causal explanation of CRC
+> coverage. Under truly leakage-safe minimal features (R11.1), RF
+> is the *worst* tabular classifier (13.6% miss), so its low ECE
+> in this analysis is descriptive, not predictive of CRC behavior.
+> We discuss the implications at the end of the section.
+
+The original R10.4 headline raised a mechanistic question: the
+formal CRC guarantee is classifier-independent, yet only one of
+five candidates satisfied it. We attempted a calibration-based
+explanation. The R11.1 result (§5.9) showed the premise was false —
+the "win" was a leakage artifact — but the calibration numbers
+themselves are real and worth reporting as classifier characterization.
 
 We computed Expected Calibration Error (10-bin), Brier score, and
 sharpness (variance of predicted probabilities) for all 5 classifiers
@@ -699,28 +825,60 @@ miscalibration unless additional calibration training is applied.*
 The Round 11 roadmap includes post-hoc LLM calibration (Platt
 scaling, isotonic regression) as a planned experiment.
 
+### 6.5 What R11.1 implies for the calibration story
+
+The R11.1 result (§5.9) shows that classifier-level calibration
+quality (low ECE) does *not* monotonically predict CRC coverage
+under truly leakage-safe features:
+
+- **RandomForest** has the lowest ECE among non-LLM classifiers
+  (0.0051) yet the *worst* CRITICAL miss rate (13.6%) on R11.1's
+  minimal features.
+- **LogReg** has comparable ECE (0.0072) yet the *best* CRITICAL
+  miss rate (6.3%).
+- The ECE difference between RF (0.0051) and LogReg (0.0072) is
+  within measurement noise, while the CRITICAL miss differs by
+  more than a factor of 2.
+
+Re-interpretation: the calibration table characterizes how well
+each classifier's probability estimates align with empirical rates
+*on the in-sample distribution*; it does not directly predict how
+the CRC quantile $\hat\lambda_s$ generalizes to a held-out test
+distribution under the constrained-feature regime where the score
+function carries genuine epistemic uncertainty about positives.
+The LLM's 68× ECE gap remains a real and reportable property —
+it would be hard to argue for an LLM safety gate at this
+calibration level — but it does not translate into a CRC win.
+
 ---
 
 ## 7. Discussion and Limitations
 
-### 7.1 Reframing the contribution
+### 7.1 Reframing the contribution (revised after R11.1)
 
 This paper began as a confident demonstration of v2's superiority on
-real EHR outcomes. It became a frank account of how a strong-looking
-demonstration was contaminated by leakage, how the corrected
-demonstration weakened many quantitative claims, and how a sklearn
-1-second baseline outperforms a 120B-parameter LLM at the central
-empirical task. We propose the contribution be read as:
+real EHR outcomes. It became a frank account of how *two* strong-
+looking demonstrations were contaminated by leakage: first the Round
+9 V1 outcome-in-prompt leakage (§4.5, §4.6), and then the R10.4
+"RandomForest unique winner" claim that R11.1 (§5.9) shows was a
+function of leakage suspect features (`charlson`,
+`specialty_baseline_rate`). After R11.1, the honest contribution is:
 
-> *Per-stratum risk control on real EHR outcomes is achievable with
-> commodity tabular classifiers under a leakage-safe protocol. The
-> LLM is not the contribution; the layer is. RandomForest is the
-> winning instantiation on MIMIC-IV decision-time features.*
+> *Per-stratum CRC is a structurally honest reporting framework that
+> made two of our own positive findings auditable enough to be
+> retracted. The empirical reality on MIMIC-IV with truly leakage-
+> safe admission-time features is that **no classifier we tested
+> satisfies $\alpha = 0.05$ on CRITICAL** — LogReg comes closest at
+> 6.3% miss (R11.1), with RF, GBDT, XGBoost at 11.6%–13.6%, and the
+> 120B LLM at 13.4%. The framework's value is the audit discipline,
+> not any specific win.*
 
-This framing is *more* defensible scientifically than the strong-LLM
-framing would have been. It is also more deployable in practice: a
-hospital running RandomForest + CRC on $\$10$k commodity hardware
-achieves the same guarantee that the LLM-based v2 fails to provide.
+This framing is *less* immediately impressive than the original
+"RF wins over LLM" claim, and *more* defensible scientifically.
+It also yields a deployable conclusion: hospitals should not expect
+formal CRC guarantees from any current classifier under 4-feature
+admission-time inputs, and should plan for additional feature
+engineering or post-hoc calibration before any clinical deployment.
 
 ### 7.2 What we did *not* find
 
@@ -772,6 +930,13 @@ survive Round 10:
   fundamental data-availability limit, not a framework defect.
 - **L28 — LLM calibration not yet attempted.** Post-hoc calibration
   (Platt, isotonic) deferred to R11.
+- **L29 — R10.4 vacuous-CRC artifact** (§5.4.1). All four tabular
+  classifiers achieve over_esc = 1.0 on CRITICAL; RF "0/1293 win"
+  is an escalate-all solution, not a discriminating classifier.
+  R11.1 (§5.9) is the deferred fix.
+- **L30 — R10.4 self-inconsistent feature set.** R10.4 used
+  `charlson` and `specialty_baseline_rate` while §7.4 L25-L26
+  identify them as leakage suspects. R11.1 removes them.
 
 ### 7.5 Threats to validity
 
@@ -790,10 +955,13 @@ camera-ready physician audit will quantify this; we have shipped the
 infrastructure (§5.5) so the result, when produced, is auditable
 end-to-end.
 
-**Conclusion validity.** RandomForest's win is consistent across all
-5 seeds (CRITICAL and HIGH) and corroborated by the calibration
-analysis. We do not see a path by which this finding could be a
-statistical fluke at $n_\text{pos} = 1293$ pooled.
+**Conclusion validity.** The RandomForest "win" from R10.4, while
+consistent across 5 seeds and corroborated by the calibration
+analysis at the time, was retracted by R11.1 (§5.9) as a leakage
+artifact. The R11.1 LogReg result (81/1293 = 6.3% CRITICAL miss) is
+likewise consistent across 5 seeds and corroborated by per-classifier
+behavioral analysis; it is reported as the *current honest baseline*
+under genuinely leakage-safe minimal features, not as a new "win".
 
 ### 7.6 Round 11 roadmap
 
@@ -819,14 +987,26 @@ discovered label leakage in our own intermediate pipeline; the
 corrected re-analysis substantially changed several intermediate
 findings and produced our central empirical result:
 
-**On leakage-safe MIMIC-IV decision-time features, a 1-second
-sklearn RandomForest paired with the same Stratified CRC layer
-satisfies $\alpha = 0.05$ CRITICAL coverage (0 misses across 1293
-test positives, exact 95% upper $0.002$) and $\alpha = 0.10$ HIGH
-coverage (0 / 525, upper $0.006$). The 120B-parameter LLM does not —
-it produces 13.4% CRITICAL miss and 57% HIGH miss.** A calibration
-analysis shows the LLM's Expected Calibration Error is 68× higher
-than RandomForest's, explaining the gap mechanistically. The Round 7
+**Our central empirical finding is, after R11.1, a negative result
+made honest by audit.** R10.4 originally reported RandomForest as
+the unique CRITICAL winner at $0/1293$ vs $\alpha=0.05$. The R11.1
+re-run with truly leakage-safe minimal features
+(`age, adm_emerg, spec_idx, n_labs` — removing the Charlson and
+specialty_baseline_rate suspects that §7.4 L25-L26 had separately
+flagged) overturns it: **RF's CRITICAL miss rises from 0/1293 to
+176/1293 (13.6%), worse than the 120B LLM**. The best classifier
+under genuine leakage-safe features is **LogReg at 6.3% CRITICAL
+miss**, still failing $\alpha=0.05$ by 50%. No classifier
+satisfies $\alpha=0.05$ on CRITICAL under 4-feature admission-time
+inputs — this is a feature-availability limit, not a framework or
+classifier limit.
+
+This is the **second** time in the same 5-round investigation that
+a strong positive finding collapsed under deeper audit (after the
+Round 9 V1 leakage discovery). The pattern — *strong-looking
+intermediate results in clinical-LLM CP pipelines should be
+considered guilty until proven innocent* — emerges as our central
+methodological contribution. The Round 7
 v2 framework's $10\times$ CRITICAL recall advantage over single-$\alpha$
 baselines (TECP, Conformal LM, Semantic Entropy) replicates robustly
 on the corrected MIMIC-IV evaluation. Kernel Mean Matching weighted
@@ -834,13 +1014,17 @@ CP is the recommended distribution-shift mitigation. The
 "ablation-dominates-v2-on-cost" finding is a corner case: v2 wins
 81 of 81 alternative cost matrices.
 
-The framework's value is in the CRC *layer*, not in any specific
-underlying classifier. The choice between a frontier LLM and a
-1-second RandomForest is, on this evidence, a choice in favor of
-RandomForest — cheaper to deploy, simpler to audit, statistically
-superior. We propose this finding as a corrective to a clinical-LLM
-safety literature that may have over-credited the LLM and
-under-credited the calibration layer.
+The framework's value, after R11.1, is in the **CRC *layer* + the
+*audit discipline***, not in any specific underlying classifier
+and not in any specific empirical win. We initially proposed
+"RandomForest wins over LLM" as a corrective to a clinical-LLM
+safety literature that had over-credited large models; the R11.1
+audit shows that proposal was itself an artifact, and the more
+defensible corrective is: *no classifier we tested provides formal
+CRC guarantees under truly leakage-safe admission-time features.*
+The 4-stratum framework's value is the layer's ability to expose
+this — to make the gap visible and auditable rather than concealed
+under spuriously low miss rates.
 
 All artifacts are reproducible on commodity Apple Silicon at $\$0$
 external API cost and zero PHI egress.
