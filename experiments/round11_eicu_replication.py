@@ -137,25 +137,24 @@ def evaluate_one(classifier_name: str, cases, seed, n_cal, n_test,
     cal, test = patient_level_split(cases, group_of=_subject_id,
                                       cal_frac=0.8, seed=seed)
     rng = random.Random(seed); rng.shuffle(cal); rng.shuffle(test)
-    cal = cal[:n_cal]; test = test[:n_test]
+    # 0 또는 음수면 split 전체 사용 (small cohort 대응)
+    if n_cal and n_cal > 0:  cal = cal[:n_cal]
+    if n_test and n_test > 0: test = test[:n_test]
+
+    def _case_to_dict(c):
+        return {k: getattr(c, k) for k in EHRCaseLite.__slots__}
 
     if use_llm:
-        # cast to dict-likes for _llm_scores compatibility — wrap question/meta
         cal_scores = _llm_scores(cal); test_scores = _llm_scores(test)
     else:
         clf = _make_classifier(classifier_name)
-        X_cal = [fv_fn(c.__dict__ if isinstance(c, EHRCaseLite) else c)
-                 if isinstance(c, EHRCaseLite) else fv_fn(c) for c in cal]
-        # EHRCaseLite 는 dict-like __dict__ 안 가짐 — slots. fallback:
-        X_cal = [fv_fn({**{k: getattr(c, k) for k in EHRCaseLite.__slots__}})
-                 for c in cal]
+        X_cal = [fv_fn(_case_to_dict(c)) for c in cal]
         y_cal = [bool(c.expected_escalate) for c in cal]
         if not clf.fit(X_cal, y_cal):
             return {"classifier": classifier_name, "seed": seed,
                     "error": "fit failed"}
         cal_scores = [clf.score(x) for x in X_cal]
-        X_test = [fv_fn({**{k: getattr(c, k) for k in EHRCaseLite.__slots__}})
-                  for c in test]
+        X_test = [fv_fn(_case_to_dict(c)) for c in test]
         test_scores = [clf.score(x) for x in X_test]
 
     cal_labels = [bool(c.expected_escalate) for c in cal]
