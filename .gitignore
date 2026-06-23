@@ -49,6 +49,17 @@ data/raw/mimic4_*.jsonl
 **/edstays.csv*
 **/triage.csv*
 
+# eICU-CRD v2.0 (PhysioNet credentialed; DUA — 절대 커밋 금지)
+# Round 11 추가: R11.3 cross-center validation
+data/raw/eicu-crd/
+data/raw/eicu_*.jsonl
+**/eicu-crd-*/
+**/patient.csv*
+**/apachePatientResult.csv*
+**/lab.csv*
+**/admissionDx.csv*
+**/pasthistory.csv*
+
 # IDE
 .vscode/
 .idea/
