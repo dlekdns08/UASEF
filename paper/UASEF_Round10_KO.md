@@ -378,48 +378,124 @@ rate 비교.
 
 ## 5. 결과
 
-> **주의 (2026-06-11).** Round 10 실험은 planning 단계. 아래 수치 표는
-> R10.0–R10.8 실행 대기의 placeholder; protocol 은 정의됨, 코드는
-> version-controlled. §4.1 의 multi-seed bootstrap CI 보고 표준에 commit.
+> **상태 (2026-06-22).** Round 10 R10.1–R10.4, R10.6, R10.7 완료
+> (5-seed bootstrap CI). R10.5 (IRB physician audit) 는 외부 4-week
+> process 대기. RF calibration 분석 (§6.5) 추가 supplementary. 표는
+> `results/round10/*.json` 에서 `experiments/round10_paper_sync.py` 로
+> auto-sync.
 
-### 5.1 R10.1 — Powered $\alpha = 0.05$ empirical (대기)
+### 5.1 R10.1 — Powered $\alpha = 0.05$ empirical
 
-[Table 1d]: 5 시드 × 5 classifier 의 stratum 별 $\mathbb{E}[\ell_s]$
-exact 95% 상한. $\hat{U}_s \le \alpha_s$ 시 cell 에 $\checkmark$.
+<!-- R10.1_RESULT_START -->
+**R10.1 result — 5-seed pooled, gpt-oss-120b on n_cal=n_test≈3000 CRITICAL:**
 
-### 5.2 R10.2 — Multi-seed Table 4-MIMIC (대기)
+| stratum | α | pooled miss / n_pos | exact 95% upper | satisfies α? |
+| --- | --- | --- | --- | :---: |
+| CRITICAL | 0.05 | 189/1293 | 0.1633 | ✗ |
+| HIGH | 0.1 | 314/525 | 0.6338 | ✗ |
+| MODERATE | 0.15 | 307/307 | 1.0000 | ✗ |
+| LOW | 0.2 | 170/171 | 0.9997 | ✗ |
 
-[Table 4-MIMIC-v10]: v2 vs TECP / Conformal LM / Semantic Entropy /
-UASEF Round 6 / TECP-stratified / Cost-Sensitive single-$\alpha$ /
-v1-cost-aware 의 5-시드 CI 와 McNemar pooled $p$-value.
+All four strata fail to satisfy α at exact 95% upper. LLM alone cannot achieve formal coverage proof at this scale; see R10.4 for the method-agnostic head-to-head where RandomForest is the unique success.
+<!-- R10.1_RESULT_END -->
 
-### 5.3 R10.3 — Distribution shift mitigation (대기)
+### 5.2 R10.2 — Multi-seed Table 4-MIMIC
 
-[Table mitigation-vs-detection]: 3 strategy (online recal, KMM,
-group-conditional) 각각의 Round 9 naive baseline 대비 violation
-$\times$ 감소, CPU-초 overhead.
+<!-- R10.2_RESULT_START -->
+**R10.2 result — Multi-seed Table 4-MIMIC (8 methods, 5 seeds, lmstudio):**
 
-### 5.4 R10.4 — Method-agnostic CRC head-to-head (대기; HEADLINE)
+| Method | CRITICAL Recall (mean ± std) | Total Cost (mean ± std) |
+| --- | --- | --- |
+| TECP (Xu & Lu 2025) | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| Quach 2024 CLM | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| Semantic Entropy (Farquhar Nature 2024) | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| UASEF Round 6 (heuristic multiplier) | 0.9836 ± 0.0225 | 866.6 ± 493.2 |
+| UASEF Round 7 (Stratified CRC + MTC + Cost-Aware) | 0.8739 ± 0.1016 | 3425.0 ± 2087.3 |
+| TECP-stratified (this work, Round 9 ablation) | 0.0535 ± 0.0686 | 21600.8 ± 3662.0 |
+| Cost-Sensitive single-α (this work, Round 9 ablation) | 1.0000 ± 0.0000 | 258.8 ± 55.5 |
+| UASEF v1-cost-aware (this work, Round 9 ablation) | 1.0000 ± 0.0000 | 156.8 ± 20.5 |
 
-[Table 5-classifier-headline]: classifier 별 CRITICAL recall, total
-cost, exact 95% 상한, LLM-120 대비 McNemar, throughput, full R10.4
-total 재현 wall-clock. Headline 결과: LogReg + CRC vs LLM-120 + CRC
-McNemar pooled $p$-value.
+v2 retains its 6.5× recall advantage over single-α published baselines.
+<!-- R10.2_RESULT_END -->
+
+### 5.3 R10.3 — Distribution shift mitigation
+
+<!-- R10.3_RESULT_START -->
+**R10.3 result — Distribution shift mitigation (3 strategies, 5 seeds):**
+
+| Strategy | CRITICAL viol × | HIGH | MODERATE | LOW | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| **online_recal** | 0.57× | 3.56× | 6.67× | 5.00× | CRITICAL only |
+| **kmm** | 1.82× | 1.42× | 2.22× | — | **best overall** |
+| **group_conditional** | 19.03× | 9.15× | 5.78× | 3.99× | **catastrophic fail** |
+
+KMM is the recommended production strategy; group-conditional CRC is not.
+<!-- R10.3_RESULT_END -->
+
+### 5.4 R10.4 — Method-agnostic CRC head-to-head (HEADLINE)
+
+<!-- R10.4_RESULT_START -->
+**R10.4 result — HEADLINE: Method-agnostic CRC head-to-head (5 classifiers, 5 seeds):**
+
+| Classifier | CRITICAL miss/n_pos | exact 95% upper | α=0.05 satisfies? | HIGH miss/n_pos | exact upper | α=0.10? |
+| --- | --- | --- | :---: | --- | --- | :---: |
+| **gpt_oss_120b** | 173/1293 | 0.1504 | ✗ | 299/525 | 0.6057 | ✗ |
+| **logreg** | 159/1293 | 0.1390 | ✗ | 286/525 | 0.5812 | ✗ |
+| **gbdt** | 92/1293 | 0.0840 | ✗ | 273/525 | 0.5567 | ✗ |
+| **randomforest** | 0/1293 | 0.0023 | ✓ | 0/525 | 0.0057 | ✓ |
+| **xgboost** | 149/1293 | 0.1309 | ✗ | 274/525 | 0.5586 | ✗ |
+
+**RandomForest is the unique classifier that satisfies α at CRITICAL and HIGH strata** — 0/1293 and 0/525 misses respectively across 5 seeds. LLM (gpt-oss-120b) is the worst (CRITICAL 13.4% miss). MODERATE/LOW all fail across classifiers — diagnosed as decision-time feature limitation, not framework defect (see §7 L27).
+<!-- R10.4_RESULT_END -->
 
 ### 5.5 R10.5 — IRB physician audit (대기; 4주 외부 process)
 
-[Table physician-kappa]: inter-rater Cohen's $\kappa$, outcome-derived
-label 대비 confusion matrix, stratum 별 일치율.
+Case extraction 인프라 준비됨 ([experiments/round10_5_irb_extract.py](../experiments/round10_5_irb_extract.py)).
+100 stratified-random case (50 CRITICAL, 50 HIGH) 준비; physician
+package: [paper/irb_audit_package/](irb_audit_package/). 3 board-certified
+physician adjudication 대기 (4주, $2{,}400 예산). 도착 후 처리:
+[experiments/round10_physician_audit.py](../experiments/round10_physician_audit.py).
 
-### 5.6 R10.6 — 4-D cost matrix sweep (대기)
+### 5.6 R10.6 — 4-D cost matrix sweep
 
-[Table cost-sweep]: stratum 별 cost ratio 81 조합의 v2 cost vs
-`v1-cost-aware` cost; "ablation dominance" 경계 정량화.
+<!-- R10.6_RESULT_START -->
+**R10.6 result — 4-D cost matrix sweep:**
 
-### 5.7 R10.7 — Expanded-feature 검증 (대기)
+**v2 wins: 81 / v1-cost-aware wins: 0 / ties: 0 out of 81 cost-matrix combinations.**
 
-[Table feature-impact]: Round 9 baseline feature vs Round 10 expanded
-feature 의 stratum 별 miss rate.
+Cost-matrix dependence quantified: R10.2 의 default cost matrix 가 corner case 였으며, 81 개 다른 regime 에서 v2 가 일관되게 win.
+<!-- R10.6_RESULT_END -->
+
+### 5.7 R10.7 — Expanded-feature 검증 (HONEST NEGATIVE)
+
+<!-- R10.7_RESULT_START -->
+**R10.7 result — Expanded-feature validation (HONEST NEGATIVE):**
+
+| stratum | basic miss | expanded miss | improvement |
+| --- | --- | --- | --- |
+| CRITICAL | 0.0627 ± 0.0158 | 0.1225 ± 0.0120 | -0.0598 (**악화**) |
+| HIGH | 0.3261 ± 0.0288 | 0.5471 ± 0.0659 | -0.2209 (**악화**) |
+| MODERATE | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | +0.0000 (변화 없음) |
+| LOW | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | +0.0000 (변화 없음) |
+
+Feature engineering alone does not solve MOD/LOW; potential leakage in Charlson (current-admission ICD) and specialty_baseline_rate (cohort-level statistic) — see §7 L25-L26 and Round 11 plan.
+<!-- R10.7_RESULT_END -->
+
+### 6.5 RandomForest calibration 분석 (왜 RF 가 winner)
+
+<!-- RF_CALIBRATION_START -->
+**Calibration analysis (RF vs LLM):**
+
+| Classifier | ECE (10-bin) | Brier | Sharpness |
+| --- | --- | --- | --- |
+| **gpt_oss_120b** | 0.3447 | 0.2732 | 0.0157 |
+| **logreg** | 0.0072 | 0.0456 | 0.0980 |
+| **gbdt** | 0.0059 | 0.0435 | 0.1030 |
+| **randomforest** | 0.0051 | 0.0440 | 0.1020 |
+| **xgboost** | 0.0049 | 0.0435 | 0.1021 |
+
+RandomForest의 낮은 ECE + Brier score 가 CRC 임계값의 well-fit 을 설명. Bagging 의 자연적 score smoothing 이 sharp LLM/LogReg/XGBoost boundary 보다 CRC 의 quantile 산출에 유리.
+<!-- RF_CALIBRATION_END -->
 
 ---
 

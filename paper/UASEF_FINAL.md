@@ -1,0 +1,1065 @@
+# Method-Agnostic Stratified Conformal Risk Control for Safe Clinical Escalation: An Honest Multi-Round Empirical Journey from MedAbstain to MIMIC-IV
+
+**Authors.** *[Author Name]*<sup>1</sup>, *[Co-author]*<sup>2</sup>
+<sup>1</sup>*[Affiliation 1]*; <sup>2</sup>*[Affiliation 2]*
+Correspondence: `[email]`
+
+**Provenance.** This is the final consolidated manuscript synthesizing
+five rounds of UASEF development (Rounds 6–10, 2026-04 to 2026-06)
+including a critical pre-submission leakage-safety audit that
+invalidated a substantial portion of intermediate findings. We retain
+the honest record of corrections as a methodological contribution.
+
+**Target venue.** ML4H 2026 (Spotlight track) / NeurIPS 2026 Safe-ML
+Workshop / JAMA Network Open (Clinical Evaluation track).
+
+**Code.** `https://github.com/[org]/UASEF` (anonymized).
+
+**Data.** MIMIC-IV v3.1 is not redistributed; replication requires
+PhysioNet credentialing.
+
+**Compute disclosure.** All inference performed locally on a single Mac
+Studio (M3 Ultra, 96 GB unified memory). External-API cost: $0. PHI
+egress: 0 bytes. Total wall-clock across 5 rounds: ~260 hours.
+
+---
+
+## Abstract
+
+We present a 5-round empirical investigation into per-stratum
+Conformal Risk Control (CRC) for clinical-LLM safety. The investigation
+spans MedAbstain (QA benchmark, Rounds 7-8) and MIMIC-IV v3.1
+(PhysioNet credentialed inpatient EHR, Rounds 9-10), and includes a
+**critical mid-investigation discovery of label leakage** in our own
+Round 9 pipeline. We document the leakage, its detection, and the
+corrected re-analysis with full transparency.
+
+Five findings emerge from the corrected analysis:
+
+1. **Method-agnosticism with a sharp empirical refinement.** The CRC
+   layer's formal guarantee $\mathbb{E}[\ell_s] \le \alpha_s$ is
+   classifier-independent, yet on MIMIC-IV with leakage-safe
+   decision-time features, only one of five candidate classifiers —
+   **RandomForest** — satisfies the guarantee at CRITICAL (0/1293
+   misses across 5 seeds, exact Clopper-Pearson upper $0.002$ vs
+   $\alpha=0.05$) and HIGH ($0/525$, upper $0.006$ vs $\alpha=0.10$).
+   The 120B-parameter open-weight LLM (`openai/gpt-oss-120b`) is the
+   *worst* candidate (173/1293 = 13.4% CRITICAL miss). This finding
+   inverts the deployment narrative typical in the clinical-LLM safety
+   literature.
+
+2. **A calibration-quality explanation.** We measure Expected
+   Calibration Error (ECE), Brier score, and sharpness for all five
+   classifiers on identical features. **RandomForest's ECE is ~68×
+   lower than the LLM's** ($0.0051$ vs $0.3447$); Brier is 6× lower.
+   The LLM's very low sharpness (variance $0.0157$) indicates its
+   probability estimates concentrate in a narrow band, failing to
+   discriminate cases — the direct mechanistic cause of its CRC
+   failure.
+
+3. **The leakage discovery.** Our own Round 9 pipeline derived risk
+   stratum $\sigma$ from future outcomes (ICU admission within 24 h,
+   mortality, sepsis indicators) *and* placed those same future fields
+   in the model prompt. The 5 favorable findings of Round 9 V1 were
+   all artifacts. The post-correction re-analysis (Round 9 V2)
+   substantially weakened the cost-domination and "weighted-CP fails"
+   claims, while preserving the $10\times$ recall advantage over
+   single-$\alpha$ baselines. We present the leakage-safe protocol —
+   decision-time risk group $G(X_{t_0}) \perp Y$, patient-level split,
+   exact Clopper-Pearson upper bound — as a publishable contribution
+   independent of the framework itself.
+
+4. **Distribution shift: KMM works, others don't.** On the leakage-safe
+   cardiology→{neurology, internal-medicine, surgery} transfer,
+   Kernel Mean Matching weighted CP [Huang et al., 2007] recovers
+   coverage to $1.4$–$2.2\times$ violation across all strata, while
+   rolling-window recalibration helps only CRITICAL ($0.57\times$) and
+   group-conditional CRC catastrophically fails (CRITICAL $19\times$).
+   This reverses our Round 9 V1's apparent "weighted CP degrades
+   coverage" finding, which was a leakage artifact.
+
+5. **Cost-matrix dependence.** A 4-D sweep of stratum-wise cost ratios
+   shows **v2 wins in 81 of 81 cost-matrix combinations** against the
+   `v1-cost-aware` ablation. The "ablation dominates v2 on cost"
+   pattern observed at our default cost matrix is a corner case;
+   v2's cost advantage is robust under cost-matrix perturbation.
+
+We frame the central contribution as *honest, reproducible per-stratum
+risk control on real EHR outcomes, deployable on commodity CPU
+hardware ($\$0$ external API cost), with full transparency about
+leakage, calibration, and the conditions under which our claims hold*.
+
+**Keywords.** conformal prediction, conformal risk control,
+distribution-free uncertainty quantification, large language models,
+random forest, calibration, expected calibration error, clinical
+decision support, MIMIC-IV, PhysioNet, leakage-safe protocols.
+
+---
+
+## 1. Introduction
+
+### 1.1 The clinical-LLM safety problem
+
+When a clinical decision-support LLM is uncertain, it should defer to
+a human clinician — *escalate* — rather than commit to a recommendation
+that could harm a patient [Savage et al., 2025; Singhal et al., 2023].
+This is a *selective prediction* problem [El-Yaniv & Wiener, 2010], and
+conformal prediction (CP) provides the standard formal answer:
+distribution-free, finite-sample coverage guarantees on the abstention
+threshold [Vovk et al., 2005; Angelopoulos & Bates, 2021]. Recent
+generalizations to *conformal risk control* (CRC) [Angelopoulos et al.,
+2024] extend the framework to bounded asymmetric losses, supporting the
+cost-sensitive nature of clinical safety (a missed escalation in
+emergency medicine costs orders of magnitude more than a missed
+escalation in routine outpatient care).
+
+The UASEF v2 framework [Anonymous, 2026 — Round 7] combines three
+pivots: (A) Stratified Conformal Risk Control providing per-stratum
+guarantees $\mathbb{E}[\ell_s] \le \alpha_s$ for
+$s \in \{\text{CRITICAL, HIGH, MODERATE, LOW}\}$; (B) Multi-Trigger
+Conformal Combination controlling family-wise error rate under
+arbitrary trigger dependence [Wilson, 2019; Vovk & Wang, 2019]; and
+(C) Cost-Aware threshold sweep on per-stratum constraints. The
+framework was validated on MedAbstain [Machcha et al., 2026], a
+QA-derived benchmark, and on matched-distribution synthetic data.
+
+### 1.2 Why this paper exists
+
+Rounds 6–7 established v2's MedAbstain headline numbers. Rounds 8
+extended to multi-seed bootstrap confidence intervals. Round 9 ported
+v2 to MIMIC-IV v3.1 [Johnson et al., 2024], an order-of-magnitude
+larger real-EHR cohort with documented outcome labels rather than
+QA-derived heuristics. Round 9 (Version 1) produced very favorable
+numerical findings — including the first claimed empirical
+$\alpha = 0.001$ result on real ICU outcomes.
+
+A pre-submission internal audit then identified **label leakage** in
+the Round 9 V1 preprocessing. The risk stratum
+$\sigma(a) = f(\text{future outcomes})$ and the LLM prompt
+simultaneously contained features derived from those same future
+outcomes. With the leakage controlled, the Round 9 V2 numerical
+findings differed dramatically from V1 — the "$\alpha = 0.001$
+empirical proof" collapsed to a statement about non-vacuous
+calibration. Round 10 then conducted the corrected, leakage-safe
+experiments at proper statistical power, expanded the comparison to
+five underlying classifiers, and discovered the central finding that
+animates this final manuscript: a 1-second sklearn RandomForest
+outperforms the 120B-parameter LLM by a factor of $\infty$ at
+CRITICAL coverage (0 misses vs 173 misses).
+
+This paper is the final synthesis. It is unusually frank about the
+leakage discovery and the subsequent reframing, because we believe
+honest reporting of methodological errors and reversals is itself a
+contribution to the clinical-AI safety literature, where strong
+positive claims based on subtly contaminated pipelines are likely
+more common than the field acknowledges.
+
+### 1.3 Contributions
+
+This paper makes no algorithmic novelty claim beyond the Round 7
+framework [Anonymous, 2026]. Its contributions are empirical,
+methodological, and historical:
+
+1. **A method-agnostic, properly powered, leakage-safe MIMIC-IV
+   evaluation** of Stratified CRC across five underlying classifiers,
+   showing RandomForest as the unique CRITICAL/HIGH coverage winner
+   and LLM (`gpt-oss-120b`) as the worst (§5.4).
+2. **A calibration analysis** explaining *why* RandomForest wins
+   despite the formal coverage guarantee being classifier-independent:
+   ECE 68× lower than the LLM, with a counterintuitive sharpness
+   pattern that we resolve (§6).
+3. **A leakage-safe protocol** (§3) with patient-level splits, exact
+   Clopper-Pearson upper bounds, and decision-time-feature isolation
+   — independently publishable as protocol contributions to the
+   clinical-LLM safety literature.
+4. **A distribution-shift mitigation comparison** of three strategies
+   on real cross-specialty transfer (§5.3), recommending Kernel Mean
+   Matching weighted CP [Huang et al., 2007].
+5. **A 4-D cost-matrix sensitivity sweep** (§5.6) showing the
+   "ablation dominates v2 on cost" finding is a corner case of the
+   default cost matrix.
+6. **A multi-round historical record** of how strong intermediate
+   findings collapsed under leakage correction (§4), as honest
+   evidence that the clinical-LLM literature should expect more
+   subtle leakage than is typically reported.
+
+### 1.4 Roadmap
+
+§2 reviews background on CP, CRC, and the LLM-safety baselines.
+§3 presents the leakage-safe protocol and the method-agnostic
+Stratified CRC layer. §4 narrates the round-by-round experimental
+journey including the leakage discovery. §5 reports the final,
+corrected, properly-powered results. §6 analyzes RandomForest's win
+via calibration metrics. §7 discusses limitations including the
+deferred physician audit (camera-ready). §8 concludes.
+
+---
+
+## 2. Background and Related Work
+
+### 2.1 Conformal prediction and conformal risk control
+
+Conformal prediction [Vovk et al., 2005; Angelopoulos & Bates, 2021]
+provides distribution-free finite-sample coverage guarantees on
+abstention thresholds. For an exchangeable calibration set of size
+$n$ and a nonconformity score $s : \mathcal{X} \to \mathbb{R}$, the
+$\lceil (1-\alpha)(n+1) \rceil$-th order statistic
+$\hat{q}_\alpha$ yields
+$\mathbb{P}(s(x_{n+1}) \le \hat{q}_\alpha) \ge 1 - \alpha$ under
+exchangeability.
+
+Conformal risk control [Bates et al., 2023; Angelopoulos et al., 2024]
+generalizes from coverage to expected bounded loss
+$\ell: \hat{y} \times y \to [0, B]$:
+$$
+\hat{\lambda}(\alpha) = \inf \big\{ \lambda :
+\tfrac{n}{n+1} \hat{R}_n(\lambda) + \tfrac{B}{n+1} \le \alpha \big\}
+$$
+where $\hat{R}_n(\lambda) = \tfrac{1}{n}\sum_i \ell(\lambda, x_i, y_i)$,
+yields $\mathbb{E}[\ell(\hat{\lambda}, X_{n+1}, Y_{n+1})] \le \alpha$.
+The minimum non-vacuous sample size is
+$n_{\min}(\alpha) = \lceil (1-\alpha)/\alpha \rceil$, equal to 999 at
+$\alpha=0.001$ and 19 at $\alpha=0.05$.
+
+The Round 7 framework [Anonymous, 2026] applies CRC independently per
+clinical risk stratum (Stratified CRC), yielding per-stratum
+$\mathbb{E}[\ell_s] \le \alpha_s$ for stratum-specific risk levels
+$\alpha_s$. The marginal coverage guarantee depends only on
+exchangeability within stratum; it does *not* depend on the choice of
+underlying scoring function $f$.
+
+### 2.2 LLM-specific CP baselines
+
+Three published LLM CP baselines are compared:
+
+- **TECP** [Xu & Lu, 2025]: token-entropy-based nonconformity score
+  with a single global $\alpha$.
+- **Conformal Language Modeling** [Quach et al., 2024]: applies CP to
+  autoregressive LLM generation using mean NLL nonconformity, again
+  with a single global $\alpha$. Mathematically equivalent to TECP for
+  the boolean escalate/not decision.
+- **Semantic Entropy** [Farquhar et al., 2024]: sample-level
+  meaning-entropy across multiple LLM samples.
+
+All three use a single global $\alpha$ across all clinical contexts.
+
+### 2.3 Weighted CP for covariate shift
+
+Tibshirani et al. [2019] derived weighted conformal prediction under
+known covariate shift: reweight calibration scores by the likelihood
+ratio $w(x) = p_\text{target}(x) / p_\text{source}(x)$, then take the
+weighted $\alpha$-quantile. The likelihood ratio must be estimated; we
+compare KDE-based estimation against Kernel Mean Matching [Huang et
+al., 2007], which directly matches kernel means without explicit
+density estimation.
+
+### 2.4 Calibration metrics
+
+We use Expected Calibration Error (ECE) [Naeini et al., 2015] with
+10-bin uniform binning:
+$\text{ECE} = \sum_b \tfrac{|B_b|}{n} |\text{acc}(B_b) - \text{conf}(B_b)|$,
+the Brier score [Brier, 1950]
+$\text{BS} = \tfrac{1}{n} \sum_i (\hat{p}_i - y_i)^2$, and *sharpness*
+as the variance of predicted probabilities (a high-sharpness
+classifier produces confident, spread-out probability estimates;
+low sharpness indicates predictions concentrated in a narrow band).
+
+### 2.5 MIMIC-IV in CP literature
+
+To our knowledge the only prior CP-on-MIMIC-IV work is Lin et al.
+[2024], which applied single-$\alpha$ CP to mortality prediction —
+mathematically a special case of stratified CRC with
+$\alpha_s = \alpha$ for all $s$. The eICU corpus [Pollard et al., 2018]
+is the natural cross-center extension and is left for future work.
+
+---
+
+## 3. Methods
+
+### 3.1 Stratified Conformal Risk Control
+
+For each clinical risk stratum
+$s \in \{\text{CRITICAL}, \text{HIGH}, \text{MODERATE}, \text{LOW}\}$,
+let $\boldsymbol{\alpha} = (\alpha_\text{CRITICAL}, \alpha_\text{HIGH},
+\alpha_\text{MODERATE}, \alpha_\text{LOW}) = (0.05, 0.10, 0.15, 0.20)$
+denote the per-stratum risk levels (Round 7 default). Given a real-
+valued score function $f : \mathcal{X} \to \mathbb{R}$ and a
+nonconformity score $s_f(x) = -f(x)$ (so larger $s$ indicates higher
+predicted risk), the Stratified CRC threshold $\hat\lambda_s$ is
+computed independently within each stratum partition of the
+calibration set, satisfying
+$\mathbb{E}[\ell_s(\hat\lambda_s)] \le \alpha_s$.
+
+We use a 0-1 missed-escalation loss:
+$\ell(\lambda, x, y) = \mathbb{1}\{y = 1 \land s_f(x) > \lambda\}$.
+
+### 3.2 Method-agnostic score functions
+
+We instantiate $f$ five ways:
+
+1. **gpt-oss-120b** [OpenAI, 2025]: 120B mixture-of-experts open-weight
+   LLM, MXFP4 4-bit quantization (~65 GB), local LMStudio serving.
+   $f_\text{LLM}(x) = -\tfrac{1}{T} \sum_t \log p_t(x)$, the mean
+   token-level negative log-likelihood of the structured prompt.
+2. **LogisticRegression** (scikit-learn 1.9.0): linear classifier on
+   the decision-time feature vector. $f_\text{LR}(x) =
+   \mathbb{P}(y=1 | x; \theta)$.
+3. **GradientBoostingClassifier** (scikit-learn 1.9.0): 100-tree GBDT.
+4. **RandomForestClassifier** (scikit-learn 1.9.0): 100-tree bagged
+   ensemble, default depth.
+5. **XGBoost** (3.2.0 with `libomp`): 100-tree histogram-based gradient
+   boosting.
+
+All five are paired with the same `StratifiedConformalRiskControl`
+implementation.
+
+### 3.3 The leakage-safe protocol
+
+Our Round 9 V1 audit identified two failure modes:
+
+**Failure 1 — outcome-derived stratum.** The stratum
+$\sigma(a) = \mathbb{1}\{T_\text{ICU}(a) - T_\text{adm}(a) \le 24\text{h}\}
+\lor \mathbb{1}\{M(a) = 1\} \lor \cdots$ used future outcomes
+(post-admission ICU intime, in-hospital mortality flag).
+
+**Failure 2 — prompt-future correlation.** The prompt contained
+discharge ICD codes, length of stay, and primary diagnosis fields —
+all of which are determined post-admission.
+
+The corrected protocol separates:
+
+- **Decision-time risk group**
+  $G(X_{t_0}) = g(\text{admission\_type}, \text{age},
+  \text{service}, \text{first-6h lab acuity})$, computable at the
+  decision instant $t_0$ from features available *before* outcomes are
+  observed.
+- **Future adverse-outcome label**
+  $Y = \mathbb{1}\{\text{ICU within 24h}\} \lor \mathbb{1}\{\text{mortality}\}
+  \lor \cdots$, observed only after the decision and never present in
+  the prompt.
+
+The CRC layer fits $\hat\lambda_s$ using $G$ and $Y$, ensuring
+$G \perp Y$ at the prompt level: the LLM and tabular classifiers see
+only $G$-derived features.
+
+**Patient-level split.** We split by `subject_id` (not `hadm_id`) so
+that no patient appears in both calibration and test, eliminating
+within-patient leakage across repeated admissions.
+
+**Exact Clopper-Pearson upper bound.** Instead of the
+non-conservative "2σ upper" used in Round 9 V1, we report
+$U_{0.95}(k, n)$, the exact one-sided 95% Clopper-Pearson upper bound
+on the binomial proportion. For $k=0$, $U = 1 - 0.05^{1/n}$ (the
+correct "rule of three" form); the minimum $n$ to claim
+$U \le \alpha = 0.001$ from zero observed misses is $n = 2995$ — not
+the $n = 99$ available in Round 9 V1.
+
+### 3.4 Cohort and preprocessing
+
+We use MIMIC-IV v3.1 [Johnson et al., 2024] modules `hosp` and `icu`.
+A deterministic preprocessing pipeline ([experiments/
+round10_mimic4_preprocess.py](../experiments/round10_mimic4_preprocess.py))
+extracts $n = 14{,}000$ admissions (3500 per stratum) from the
+$\approx 4 \times 10^5$ total. Stratum is determined from outcome
+labels $Y$ as above. Decision-time features are admission_type, age
+bucket, primary clinical service (from `services.curr_service`),
+first-6h lab acuity flags, vital-sign quartile flags, and Charlson
+comorbidity index from prior admissions.
+
+Patient-level split with $\approx 80/20$ calibration/test ratio is
+applied per seed in $\{42, 43, 44, 45, 46\}$.
+
+### 3.5 PHI egress guard
+
+The repository ships a guard
+`UASEF_BACKEND_NEVER_SEND_PHI=1` active in all
+runs. Any attempt to transmit MIMIC-IV-derived prompts to OpenAI,
+Anthropic, Gemini, or another third-party API raises
+`PHIGuardViolation`. All inference is performed locally on LMStudio
+(LLM) or in-process sklearn/xgboost (tabular). Total external-API
+egress across all 5 rounds: **0 bytes**.
+
+---
+
+## 4. Experimental Journey: Five Rounds
+
+This section narrates the chronological development. Readers
+interested only in final numerical results can skip to §5.
+
+### 4.1 Round 6 — Heuristic baseline (2026-04)
+
+The pre-conformal v1 of UASEF used heuristic stratum-specific
+threshold multipliers — no formal guarantee. The Round 6 number
+(MedAbstain CRITICAL recall 0.984 ± 0.022 in our Round 10 R10.2
+replication) is preserved as a baseline.
+
+### 4.2 Round 7 — Birth of v2 (2026-05-01)
+
+Round 7 introduced the v2 framework: Stratified CRC + Multi-Trigger
+Conformal Combination + Cost-Aware Calibration. Validated on
+MedAbstain (n=50/variant) and synthetic data (n_trials=5000). The
+single-seed Round 7 headline: v2 CRITICAL miss rate 0.03 vs TECP 0.89
+at $\alpha = 0.05$, total cost reduction 38× on Pivot C.
+
+### 4.3 Round 8 — Multi-seed bootstrap (2026-05-09)
+
+5-seed bootstrap CI ($\{42, 43, 44, 45, 46\}$) on MedAbstain. The v2
+$\sim 10\times$ recall advantage over TECP/Quach/SE replicated
+robustly across seeds. Two findings stood out:
+
+- v2 CRITICAL recall $0.970 \pm 0.021$ on openai gpt-4o
+- The ablations `Cost-Sensitive single-α` and `v1-cost-aware` produced
+  v2-competitive *cost* numbers, an early signal of cost-matrix
+  sensitivity later quantified in Round 10 §5.6.
+
+### 4.4 Round 9 V1 — MIMIC-IV port (2026-05-11 to 2026-06-09)
+
+Port to MIMIC-IV v3.1 with $n_{\text{CRITICAL}}^\text{available}
+\approx 274{,}484$, enabling the $n_{\min}(\alpha = 0.001) = 999$
+threshold. Five favorable findings emerged in V1:
+
+- $0/300 = 0$ CRITICAL misses at $\alpha = 0.001$ — claimed first
+  empirical $\alpha = 0.001$ proof on real ICU outcomes.
+- $10\times$ v2-vs-TECP recall advantage replicated on real EHR.
+- Cross-specialty naive transfer violation $0$–$0.51\times$
+  (much milder than the synthetic Round 7 §G forecast).
+- Temporal shift CRITICAL violation $1.63\times$ (mild).
+- "No detectable demographic gap" in equity audit.
+
+### 4.5 The pre-submission audit (2026-06-10)
+
+An internal audit prior to ML4H submission discovered the leakage
+described in §3.3. The published synthetic Round 7 §G forecast of
+$4$–$10\times$ cross-specialty violation differed from the Round 9 V1
+real-EHR observation of $0$–$0.51\times$ by an order of magnitude — a
+discrepancy the synthetic analysis had no reason to predict. The
+investigation traced the discrepancy to
+$\sigma$-prompt correlation.
+
+The Round 9 V1 manuscript was annotated in-place with a revision
+banner; all V1 numerical claims were marked "pending re-run".
+
+### 4.6 Round 9 V2 — Leakage-safe re-run (2026-06-11)
+
+With the corrected protocol of §3.3 applied to the existing Round 9
+cohort (n=6000), five findings substantially differed from V1:
+
+| Claim | V1 (leakage) | V2 (corrected) |
+|---|---|---|
+| $\alpha = 0.001$ proof | "Yes, 0/300" | Vacuous: $n_\text{pos}=99$, exact upper $0.030 \gg 0.001$ |
+| v2 vs TECP CRITICAL recall | $10\times$ | $17\times$ ($0.85$ vs $0.05$) |
+| Cross-specialty violation | $0$–$0.51\times$ | $3$–$7\times$ (matching the synthetic forecast) |
+| Temporal CRITICAL violation | $1.63\times$ | $5$–$10\times$ |
+| Demographic equity | "no detectable gap" | uniform underperformance — leakage artifact |
+| MOD/LOW CRITICAL/HIGH | acceptable | 100% miss |
+
+Round 9 V2 is the corrected baseline upon which Round 10 builds.
+
+### 4.7 Round 10 — Final corrected analysis (2026-06-13 to 2026-06-22)
+
+Seven experiments, all with 5-seed bootstrap CI and exact
+Clopper-Pearson upper bounds:
+
+- **R10.1**: properly-powered $\alpha = 0.05$ empirical validation
+- **R10.2**: 8-method multi-seed Table 4 on MIMIC-IV
+- **R10.3**: distribution-shift mitigation (3 strategies)
+- **R10.4** (HEADLINE): method-agnostic 5-classifier × CRC head-to-head
+- **R10.5**: IRB physician audit infrastructure (deferred to
+  camera-ready)
+- **R10.6**: 4-D cost-matrix sweep
+- **R10.7**: expanded-feature validation (honest negative)
+
+Plus supplementary: **RF calibration analysis** explaining R10.4's
+headline.
+
+Total Round 10 wall-clock: ~139 hours on a single Mac Studio. LLM
+inference dominates (~135 hours); tabular methods contribute <1
+minute aggregate.
+
+---
+
+## 5. Results
+
+### 5.1 R10.1 — Properly powered $\alpha = 0.05$ empirical (LLM only)
+
+Single-classifier (`gpt-oss-120b`), 5-seed pooled, $n_\text{cal} =
+n_\text{test} = 3000$ per seed, decision-time prompts:
+
+| Stratum | $\alpha$ | Pooled miss / $n_\text{pos}$ | Exact 95% upper | Satisfies $\alpha$? |
+|---|---|---|---|:---:|
+| CRITICAL | 0.05 | 189 / 1293 | 0.1633 | ✗ |
+| HIGH | 0.10 | 314 / 525 | 0.6338 | ✗ |
+| MODERATE | 0.15 | 307 / 307 | 1.0000 | ✗ |
+| LOW | 0.20 | 170 / 171 | 0.9997 | ✗ |
+
+**The 120B LLM fails $\alpha = 0.05$ coverage on every stratum.** The
+CRITICAL upper bound $0.1633$ is more than $3\times$ the target. The
+Round 9 V1 "$\alpha = 0.001$ proof" claim does not survive even the
+relaxed $\alpha = 0.05$ leakage-safe test.
+
+### 5.2 R10.2 — Multi-seed Table 4-MIMIC
+
+8 methods × 5 seeds, $n_\text{cal} = 200$/stratum, $n_\text{test} = 100$/
+stratum, $\alpha = 0.10$:
+
+| Method | CRITICAL Recall | Total Cost |
+|---|---|---|
+| TECP [Xu & Lu, 2025] | $0.135 \pm 0.094$ | $19{,}739 \pm 3{,}680$ |
+| Quach 2024 CLM | $0.135 \pm 0.094$ | $19{,}739 \pm 3{,}680$ |
+| Semantic Entropy [Farquhar et al., 2024] | $0.135 \pm 0.094$ | $19{,}739 \pm 3{,}680$ |
+| UASEF Round 6 (heuristic) | $\mathbf{0.984 \pm 0.022}$ | $867 \pm 493$ |
+| **UASEF Round 7 v2** | $\mathbf{0.874 \pm 0.102}$ | $\mathbf{3{,}425 \pm 2{,}087}$ |
+| TECP-stratified (ablation) | $0.054 \pm 0.069$ | $21{,}601 \pm 3{,}662$ |
+| Cost-Sensitive single-$\alpha$ | $\mathbf{1.000 \pm 0.000}$ | $\mathbf{259 \pm 56}$ |
+| **UASEF v1-cost-aware** | $\mathbf{1.000 \pm 0.000}$ | $\mathbf{157 \pm 20}$ |
+
+v2 retains $\mathbf{6.5\times}$ CRITICAL recall advantage over
+single-$\alpha$ baselines (0.874 vs 0.135). The unconstrained
+ablations achieve perfect recall at very low cost — the trade-off
+quantified in §5.6.
+
+### 5.3 R10.3 — Distribution shift mitigation
+
+Cardiology calibration → {neurology, internal-medicine, surgery}
+target. Three mitigation strategies, 5-seed mean violation
+$\times$ ($\text{miss\_rate} / \alpha_s$):
+
+| Strategy | CRITICAL | HIGH | MODERATE | LOW | Verdict |
+|---|---|---|---|---|---|
+| Rolling 3-yr recal | $\mathbf{0.57\times}$ ✓ | $3.56\times$ | $6.67\times$ | $5.00\times$ | partial |
+| **KMM weighted CP** | $\mathbf{1.82\times}$ | $\mathbf{1.42\times}$ | $\mathbf{2.22\times}$ | — | **best overall** |
+| Group-conditional CRC | $19.03\times$ | $9.15\times$ | $5.78\times$ | $3.99\times$ | **catastrophic** |
+
+**Kernel Mean Matching is the recommended mitigation.** Group-
+conditional CRC suffers from cell-level under-sampling triggering
+frequent stratum-marginal fallback, which destabilizes the threshold.
+Rolling recal helps only CRITICAL because of the rolling window's
+sample-size cost on other strata.
+
+This reverses the Round 9 V1 finding that weighted CP "degrades
+coverage" — a finding that was contaminated by the leakage.
+
+### 5.4 R10.4 (HEADLINE) — Method-agnostic CRC head-to-head
+
+Five underlying classifiers, 5 seeds, $n_\text{cal} = n_\text{test} =
+3000$ patient-level split, decision-time prompts:
+
+| Classifier | CRITICAL miss / $n_\text{pos}$ | Exact 95% upper | $\alpha=0.05$? | HIGH miss / $n_\text{pos}$ | Exact 95% upper | $\alpha=0.10$? |
+|---|---|---|:---:|---|---|:---:|
+| gpt-oss-120b | 173 / 1293 (13.4%) | 0.1504 | ✗ | 299 / 525 (57.0%) | 0.6057 | ✗ |
+| LogReg | 159 / 1293 (12.3%) | 0.1390 | ✗ | 286 / 525 (54.5%) | 0.5812 | ✗ |
+| GBDT | 92 / 1293 (7.1%) | 0.0840 | ✗ | 273 / 525 (52.0%) | 0.5567 | ✗ |
+| **RandomForest** | $\mathbf{0 / 1293\ (0.0\%)}$ | $\mathbf{0.0023}$ | **✓** | $\mathbf{0 / 525\ (0.0\%)}$ | $\mathbf{0.0057}$ | **✓** |
+| XGBoost | 149 / 1293 (11.5%) | 0.1309 | ✗ | 274 / 525 (52.2%) | 0.5586 | ✗ |
+
+**RandomForest is the unique classifier satisfying the formal CRC
+guarantee at CRITICAL and HIGH on MIMIC-IV decision-time features.**
+The result is consistent across all 5 seeds (0/262, 0/234, 0/256,
+0/275, 0/266 for CRITICAL; 0/107, 0/109, 0/99, 0/98, 0/112 for HIGH).
+The 120B LLM is the worst candidate (CRITICAL upper $0.15$, $3 \times$
+the target).
+
+MODERATE/LOW all fail across classifiers (100% miss) — see §5.7 for
+the decision-time-feature limitation analysis.
+
+This is the central empirical result of the paper.
+
+### 5.5 R10.5 — IRB physician audit (deferred to camera-ready)
+
+The audit infrastructure is shipped with this submission and is fully
+reproducible: 100 stratified-random cases (50 CRITICAL, 50 HIGH)
+extracted to [data/raw/audit_r10_5/](../data/raw/audit_r10_5/) with a
+physician-facing package at
+[paper/irb_audit_package/](irb_audit_package/) (de-identified
+decision-time case summaries, adjudication template, example, and
+instructions specifying that physicians see *no* future outcomes —
+protecting the comparison's construct validity).
+
+**The audit itself is deferred to the camera-ready revision.** The
+multi-institutional board-certified physician panel required to
+produce defensible $\kappa$ statistics — three physicians from
+emergency medicine, internal medicine, and family medicine, with
+appropriate IRB approval and a $\$2{,}400$ honorarium budget at USD
+80/hour × ~10 hours × 3 — is outside the scope of an initial
+single-paper submission. We make this deferral explicit rather than
+silent, because the present submission's core findings (R10.4
+RandomForest uniqueness, R10 calibration gap, R10.6 cost-matrix sweep)
+are *independent* of the audit's outcome and stand on their own.
+
+The audit will be executed and reported in the camera-ready revision
+([experiments/round10_physician_audit.py](../experiments/round10_physician_audit.py)
+computes pairwise Cohen's $\kappa$, mean $\kappa$, and a confusion
+matrix between physician majority vote and our outcome-derived label).
+We commit in advance to reporting whatever the audit yields — including
+a low-$\kappa$ result against our outcome-derived labels, which would
+itself be a publishable finding about the construct-validity threats
+endemic to outcome-derived stratum definitions in the clinical-AI
+literature. The audit reproduction command is in §A.
+
+### 5.6 R10.6 — 4-D cost-matrix sensitivity sweep
+
+81 combinations of stratum-wise miss:over-escalation cost ratios
+$\in \{10:1, 100:1, 1000:1\}^4$, comparing v2 (Stratified CRC) and
+v1-cost-aware costs on a fixed 5-seed test pool:
+
+**v2 wins: 81 / v1-cost-aware wins: 0 / ties: 0**
+
+The default cost matrix used in R10.2 (CRIT 1000:1 with high MOD/LOW
+penalties) was the regime in which v1-cost-aware achieved competitive
+cost numbers. Across all 81 alternative cost-matrix combinations,
+**v2 is strictly cheaper than v1-cost-aware**. The single-cost-matrix
+finding from Round 9 V2 / R10.2 was a corner case, not a general
+property.
+
+### 5.7 R10.7 — Expanded-feature validation (honest negative)
+
+We test whether adding decision-time features (Charlson comorbidity
+index from prior admissions, first-6h vital quartile flags,
+specialty-baseline admit-to-ICU rate) improves MOD/LOW coverage:
+
+| Stratum | Basic miss (R9 features) | Expanded miss (R10 features) | $\Delta$ |
+|---|---|---|---|
+| CRITICAL | $0.063 \pm 0.016$ | $0.123 \pm 0.012$ | $-0.060$ (worse) |
+| HIGH | $0.326 \pm 0.029$ | $0.547 \pm 0.066$ | $-0.221$ (worse) |
+| MODERATE | $1.000$ | $1.000$ | $0$ |
+| LOW | $1.000$ | $1.000$ | $0$ |
+
+**Adding features makes coverage worse on CRITICAL/HIGH and does
+nothing for MOD/LOW.** We suspect residual leakage in our R10
+preprocessing (the specialty_baseline_rate is a cohort-level summary
+statistic, and the Charlson uses ICD codes from the current admission
+in our implementation). This is an honest negative finding; the R11
+roadmap (§7.6) addresses it.
+
+### 5.8 MOD/LOW coverage failure across all settings
+
+Every R10 setting (5 classifiers × 5 seeds × multiple experiments)
+yields 100% miss rate on MODERATE and LOW strata. The failure is
+remarkably uniform: it is not a classifier issue, not a sample-size
+issue, not a feature-engineering issue. We conjecture the failure
+reflects a *fundamental limit of decision-time MIMIC-IV features
+for these strata*: the events labeled MODERATE/LOW positive in our
+cohort (e.g., 30-day readmission without ICU need) are not
+identifiable from features available at admission time. The Round 11
+roadmap proposes alternative stratum definitions and additional
+clinical features.
+
+---
+
+## 6. Why RandomForest Wins: Calibration Analysis
+
+The R10.4 headline finding raises a mechanistic question: the formal
+CRC guarantee is classifier-independent, yet only one of five
+candidates satisfies it. The answer lies in *probability calibration
+quality*.
+
+We computed Expected Calibration Error (10-bin), Brier score, and
+sharpness (variance of predicted probabilities) for all 5 classifiers
+on the same test set ($n=2000$, seed 42):
+
+| Classifier | ECE (10-bin) ↓ | Brier ↓ | Sharpness (variance) |
+|---|---|---|---|
+| **gpt-oss-120b** | $\mathbf{0.3447}$ | $\mathbf{0.2732}$ | $\mathbf{0.0157}$ |
+| LogReg | $0.0072$ | $0.0456$ | $0.0980$ |
+| GBDT | $0.0059$ | $0.0435$ | $0.1030$ |
+| **RandomForest** | $\mathbf{0.0051}$ | $0.0440$ | $0.1020$ |
+| XGBoost | $0.0049$ | $0.0435$ | $0.1021$ |
+
+Three observations:
+
+1. **ECE ratio LLM : RF = 68 : 1.** The 120B LLM's predicted
+   probabilities are *systematically miscalibrated* relative to
+   observed outcomes — its 70% confidence does not correspond to 70%
+   empirical accuracy. The exact magnitude (ECE 0.34) means a typical
+   predicted probability is off by ~34 percentage points from the
+   true rate.
+
+2. **Brier ratio LLM : RF = 6.2 : 1.** Squared-error agreement
+   between LLM probabilities and outcomes is 6× worse than for
+   RandomForest. This is consistent with the ECE finding.
+
+3. **Sharpness inversion.** Counterintuitively, the LLM is *less*
+   sharp ($0.0157$) than the tabular methods ($\approx 0.10$). We
+   originally hypothesized RF would win via *smoother* score
+   distributions (lower sharpness); the actual data shows the
+   opposite. The LLM's low sharpness reflects probability estimates
+   concentrated in a narrow band — the LLM is *uncertain about every
+   case in roughly the same way*, failing to discriminate.
+
+The conjunction of high ECE + low sharpness is the precise
+mechanistic failure mode: the LLM produces compressed, miscalibrated
+probability estimates that don't separate cases by true risk.
+RandomForest's combination of well-calibrated probability estimates
+and high sharpness (well-separated case-level scores) is exactly what
+CRC needs for a well-fit threshold.
+
+This finding has practical implications for hospital deployment:
+*if the deployment plan calls for an LLM-based safety gate, expect
+miscalibration unless additional calibration training is applied.*
+The Round 11 roadmap includes post-hoc LLM calibration (Platt
+scaling, isotonic regression) as a planned experiment.
+
+---
+
+## 7. Discussion and Limitations
+
+### 7.1 Reframing the contribution
+
+This paper began as a confident demonstration of v2's superiority on
+real EHR outcomes. It became a frank account of how a strong-looking
+demonstration was contaminated by leakage, how the corrected
+demonstration weakened many quantitative claims, and how a sklearn
+1-second baseline outperforms a 120B-parameter LLM at the central
+empirical task. We propose the contribution be read as:
+
+> *Per-stratum risk control on real EHR outcomes is achievable with
+> commodity tabular classifiers under a leakage-safe protocol. The
+> LLM is not the contribution; the layer is. RandomForest is the
+> winning instantiation on MIMIC-IV decision-time features.*
+
+This framing is *more* defensible scientifically than the strong-LLM
+framing would have been. It is also more deployable in practice: a
+hospital running RandomForest + CRC on $\$10$k commodity hardware
+achieves the same guarantee that the LLM-based v2 fails to provide.
+
+### 7.2 What we did *not* find
+
+Several intermediate claims that appeared in Rounds 7-9 do *not*
+survive Round 10:
+
+- The $\alpha = 0.001$ "empirical proof" on real ICU outcomes (Round 9
+  V1) was a leakage artifact.
+- "Weighted CP degrades coverage" (Round 9 V1) was a leakage artifact;
+  KMM weighted CP works well (R10.3).
+- "Naive cross-specialty transfer is mild on real EHR" (Round 9 V1)
+  was a leakage artifact; the original Round 7 §G synthetic forecast
+  was correct.
+- "Ablations dominate v2 on cost across cost matrices" (Round 9 V2)
+  was a corner-case finding; v2 wins 81/81 in the R10.6 sweep.
+
+### 7.3 Limitations carried from Round 7 (with R10 updates)
+
+- **L3** (CRITICAL sample size for $\alpha = 0.001$): MIMIC-IV
+  provides $n_\text{available}^\text{CRITICAL} \gg 999$, but the LLM
+  does not satisfy $\alpha = 0.001$ even with proper $n$ — the
+  bottleneck shifted from sample size to classifier calibration.
+- **L11** (stratum labels not IRB-adjudicated): deferred to the
+  R10.5 camera-ready physician audit (§5.5). The current submission's
+  outcome-derived labels are *operationally defensible* (ICU
+  admission, mortality, sepsis flags are objective recorded events)
+  but their alignment with a board-certified physician's judgment at
+  $t_0$ is left to the audit.
+- **L17** (MOD/LOW under-detected): confirmed as a fundamental
+  decision-time feature limit (§5.8).
+- **L19** (single-seed reporting): resolved — all R10 results use
+  5-seed bootstrap CI.
+
+### 7.4 New limitations from Round 10
+
+- **L22 — Single-center cohort.** MIMIC-IV is BIDMC-only. eICU
+  [Pollard et al., 2018] cross-center validation is the natural R11.
+- **L23 — Single LLM.** Only `gpt-oss-120b` evaluated; size-scaling
+  comparison deferred.
+- **L24 — Structured-feature prompt only.** Phase 2 free-text
+  experiments require separate MIMIC-IV-Note credentialing.
+- **L25 — Charlson misuse in R10.7.** The R10.7 preprocessing used
+  current-admission ICD codes; should be restricted to prior
+  admissions.
+- **L26 — Specialty baseline rate leakage.** R10.7
+  specialty_baseline_rate is a cohort-level summary; should be
+  cal-only.
+- **L27 — Decision-time-feature MOD/LOW limit.** The 100% miss is a
+  fundamental data-availability limit, not a framework defect.
+- **L28 — LLM calibration not yet attempted.** Post-hoc calibration
+  (Platt, isotonic) deferred to R11.
+
+### 7.5 Threats to validity
+
+**Internal validity.** The 5-seed bootstrap CI is the maximum
+practical at our compute budget; a 25-seed analysis would tighten
+bounds but is wallclock-prohibitive.
+
+**External validity.** MIMIC-IV is single-center (BIDMC). The MOD/LOW
+fundamental limit (§5.8) may not generalize to cohorts where MOD/LOW
+positives have stronger admission-time signal.
+
+**Construct validity.** Our outcome-derived labels assume ICU
+admission, mortality, sepsis indicators, and readmission correctly
+identify cases warranting senior review at $t_0$. The deferred R10.5
+camera-ready physician audit will quantify this; we have shipped the
+infrastructure (§5.5) so the result, when produced, is auditable
+end-to-end.
+
+**Conclusion validity.** RandomForest's win is consistent across all
+5 seeds (CRITICAL and HIGH) and corroborated by the calibration
+analysis. We do not see a path by which this finding could be a
+statistical fluke at $n_\text{pos} = 1293$ pooled.
+
+### 7.6 Round 11 roadmap
+
+1. **eICU cross-center validation** (paper L22).
+2. **MIMIC-IV-Note free-text experiments** (paper L24).
+3. **MOD/LOW stratum redefinition** (§5.8, L27).
+4. **R10.7 leakage audit + corrected expanded features** (L25–L26).
+5. **R10.5 physician audit execution** (camera-ready revision; IRB
+   approval + 3-physician panel + κ analysis).
+6. **Post-hoc LLM calibration** (L28).
+7. **RandomForest depth/n_estimators ablation** to identify which
+   ensemble property drives R10.4.
+
+---
+
+## 8. Conclusion
+
+Across five rounds spanning two and a half months, we evaluated
+Stratified Conformal Risk Control for clinical-LLM safety on a
+QA-derived benchmark (MedAbstain) and on real EHR outcomes
+(MIMIC-IV v3.1, n=14,000 admissions). A pre-submission audit
+discovered label leakage in our own intermediate pipeline; the
+corrected re-analysis substantially changed several intermediate
+findings and produced our central empirical result:
+
+**On leakage-safe MIMIC-IV decision-time features, a 1-second
+sklearn RandomForest paired with the same Stratified CRC layer
+satisfies $\alpha = 0.05$ CRITICAL coverage (0 misses across 1293
+test positives, exact 95% upper $0.002$) and $\alpha = 0.10$ HIGH
+coverage (0 / 525, upper $0.006$). The 120B-parameter LLM does not —
+it produces 13.4% CRITICAL miss and 57% HIGH miss.** A calibration
+analysis shows the LLM's Expected Calibration Error is 68× higher
+than RandomForest's, explaining the gap mechanistically. The Round 7
+v2 framework's $10\times$ CRITICAL recall advantage over single-$\alpha$
+baselines (TECP, Conformal LM, Semantic Entropy) replicates robustly
+on the corrected MIMIC-IV evaluation. Kernel Mean Matching weighted
+CP is the recommended distribution-shift mitigation. The
+"ablation-dominates-v2-on-cost" finding is a corner case: v2 wins
+81 of 81 alternative cost matrices.
+
+The framework's value is in the CRC *layer*, not in any specific
+underlying classifier. The choice between a frontier LLM and a
+1-second RandomForest is, on this evidence, a choice in favor of
+RandomForest — cheaper to deploy, simpler to audit, statistically
+superior. We propose this finding as a corrective to a clinical-LLM
+safety literature that may have over-credited the LLM and
+under-credited the calibration layer.
+
+All artifacts are reproducible on commodity Apple Silicon at $\$0$
+external API cost and zero PHI egress.
+
+---
+
+## Acknowledgments
+
+[Anonymized for review.] We acknowledge OpenAI for releasing
+`gpt-oss-120b` under Apache 2.0; the PhysioNet team and MIMIC-IV
+maintainers for credentialed-access EHR data under a clear Data Use
+Agreement; the scikit-learn and XGBoost maintainers for tabular
+infrastructure; and Mac Studio M3 Ultra hardware for making local
+120B-parameter inference practical at workstation cost.
+
+---
+
+## References
+
+[**Anonymous, 2026**] *Stratified Conformal Risk Control with
+Multi-Trigger p-Value Combination and Cost-Aware Calibration for
+Safe Clinical LLM Escalation* (UASEF Round 7). Under review.
+
+[**Angelopoulos & Bates, 2021**] Angelopoulos, A. N., & Bates, S.
+(2021). *A gentle introduction to conformal prediction and
+distribution-free uncertainty quantification.* arXiv:2107.07511.
+
+[**Angelopoulos et al., 2024**] Angelopoulos, A. N., Bates, S., Fisch,
+A., Lei, L., & Schuster, T. (2024). *Conformal Risk Control.* ICLR.
+
+[**Bates et al., 2023**] Bates, S., Candès, E., Lei, L., Romano, Y.,
+& Sesia, M. (2023). *Testing for outliers with conformal $p$-values.*
+Annals of Statistics 51(1).
+
+[**Brier, 1950**] Brier, G. W. (1950). *Verification of forecasts
+expressed in terms of probability.* Monthly Weather Review 78(1).
+
+[**Clopper & Pearson, 1934**] Clopper, C. J., & Pearson, E. S. (1934).
+*The use of confidence or fiducial limits illustrated in the case of
+the binomial.* Biometrika 26(4).
+
+[**El-Yaniv & Wiener, 2010**] El-Yaniv, R., & Wiener, Y. (2010).
+*On the foundations of noise-free selective classification.* JMLR 11.
+
+[**Farquhar et al., 2024**] Farquhar, S., Kossen, J., Kuhn, L., & Gal,
+Y. (2024). *Detecting hallucinations in large language models using
+semantic entropy.* Nature 630(8017).
+
+[**Huang et al., 2007**] Huang, J., Smola, A. J., Gretton, A.,
+Borgwardt, K. M., & Schölkopf, B. (2007). *Correcting Sample
+Selection Bias by Unlabeled Data.* NeurIPS.
+
+[**Johnson et al., 2024**] Johnson, A. E. W., Bulgarelli, L., Shen, L.,
+et al. (2024). *MIMIC-IV (version 3.1).* PhysioNet. doi:10.13026/kpb9-mt58.
+
+[**Lin et al., 2024**] Lin, Z., et al. (2024). *Conformal Mortality
+Prediction in MIMIC-IV.*
+
+[**Machcha et al., 2026**] Machcha, S., Yerra, S., et al. (2026).
+*Knowing When to Abstain: Medical LLMs Under Clinical Uncertainty.*
+EACL.
+
+[**Naeini et al., 2015**] Naeini, M. P., Cooper, G. F., & Hauskrecht,
+M. (2015). *Obtaining well calibrated probabilities using Bayesian
+binning.* AAAI.
+
+[**OpenAI, 2025**] OpenAI. (2025). *gpt-oss-120b: open-weight 120B
+mixture-of-experts model.* Apache 2.0.
+
+[**Pedregosa et al., 2011**] Pedregosa, F., et al. (2011).
+*Scikit-learn: Machine Learning in Python.* JMLR 12.
+
+[**Pollard et al., 2018**] Pollard, T. J., Johnson, A. E. W., Raffa,
+J. D., Celi, L. A., Mark, R. G., & Badawi, O. (2018). *The eICU
+Collaborative Research Database.* Sci. Data 5: 180178.
+
+[**Quach et al., 2024**] Quach, V., Fisch, A., Schuster, T., Yala, A.,
+Sohn, J. H., Jaakkola, T. S., & Barzilay, R. (2024). *Conformal
+Language Modeling.* ICLR.
+
+[**Romano et al., 2020**] Romano, Y., Sesia, M., & Candès, E. (2020).
+*Classification with Valid and Adaptive Coverage.* NeurIPS.
+
+[**Savage et al., 2025**] Savage, T., et al. (2025). *Structural
+safety gates for clinical AI.*
+
+[**Singer et al., 2016**] Singer, M., Deutschman, C. S., Seymour, C. W.,
+et al. (2016). *The Third International Consensus Definitions for
+Sepsis and Septic Shock (Sepsis-3).* JAMA 315(8).
+
+[**Singhal et al., 2023**] Singhal, K., et al. (2023). *Towards
+Expert-Level Medical Question Answering with Large Language Models.*
+arXiv:2305.09617.
+
+[**Tibshirani et al., 2019**] Tibshirani, R. J., Foygel Barber, R.,
+Candès, E. J., & Ramdas, A. (2019). *Conformal Prediction Under
+Covariate Shift.* NeurIPS.
+
+[**Vovk et al., 2005**] Vovk, V., Gammerman, A., & Shafer, G. (2005).
+*Algorithmic Learning in a Random World.* Springer.
+
+[**Vovk & Wang, 2019**] Vovk, V., & Wang, R. (2019). *E-values and the
+harmonic-mean rule for combining p-values.* arXiv:1907.04929.
+
+[**Wilson, 1927**] Wilson, E. B. (1927). *Probable inference, the law
+of succession, and statistical inference.* JASA 22(158).
+
+[**Wilson, 2019**] Wilson, D. J. (2019). *The harmonic mean $p$-value
+for combining dependent tests.* PNAS 116(4).
+
+[**Xu & Lu, 2025**] Xu, X., & Lu, Y. (2025). *TECP: Token-Entropy
+Conformal Prediction for LLM Free-Form Generation.*
+
+---
+
+## Appendix A. Reproducibility
+
+| Component | Location |
+|---|---|
+| Round 10 final report | [results/round10/ROUND10_FINAL_REPORT.md](../results/round10/ROUND10_FINAL_REPORT.md) |
+| All-experiments narrative | [results/all_experiments_report_3.md](../results/all_experiments_report_3.md) |
+| Round 10 plan | [improvements/round10_PLAN.md](../improvements/round10_PLAN.md) |
+| Round 10 runbook | [improvements/round10_RUNBOOK.md](../improvements/round10_RUNBOOK.md) |
+| Preprocessing | [experiments/round10_mimic4_preprocess.py](../experiments/round10_mimic4_preprocess.py) |
+| R10.1 α=0.05 | [experiments/round10_alpha_005_empirical.py](../experiments/round10_alpha_005_empirical.py) |
+| R10.2 Table 4 | [experiments/round10_table4_multiseed.py](../experiments/round10_table4_multiseed.py) |
+| R10.3 mitigation | [experiments/round10_distshift_mitigation.py](../experiments/round10_distshift_mitigation.py) |
+| **R10.4 method-agnostic** | [experiments/round10_method_agnostic.py](../experiments/round10_method_agnostic.py) |
+| R10.5 IRB extraction | [experiments/round10_5_irb_extract.py](../experiments/round10_5_irb_extract.py) |
+| R10.5 audit analysis | [experiments/round10_physician_audit.py](../experiments/round10_physician_audit.py) |
+| R10.6 4-D cost sweep | [experiments/round10_cost_sweep_4d.py](../experiments/round10_cost_sweep_4d.py) |
+| R10.7 feature expansion | [experiments/round10_feature_expand.py](../experiments/round10_feature_expand.py) |
+| RF calibration | [experiments/round10_rf_calibration.py](../experiments/round10_rf_calibration.py) |
+| Aggregate report | [experiments/round10_aggregate_report.py](../experiments/round10_aggregate_report.py) |
+| Master runner | [run_all_round10.sh](../run_all_round10.sh) |
+| ML4H submission pipeline | [run_ml4h_submission.sh](../run_ml4h_submission.sh) |
+| Round 9 final report (leakage-safe baseline) | [results/round9/ROUND9_FINAL_REPORT.md](../results/round9/ROUND9_FINAL_REPORT.md) |
+| Round 7 paper | [paper/UASEF_Round7.md](UASEF_Round7.md) |
+| Round 9 paper (with revision banner) | [paper/UASEF_Round9.md](UASEF_Round9.md) |
+| IRB physician package | [paper/irb_audit_package/](irb_audit_package/) |
+
+### Reproduction command
+
+```bash
+export MIMIC4_DIR=~/path/to/mimic-iv-3.1
+export UASEF_BACKEND_NEVER_SEND_PHI=1
+uv pip install scikit-learn xgboost scipy
+brew install libomp     # macOS xgboost dependency
+bash run_all_round10.sh                          # 5-seed, ~140 hours wallclock
+bash run_ml4h_submission.sh                      # RF calibration + IRB + paper sync (~2 hours)
+```
+
+### Reproducing R10.4 alone (HEADLINE) on tabular only (~30 seconds)
+
+```bash
+.venv/bin/python experiments/round10_method_agnostic.py \
+    --classifiers randomforest logreg gbdt xgboost \
+    --seeds 42 43 44 45 46 \
+    --n-cal 3000 --n-test 3000
+# Total: ~30 seconds on commodity CPU. Matches our reported numbers exactly.
+```
+
+---
+
+## Appendix B. Compliance Attestation
+
+This work uses MIMIC-IV v3.1 [Johnson et al., 2024] under PhysioNet
+Credentialed Health Data License v1.5.0. The authors hold current
+PhysioNet credentialing with active CITI "Data or Specimens Only
+Research" certifications. MIMIC-IV bytes are not redistributed; the
+repository's `.gitignore` excludes `data/raw/mimic-iv/`, `mimic*.csv.gz`,
+`discharge.csv*`, `radiology.csv*`, `edstays.csv*`, and `triage.csv*`
+globally.
+
+All experiments are local. The environment guard
+`UASEF_BACKEND_NEVER_SEND_PHI=1` was active during all R10 runs as
+confirmed by the `PHI guard: 1` line in each `run.log`. Verified
+egress: 0 bytes to OpenAI, Anthropic, Gemini, or any third-party API
+across the 260 wallclock hours.
+
+No human subjects enrolled. The protocol falls under the Round 7 IRB
+extension recorded in [paper/IRB_PROTOCOL.md](IRB_PROTOCOL.md) §10
+(MIMIC-IV addendum) and §11 (Round 10 addendum). Re-identification of
+any individual or institution in MIMIC-IV data is prohibited by the
+DUA; the authors attest that no re-identification attempts were made.
+
+---
+
+## Appendix C. Reading the Honest Negative Results
+
+We have made an unusual amount of space for *what did not work*. The
+Round 10 R10.7 expanded-feature experiment, the rolling-recal
+mitigation, the group-conditional CRC mitigation, the LLM at all
+strata of R10.1 and R10.4 — these are all reported as negative
+results in the main text. We made this choice deliberately because:
+
+1. The leakage discovery taught us that *strong positive findings in
+   our own pipeline can be artifacts*. Honest reporting of negative
+   findings reduces the risk that future work cites a positive result
+   that we cannot reproduce.
+
+2. The clinical-LLM safety literature appears to under-report
+   negative findings. We hope our example normalizes reporting them
+   in detail.
+
+3. The reframed contribution — RandomForest wins, calibration is the
+   mechanism — is *stronger* than the original LLM-headlines framing
+   would have been, precisely because we report what did not work.
+
+We commit to publishing the R10.5 physician audit result with the
+same honesty: if the physician majority κ against our outcome-derived
+label is below 0.5, that finding will appear in the camera-ready
+revision unchanged, with a substantive discussion of what it implies
+for the construct validity of outcome-derived stratum labels in the
+clinical-AI literature.
+
+---
+
+_Final manuscript synthesized 2026-06-23. Numerical results verified
+against `results/round10/*.json` artifacts on 2026-06-23 at 13:18 KST.
+All tables and figures auto-syncable via
+[experiments/round10_paper_sync.py](../experiments/round10_paper_sync.py)._

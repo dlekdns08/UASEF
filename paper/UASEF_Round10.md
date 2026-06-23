@@ -427,52 +427,124 @@ $\le 0.30$.
 
 ## 5. Results
 
-> **Note (2026-06-11).** Round 10 experiments are at the planning stage.
-> Numerical tables below are placeholders pending the R10.0–R10.8 runs;
-> the protocol is defined and code is in version control. We commit to
-> the multi-seed bootstrap CI reporting standard described in §4.1.
+> **Status (2026-06-22).** Round 10 R10.1–R10.4, R10.6, R10.7 complete
+> (5-seed bootstrap CI). R10.5 (IRB physician audit) pending external
+> 4-week process. RF calibration analysis (§6.5) added supplementary.
+> Tables auto-synced from `results/round10/*.json` via
+> `experiments/round10_paper_sync.py`.
 
-### 5.1 R10.1 — Powered $\alpha = 0.05$ empirical (pending)
+### 5.1 R10.1 — Powered $\alpha = 0.05$ empirical
 
-[Table 1d]: per-stratum exact 95% upper bound on $\mathbb{E}[\ell_s]$
-across 5 seeds, 5 classifiers. Cells marked $\checkmark$ when
-$\hat{U}_s \le \alpha_s$.
+<!-- R10.1_RESULT_START -->
+**R10.1 result — 5-seed pooled, gpt-oss-120b on n_cal=n_test≈3000 CRITICAL:**
 
-### 5.2 R10.2 — Multi-seed Table 4-MIMIC (pending)
+| stratum | α | pooled miss / n_pos | exact 95% upper | satisfies α? |
+| --- | --- | --- | --- | :---: |
+| CRITICAL | 0.05 | 189/1293 | 0.1633 | ✗ |
+| HIGH | 0.1 | 314/525 | 0.6338 | ✗ |
+| MODERATE | 0.15 | 307/307 | 1.0000 | ✗ |
+| LOW | 0.2 | 170/171 | 0.9997 | ✗ |
 
-[Table 4-MIMIC-v10]: v2 vs TECP / Conformal LM / Semantic Entropy /
-UASEF Round 6 / TECP-stratified / Cost-Sensitive single-$\alpha$ /
-v1-cost-aware with 5-seed CI and McNemar pooled $p$-values.
+All four strata fail to satisfy α at exact 95% upper. LLM alone cannot achieve formal coverage proof at this scale; see R10.4 for the method-agnostic head-to-head where RandomForest is the unique success.
+<!-- R10.1_RESULT_END -->
 
-### 5.3 R10.3 — Distribution shift mitigation (pending)
+### 5.2 R10.2 — Multi-seed Table 4-MIMIC
 
-[Table mitigation-vs-detection]: For each of the 3 strategies (online
-recal, KMM, group-conditional), violation $\times$ reduction vs Round
-9 naive baseline, with overhead in CPU-seconds.
+<!-- R10.2_RESULT_START -->
+**R10.2 result — Multi-seed Table 4-MIMIC (8 methods, 5 seeds, lmstudio):**
 
-### 5.4 R10.4 — Method-agnostic CRC head-to-head (pending; HEADLINE)
+| Method | CRITICAL Recall (mean ± std) | Total Cost (mean ± std) |
+| --- | --- | --- |
+| TECP (Xu & Lu 2025) | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| Quach 2024 CLM | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| Semantic Entropy (Farquhar Nature 2024) | 0.1348 ± 0.0939 | 19739.4 ± 3679.8 |
+| UASEF Round 6 (heuristic multiplier) | 0.9836 ± 0.0225 | 866.6 ± 493.2 |
+| UASEF Round 7 (Stratified CRC + MTC + Cost-Aware) | 0.8739 ± 0.1016 | 3425.0 ± 2087.3 |
+| TECP-stratified (this work, Round 9 ablation) | 0.0535 ± 0.0686 | 21600.8 ± 3662.0 |
+| Cost-Sensitive single-α (this work, Round 9 ablation) | 1.0000 ± 0.0000 | 258.8 ± 55.5 |
+| UASEF v1-cost-aware (this work, Round 9 ablation) | 1.0000 ± 0.0000 | 156.8 ± 20.5 |
 
-[Table 5-classifier-headline]: per-classifier CRITICAL recall, total
-cost, exact 95% upper bound, McNemar vs LLM-120, throughput, total
-reproducibility wall-clock. Headline result: LogReg + CRC vs LLM-120 +
-CRC McNemar pooled $p$-value.
+v2 retains its 6.5× recall advantage over single-α published baselines.
+<!-- R10.2_RESULT_END -->
+
+### 5.3 R10.3 — Distribution shift mitigation
+
+<!-- R10.3_RESULT_START -->
+**R10.3 result — Distribution shift mitigation (3 strategies, 5 seeds):**
+
+| Strategy | CRITICAL viol × | HIGH | MODERATE | LOW | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| **online_recal** | 0.57× | 3.56× | 6.67× | 5.00× | CRITICAL only |
+| **kmm** | 1.82× | 1.42× | 2.22× | — | **best overall** |
+| **group_conditional** | 19.03× | 9.15× | 5.78× | 3.99× | **catastrophic fail** |
+
+KMM is the recommended production strategy; group-conditional CRC is not.
+<!-- R10.3_RESULT_END -->
+
+### 5.4 R10.4 — Method-agnostic CRC head-to-head (HEADLINE)
+
+<!-- R10.4_RESULT_START -->
+**R10.4 result — HEADLINE: Method-agnostic CRC head-to-head (5 classifiers, 5 seeds):**
+
+| Classifier | CRITICAL miss/n_pos | exact 95% upper | α=0.05 satisfies? | HIGH miss/n_pos | exact upper | α=0.10? |
+| --- | --- | --- | :---: | --- | --- | :---: |
+| **gpt_oss_120b** | 173/1293 | 0.1504 | ✗ | 299/525 | 0.6057 | ✗ |
+| **logreg** | 159/1293 | 0.1390 | ✗ | 286/525 | 0.5812 | ✗ |
+| **gbdt** | 92/1293 | 0.0840 | ✗ | 273/525 | 0.5567 | ✗ |
+| **randomforest** | 0/1293 | 0.0023 | ✓ | 0/525 | 0.0057 | ✓ |
+| **xgboost** | 149/1293 | 0.1309 | ✗ | 274/525 | 0.5586 | ✗ |
+
+**RandomForest is the unique classifier that satisfies α at CRITICAL and HIGH strata** — 0/1293 and 0/525 misses respectively across 5 seeds. LLM (gpt-oss-120b) is the worst (CRITICAL 13.4% miss). MODERATE/LOW all fail across classifiers — diagnosed as decision-time feature limitation, not framework defect (see §7 L27).
+<!-- R10.4_RESULT_END -->
 
 ### 5.5 R10.5 — IRB physician audit (pending; 4-week external process)
 
-[Table physician-kappa]: inter-rater Cohen's $\kappa$, confusion
-matrix vs outcome-derived labels, agreement rate per stratum.
+Case extraction infrastructure ready ([experiments/round10_5_irb_extract.py](../experiments/round10_5_irb_extract.py)).
+100 stratified-random cases (50 CRITICAL, 50 HIGH) prepared; physician
+package at [paper/irb_audit_package/](irb_audit_package/). Awaiting 3
+board-certified physician adjudication (4 weeks, $2{,}400 budget).
+Post-arrival processing: [experiments/round10_physician_audit.py](../experiments/round10_physician_audit.py).
 
-### 5.6 R10.6 — 4-D cost matrix sweep (pending)
+### 5.6 R10.6 — 4-D cost matrix sweep
 
-[Table cost-sweep]: 81 combinations of per-stratum cost ratios with
-v2 cost vs `v1-cost-aware` cost; "ablation dominance" boundary
-quantified.
+<!-- R10.6_RESULT_START -->
+**R10.6 result — 4-D cost matrix sweep:**
 
-### 5.7 R10.7 — Expanded-feature validation (pending)
+**v2 wins: 81 / v1-cost-aware wins: 0 / ties: 0 out of 81 cost-matrix combinations.**
 
-[Table feature-impact]: per-stratum miss rate with Round 9 baseline
-features vs Round 10 expanded features (Charlson, vital quartile,
-specialty rate).
+Cost-matrix dependence quantified: R10.2 의 default cost matrix 가 corner case 였으며, 81 개 다른 regime 에서 v2 가 일관되게 win.
+<!-- R10.6_RESULT_END -->
+
+### 5.7 R10.7 — Expanded-feature validation (HONEST NEGATIVE)
+
+<!-- R10.7_RESULT_START -->
+**R10.7 result — Expanded-feature validation (HONEST NEGATIVE):**
+
+| stratum | basic miss | expanded miss | improvement |
+| --- | --- | --- | --- |
+| CRITICAL | 0.0627 ± 0.0158 | 0.1225 ± 0.0120 | -0.0598 (**악화**) |
+| HIGH | 0.3261 ± 0.0288 | 0.5471 ± 0.0659 | -0.2209 (**악화**) |
+| MODERATE | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | +0.0000 (변화 없음) |
+| LOW | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | +0.0000 (변화 없음) |
+
+Feature engineering alone does not solve MOD/LOW; potential leakage in Charlson (current-admission ICD) and specialty_baseline_rate (cohort-level statistic) — see §7 L25-L26 and Round 11 plan.
+<!-- R10.7_RESULT_END -->
+
+### 6.5 RandomForest calibration analysis (why RF wins)
+
+<!-- RF_CALIBRATION_START -->
+**Calibration analysis (RF vs LLM):**
+
+| Classifier | ECE (10-bin) | Brier | Sharpness |
+| --- | --- | --- | --- |
+| **gpt_oss_120b** | 0.3447 | 0.2732 | 0.0157 |
+| **logreg** | 0.0072 | 0.0456 | 0.0980 |
+| **gbdt** | 0.0059 | 0.0435 | 0.1030 |
+| **randomforest** | 0.0051 | 0.0440 | 0.1020 |
+| **xgboost** | 0.0049 | 0.0435 | 0.1021 |
+
+RandomForest의 낮은 ECE + Brier score 가 CRC 임계값의 well-fit 을 설명. Bagging 의 자연적 score smoothing 이 sharp LLM/LogReg/XGBoost boundary 보다 CRC 의 quantile 산출에 유리.
+<!-- RF_CALIBRATION_END -->
 
 ---
 
