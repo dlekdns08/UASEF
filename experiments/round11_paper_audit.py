@@ -178,9 +178,22 @@ def _build_rf_calibration_claims():
     """R10 RF calibration §6 ECE/Brier/sharpness."""
     j = load_json("round10/r10_rf_calibration.json")
     if not j: return
-    per_clf = j.get("per_classifier", {})
+    raw = j.get("per_classifier", [])
+    per_clf = {}
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict) and entry.get("classifier"):
+                per_clf[entry["classifier"]] = entry
+    elif isinstance(raw, dict):
+        per_clf = raw
+
+    json_field_map = {
+        "ece": "ece_10bin",
+        "brier": "brier",
+        "sharpness": "sharpness",
+    }
     spec = [
-        # (classifier, metric, paper value, abs_tolerance)
+        # (classifier, metric_label, paper value, abs_tolerance)
         ("gpt_oss_120b", "ece",       0.3447, 0.001),
         ("gpt_oss_120b", "brier",     0.2732, 0.001),
         ("gpt_oss_120b", "sharpness", 0.0157, 0.001),
@@ -191,7 +204,8 @@ def _build_rf_calibration_claims():
     ]
     for clf, metric, paper_v, tol in spec:
         d = per_clf.get(clf, {})
-        actual = d.get(metric) if isinstance(d, dict) else None
+        field = json_field_map[metric]
+        actual = d.get(field) if isinstance(d, dict) else None
         CLAIMS.append(Claim(
             name=f"§6 {clf} {metric}",
             paper_value=paper_v,
