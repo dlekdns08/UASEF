@@ -72,3 +72,5 @@ data/raw/eicu_*.jsonl
 # 로그
 *.log
 logs/
+
+paper/
