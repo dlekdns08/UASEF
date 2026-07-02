@@ -98,7 +98,20 @@ def _attach_r10_features(cases: list, jsonl_path: Path) -> None:
 # ── Classifier wrappers — uniform .fit(X, y) → score(x) ─────────────────────
 
 class _SklearnWrap:
-    """sklearn classifier → 비적합 점수 = -predict_proba(positive)."""
+    """sklearn classifier → nonconformity score = +predict_proba(positive).
+
+    CONVENTION (fixed 2026-07-02, R13 sign-bug audit): the whole UASEF
+    pipeline (StratifiedConformalRiskControl, BoundedCRC, R13/R14) uses the
+    contract "higher score = higher risk = escalate", with escalate iff
+    score > lambda and miss = positive left at score <= lambda.
+
+    The prior implementation returned -P(y=1), which INVERTS this contract:
+    a positive (high P) got the LOWEST score, so catching positives forced
+    lambda -> -inf, i.e. escalate-all. That inversion (not any framework
+    limit) produced the Round 10.4 / 11.1 vacuous "0-miss @ 100% over_esc"
+    collapse. We now return +P(y=1) so positives sit high, matching the
+    LLM path (s = -mean_logprob = uncertainty, higher = escalate).
+    """
     def __init__(self, model, name: str):
         self.model = model
         self.name = name
@@ -112,16 +125,16 @@ class _SklearnWrap:
         self.model.fit(X, y)
         return True
 
-    def score(self, x):
-        p = self.model.predict_proba([x])[0]
-        # positive class probability 의 negation = 비적합
-        # higher → less confident in positive (escalate)
-        # classes_ 가 [False, True] 또는 [0, 1] 순서로 가정
+    def _pos_idx(self):
         classes = list(self.model.classes_)
-        pos_idx = classes.index(True) if True in classes else (
+        return classes.index(True) if True in classes else (
             classes.index(1) if 1 in classes else len(classes) - 1
         )
-        return -float(p[pos_idx])
+
+    def score(self, x):
+        p = self.model.predict_proba([x])[0]
+        # +P(positive): higher = riskier = escalate (matches CRC contract)
+        return float(p[self._pos_idx()])
 
 
 def _make_classifier(name: str):

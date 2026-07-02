@@ -73,4 +73,6 @@ data/raw/eicu_*.jsonl
 *.log
 logs/
 
-paper/
+paper/data/raw/mimic-iv/mimic4_labvalues_6h.jsonl
+data/raw/mimic-iv/mimic4_labvalues_6h_guarded.jsonl
+data/raw/eicu_labvalues_6h.jsonl

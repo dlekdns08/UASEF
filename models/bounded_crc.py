@@ -96,11 +96,22 @@ class BoundedCRC:
     def __post_init__(self):
         if not (0 < self.alpha < 1):
             raise ValueError(f"alpha must be in (0,1), got {self.alpha}")
-        if not (self.c_miss > 0 and self.c_over > 0):
-            raise ValueError("c_miss and c_over must both be positive")
+        # c_over == 0 is permitted: it recovers the standard miss-only CRC
+        # loss (i.e. "vanilla CRC"), for which the escalate-all solution is
+        # NOT excluded (Proposition 2 condition alpha < c_over*Pr(Y=0) is
+        # never met). c_miss must remain strictly positive.
+        if self.c_miss <= 0:
+            raise ValueError("c_miss must be strictly positive")
+        if self.c_over < 0:
+            raise ValueError("c_over must be non-negative")
         if abs((self.c_miss + self.c_over) - 1.0) > 1e-9:
             raise ValueError(f"c_miss + c_over must equal 1, got "
                               f"{self.c_miss + self.c_over}")
+
+    @property
+    def is_vanilla(self) -> bool:
+        """c_over == 0 recovers standard (miss-only) CRC."""
+        return self.c_over == 0.0
 
     # ── loss + empirical risk ────────────────────────────────────────────
     def _empirical_risk(self, scores: np.ndarray, labels: np.ndarray,
@@ -145,6 +156,20 @@ class BoundedCRC:
             self.threshold_ = None
             self.empirical_risk_ = None
             return self
+
+        # Orientation guard: the CRC contract is "higher score = riskier =
+        # escalate", so calibration positives should score higher than
+        # negatives on average. If they score LOWER, the score sign is likely
+        # inverted (the R10.4 bug), which silently collapses to escalate-all.
+        pos = scores[labels == 1]; neg = scores[labels == 0]
+        if len(pos) and len(neg) and pos.mean() < neg.mean():
+            import warnings
+            warnings.warn(
+                f"[BoundedCRC] calibration positives have LOWER mean score "
+                f"({pos.mean():.4f}) than negatives ({neg.mean():.4f}). The "
+                f"score convention may be inverted (higher should = riskier). "
+                f"This will drive the threshold toward escalate-all.",
+                RuntimeWarning, stacklevel=2)
 
         B = max(self.c_miss, self.c_over)
 

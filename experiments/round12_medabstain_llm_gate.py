@@ -194,6 +194,10 @@ def evaluate_one_seed(cases, seed: int, n_cal: int, n_test: int,
     return {
         "seed": seed, "n_cal": len(cs), "n_test": len(ts),
         "per_stratum": per_stratum,
+        # Raw scores cached so Round 13/14 (b-CRC + ROC feasibility) can
+        # re-analyze the LLM NLL gate without re-inference.
+        "cal_scores": cs, "cal_labels": cl, "cal_strata": cst,
+        "test_scores": ts, "test_labels": tl, "test_strata": tst,
     }
 
 

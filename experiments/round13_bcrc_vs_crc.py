@@ -39,7 +39,12 @@ from experiments.metrics_utils import clopper_pearson_upper
 # Cost-weight grid
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Unified cost sweep. c_over=0.0 IS standard "vanilla" CRC (miss-only
+# loss); increasing c_over engages b-CRC's escalate-all exclusion.
+# This makes vanilla a *special case* of the same code path, so the
+# comparison is exact (no separate reimplementation).
 COST_GRID = [
+    (1.00, 0.00),   # vanilla CRC (miss-only) — reproduces paper Rounds 10-12
     (0.95, 0.05),
     (0.90, 0.10),
     (0.80, 0.20),
@@ -47,22 +52,6 @@ COST_GRID = [
 ]
 
 ALPHAS = {"CRITICAL": 0.05, "HIGH": 0.10, "MODERATE": 0.15, "LOW": 0.20}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Vanilla CRC (per paper §3, standard formulation) for fair comparison
-# ─────────────────────────────────────────────────────────────────────────────
-
-def vanilla_crc_threshold(cal_scores: np.ndarray, cal_labels: np.ndarray,
-                            alpha: float) -> float:
-    """Standard CRC threshold for miss-only loss.
-
-    Equivalent to the R10/R11/R12 code path — quantile of positive scores.
-    """
-    pos = cal_scores[cal_labels == 1]
-    if len(pos) == 0:
-        return float("-inf")   # vacuous fallback
-    return float(np.quantile(pos, alpha, method="lower"))
 
 
 def eval_threshold(scores: np.ndarray, labels: np.ndarray,
@@ -107,41 +96,39 @@ def strict_verdict(row: dict, alpha: float,
 
 def evaluate_cell(cal_scores, cal_labels, test_scores, test_labels,
                     alpha: float) -> dict:
-    """Return {vanilla, b_crc_by_cost} rows for a single (seed, stratum)."""
+    """Return the cost-sweep rows for a single (seed, stratum).
+
+    c_over=0.0 (COST_GRID[0]) is vanilla CRC; everything else is b-CRC.
+    A single BoundedCRC code path fits all, so vanilla is an exact special
+    case (no separate reimplementation to drift from the paper numbers).
+    """
     cal_scores = np.asarray(cal_scores, dtype=float)
     cal_labels = np.asarray(cal_labels, dtype=int)
     test_scores = np.asarray(test_scores, dtype=float)
     test_labels = np.asarray(test_labels, dtype=int)
 
-    # NaN 제거
     def _clean(s, l):
         m = np.isfinite(s)
         return s[m], l[m]
     cal_scores, cal_labels = _clean(cal_scores, cal_labels)
     test_scores, test_labels = _clean(test_scores, test_labels)
 
-    out = {}
-
-    # Vanilla CRC
-    lam_v = vanilla_crc_threshold(cal_scores, cal_labels, alpha)
-    row = eval_threshold(test_scores, test_labels, lam_v)
-    row["verdict"] = strict_verdict(row, alpha)
-    out["vanilla"] = row
-
-    # b-CRC grid
-    out["b_crc"] = {}
+    out = {"b_crc": {}}
     for cm, co in COST_GRID:
         key = f"cm{cm}_co{co}"
         bcrc = BoundedCRC(alpha=alpha, c_miss=cm, c_over=co)
         bcrc.fit(cal_scores, cal_labels)
         if bcrc.infeasible_:
-            out["b_crc"][key] = {"infeasible": True, "verdict": "INFEASIBLE"}
+            out["b_crc"][key] = {"infeasible": True, "verdict": "INFEASIBLE",
+                                  "c_miss": cm, "c_over": co}
             continue
         lam_b = bcrc.threshold_
         row = eval_threshold(test_scores, test_labels, lam_b)
         row["c_miss"] = cm; row["c_over"] = co
         row["verdict"] = strict_verdict(row, alpha)
         out["b_crc"][key] = row
+    # Alias the vanilla (c_over=0) cell for convenience
+    out["vanilla"] = out["b_crc"][f"cm{COST_GRID[0][0]}_co{COST_GRID[0][1]}"]
     return out
 
 
@@ -200,6 +187,54 @@ def recompute_r10_r11(classifier: str, jsonl_path: Path,
             "seed": seed,
             "cal_scores": cal_scores,
             "test_scores": test_scores,
+            "cal_labels": [int(bool(c.expected_escalate)) for c in cal],
+            "test_labels": [int(bool(c.expected_escalate)) for c in test],
+            "cal_strata": [(c.scenario_type or "").upper() for c in cal],
+            "test_strata": [(c.scenario_type or "").upper() for c in test],
+        })
+    return per_seed
+
+
+def recompute_eicu(classifier: str, eicu_jsonl: Path, pass_name: str,
+                    n_cal=3000, n_test=3000,
+                    seeds=(42, 43, 44, 45, 46)) -> list[dict]:
+    """Recompute tabular per-seed scores for eICU (Pass A or Pass B)."""
+    import random as _random
+    from experiments.round11_eicu_replication import (
+        load_eicu_jsonl, fv_pass_a, fv_pass_b, EHRCaseLite,
+    )
+    from experiments.round10_method_agnostic import _make_classifier
+    from experiments.metrics_utils import patient_level_split
+
+    if not eicu_jsonl.exists():
+        return []
+    fv_fn = fv_pass_a if pass_name == "pass_a" else fv_pass_b
+
+    def _case_to_dict(c):
+        return {k: getattr(c, k) for k in EHRCaseLite.__slots__}
+
+    def _subj(c):
+        return c.subject_id
+
+    cases = load_eicu_jsonl(eicu_jsonl)
+    per_seed = []
+    for seed in seeds:
+        cal, test = patient_level_split(cases, group_of=_subj,
+                                          cal_frac=0.8, seed=seed)
+        rng = _random.Random(seed); rng.shuffle(cal); rng.shuffle(test)
+        cal = cal[:n_cal]; test = test[:n_test]
+
+        clf = _make_classifier(classifier)
+        X_cal = [fv_fn(_case_to_dict(c)) for c in cal]
+        y_cal = [bool(c.expected_escalate) for c in cal]
+        if not clf.fit(X_cal, y_cal):
+            per_seed.append({"seed": seed, "error": "fit fail"}); continue
+        cal_scores = [clf.score(x) for x in X_cal]
+        X_test = [fv_fn(_case_to_dict(c)) for c in test]
+        test_scores = [clf.score(x) for x in X_test]
+        per_seed.append({
+            "seed": seed,
+            "cal_scores": cal_scores, "test_scores": test_scores,
             "cal_labels": [int(bool(c.expected_escalate)) for c in cal],
             "test_labels": [int(bool(c.expected_escalate)) for c in test],
             "cal_strata": [(c.scenario_type or "").upper() for c in cal],
@@ -389,6 +424,8 @@ def write_md(report: dict, out_md: Path):
                 v = clf_result["aggregate"]["vanilla"].get(stratum, {})
                 best_bcrc = None; best_verdict = "N/A"
                 for cm, co in COST_GRID:
+                    if co == 0.0:
+                        continue   # c_o=0 is vanilla, not b-CRC
                     key = f"cm{cm}_co{co}"
                     b = clf_result["aggregate"]["b_crc"][key].get(stratum, {})
                     verdict = b.get("verdict", "N/A")
@@ -413,26 +450,17 @@ def write_md(report: dict, out_md: Path):
                 lines.append(f"\n**{stratum}** (α = {clf_result['alphas'][stratum]})\n")
                 lines.append("| Method | c_m | c_o | miss/n_pos | upper 95% | over_esc | verdict |")
                 lines.append("|---|---|---|---|---|---|---|")
-                v = clf_result["aggregate"]["vanilla"].get(stratum, {})
-                if v and "pooled_misses" in v:
-                    lines.append(
-                        f"| Vanilla | — | — | "
-                        f"{v['pooled_misses']}/{v['pooled_n_pos']} "
-                        f"({(v['pooled_miss_rate'] or 0)*100:.2f}%) | "
-                        f"{v['pooled_exact_upper95']:.4f} | "
-                        f"{(v['pooled_over_esc_rate'] or 0)*100:.2f}% | "
-                        f"**{v['verdict']}** |"
-                    )
                 for cm, co in COST_GRID:
                     key = f"cm{cm}_co{co}"
+                    method = "Vanilla CRC" if co == 0.0 else "b-CRC"
                     b = clf_result["aggregate"]["b_crc"][key].get(stratum, {})
                     if b.get("infeasible_all"):
                         lines.append(
-                            f"| b-CRC | {cm} | {co} | — | — | — | INFEASIBLE ({b['n_seeds_infeasible']}/5) |"
+                            f"| {method} | {cm} | {co} | — | — | — | INFEASIBLE ({b['n_seeds_infeasible']}/5) |"
                         )
                         continue
                     lines.append(
-                        f"| b-CRC | {cm} | {co} | "
+                        f"| {method} | {cm} | {co} | "
                         f"{b['pooled_misses']}/{b['pooled_n_pos']} "
                         f"({(b['pooled_miss_rate'] or 0)*100:.2f}%) | "
                         f"{b['pooled_exact_upper95']:.4f} | "
@@ -491,6 +519,24 @@ def main():
                 f"mimic4_r11_1_{clf}", per_seed,
                 strata_list=["CRITICAL", "HIGH", "MODERATE", "LOW"],
                 alphas=ALPHAS)
+
+    # eICU R11.3 Pass A (9-feature) + Pass B (4-feature minimal)
+    if args.eicu_jsonl.exists():
+        for pass_name in ["pass_a", "pass_b"]:
+            print(f"[R13] eICU R11.3 {pass_name}")
+            cohort_key = f"eicu_r11_3_{pass_name}"
+            cohorts[cohort_key] = {}
+            for clf in args.classifiers:
+                print(f"  fitting {clf}...")
+                per_seed = recompute_eicu(
+                    clf, args.eicu_jsonl, pass_name,
+                    n_cal=args.n_cal, n_test=args.n_test)
+                cohorts[cohort_key][clf] = run_cohort(
+                    f"{cohort_key}_{clf}", per_seed,
+                    strata_list=["CRITICAL", "HIGH", "MODERATE", "LOW"],
+                    alphas=ALPHAS)
+    else:
+        print(f"[R13] eICU JSONL missing ({args.eicu_jsonl}) — skipping")
 
     # R12.1 MedAbstain (LLM cache, if raw scores present)
     r12_data = load_r12_1_seed_data()
