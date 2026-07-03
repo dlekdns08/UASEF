@@ -159,3 +159,126 @@ class DefinitionalLeakageDetector:
                          self.auroc_thr,
                          f"leaky features: {flagged}" if flagged
                          else f"max univariate AUROC={max_au:.3f}")
+
+
+# ── functional API (thin, importable) ─────────────────────────────────────────
+# Each detector is exposed as a plain function so callers can use the suite
+# without instantiating classes:  from models.audit_detectors import detect_orientation
+
+def detect_orientation(scores, labels, *, margin: float = 0.0) -> AuditFlag:
+    return OrientationDetector(margin).detect(scores, labels)
+
+
+def detect_escalate_all(over_esc_rate: float, *, vacuous_thr: float = 0.95) -> AuditFlag:
+    return EscalateAllDetector(vacuous_thr).detect(over_esc_rate)
+
+
+def detect_temporal_leakage(feature_time, outcome_time, label, *, frac_thr: float = 0.05) -> AuditFlag:
+    return TemporalLeakageDetector(frac_thr).detect(feature_time, outcome_time, label)
+
+
+def detect_informative_missingness(auroc_full, auroc_value, auroc_flag, *,
+                                   recover_thr: float = 0.85) -> AuditFlag:
+    return InformativeMissingnessDetector(recover_thr).detect(auroc_full, auroc_value, auroc_flag)
+
+
+def detect_definitional_leakage(X, y, *, names=None, auroc_thr: float = 0.90) -> AuditFlag:
+    return DefinitionalLeakageDetector(auroc_thr).detect(X, y, names=names)
+
+
+#: name -> detector class, for programmatic iteration / documentation
+DETECTORS = {
+    "orientation": OrientationDetector,
+    "escalate_all": EscalateAllDetector,
+    "temporal_leakage": TemporalLeakageDetector,
+    "informative_missingness": InformativeMissingnessDetector,
+    "definitional_leakage": DefinitionalLeakageDetector,
+}
+
+__all__ = [
+    "AuditFlag", "DETECTORS",
+    "OrientationDetector", "EscalateAllDetector", "TemporalLeakageDetector",
+    "InformativeMissingnessDetector", "DefinitionalLeakageDetector",
+    "detect_orientation", "detect_escalate_all", "detect_temporal_leakage",
+    "detect_informative_missingness", "detect_definitional_leakage",
+    "run_all_detectors",
+]
+
+
+def run_all_detectors(*, scores=None, labels=None, over_esc_rate=None,
+                      feature_time=None, outcome_time=None,
+                      auroc_full=None, auroc_value=None, auroc_flag=None,
+                      X=None, y=None, names=None) -> dict[str, AuditFlag]:
+    """Run whichever detectors have their inputs supplied; return name -> AuditFlag.
+
+    Every argument is optional — a detector runs only if its inputs are present,
+    so the same call site works whether you hold scores, a feature matrix, both,
+    or precomputed AUROCs."""
+    out: dict[str, AuditFlag] = {}
+    if scores is not None and labels is not None:
+        out["orientation"] = detect_orientation(scores, labels)
+    if over_esc_rate is not None:
+        out["escalate_all"] = detect_escalate_all(over_esc_rate)
+    if feature_time is not None and outcome_time is not None and labels is not None:
+        out["temporal_leakage"] = detect_temporal_leakage(feature_time, outcome_time, labels)
+    if auroc_full is not None and auroc_flag is not None:
+        av = auroc_value if auroc_value is not None else auroc_full
+        out["informative_missingness"] = detect_informative_missingness(auroc_full, av, auroc_flag)
+    if X is not None and y is not None:
+        out["definitional_leakage"] = detect_definitional_leakage(X, y, names=names)
+    return out
+
+
+# ── smoke test:  python -m models.audit_detectors ─────────────────────────────
+def _smoke() -> int:
+    """Synthetic known-answer smoke test (no data files, deterministic).
+
+    Each detector is exercised on a clean case (must NOT flag) and a
+    contaminated case (must flag). Returns process exit code (0 = all pass)."""
+    rng = np.random.default_rng(0)
+    n = 2000
+    y = (rng.random(n) < 0.3).astype(int)
+    # correctly-signed score: positives higher; inverted: positives lower
+    good = rng.normal(y * 1.2, 1.0)
+    checks = []  # (name, expected_flag, AuditFlag)
+
+    checks.append(("orientation/clean", False, detect_orientation(good, y)))
+    checks.append(("orientation/inverted", True, detect_orientation(-good, y)))
+    checks.append(("escalate_all/clean", False, detect_escalate_all(0.30)))
+    checks.append(("escalate_all/vacuous", True, detect_escalate_all(0.99)))
+
+    ft = rng.random(n); ot = np.where(y == 1, rng.random(n), np.inf)
+    ft_clean = np.where(y == 1, ot - 0.3, ft)          # features before outcome
+    ft_leak = np.where(y == 1, ot + 0.3, ft)           # features after outcome
+    checks.append(("temporal/clean", False, detect_temporal_leakage(ft_clean, ot, y)))
+    checks.append(("temporal/leak", True, detect_temporal_leakage(ft_leak, ot, y)))
+
+    checks.append(("missingness/value-driven", False,
+                   detect_informative_missingness(0.80, 0.79, 0.52)))
+    checks.append(("missingness/ordering-driven", True,
+                   detect_informative_missingness(0.80, 0.55, 0.79)))
+
+    Xr = rng.normal(size=(n, 4))                        # random, non-leaky
+    Xl = np.column_stack([Xr, y + rng.normal(0, 0.01, n)])  # last col = label
+    checks.append(("definitional/clean", False, detect_definitional_leakage(Xr, y)))
+    checks.append(("definitional/leak", True,
+                   detect_definitional_leakage(Xl, y, names=["a", "b", "c", "d", "LEAK"])))
+
+    print(f"UASEF diagnostic detectors — smoke test (n={n}, seed=0)\n")
+    print(f"{'case':32s} {'expect':7s} {'flagged':8s} {'stat':>7s}  result")
+    print("-" * 72)
+    ok = True
+    for name, expected, flag in checks:
+        passed = flag.flagged == expected
+        ok &= passed
+        print(f"{name:32s} {str(expected):7s} {str(flag.flagged):8s} "
+              f"{flag.statistic:7.3f}  {'PASS' if passed else 'FAIL'}")
+    print("-" * 72)
+    print(f"{'ALL PASS' if ok else 'FAILURES PRESENT'} "
+          f"({sum(f.flagged == e for _, e, f in checks)}/{len(checks)})")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(_smoke())
