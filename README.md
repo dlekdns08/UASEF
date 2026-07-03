@@ -8,10 +8,123 @@ LLM 기반 의료 에이전트가 **자신의 불확실성을 정량화**하고,
 
 ---
 
+> ## ⭐ 현재 주력 연구 (2026) — Diagnostic Framework for Conformal Clinical-Escalation Pipelines
+>
+> 이 저장소의 **현재 주력 연구**는 초기의 "LLM 에스컬레이션 게이트 구축"에서
+> 한 걸음 나아가, **conformal clinical-escalation 파이프라인을 위한 *검증된 진단
+> 프레임워크*** 로 발전했습니다. 핵심 통찰: 임상 CP 게이트는 커버리지가 완벽해
+> 보여도 **여러 구조적 함정(leakage·orientation·informative missingness)** 때문에
+> 배포 불가한데, 커버리지만 보고하면 이 함정이 드러나지 않습니다. 우리는 이 함정들을
+> **측정 가능한 탐지기**로 형식화하고, MIMIC-IV·eICU-CRD 실데이터에서 검증합니다.
+>
+> - **대상 저널**: ***Patterns*** (Cell Press) — data-science methodology
+> - **논문 초안**: [paper/UASEF_PATTERNS_2026.md](paper/UASEF_PATTERNS_2026.md)
+> - **상세 문서**: 아래 [§0.8 진단 프레임워크](#08-현재-연구--diagnostic-framework-patterns-2026) 참조
+> - **재현성**: 검증 코어 10/10 tests, 전량 로컬 연산, 외부 API $0, PHI egress 0 bytes
+>
+> 아래 **§0.5~§12** 는 원래의 LLM-escalation 프레임워크(v1/v2 — UQM/RTC/EDE,
+> LangGraph ReAct)를 다루며, **여전히 유효한 참조 구현**으로 보존됩니다.
+
+---
+
+## 0.8. 현재 연구 — Diagnostic Framework (Patterns 2026)
+
+> **논문**: *A Validated Diagnostic Framework for Conformal Clinical-Escalation
+> Pipelines: Five Failure Modes, Five Detectors, and a Reporting Audit*
+> ([paper/UASEF_PATTERNS_2026.md](paper/UASEF_PATTERNS_2026.md)).
+
+### 0.8.1 무엇이 바뀌었나 (연구 재정의)
+
+초기 UASEF는 "LLM logprob CP로 에스컬레이션 게이트를 만든다"였습니다. 실데이터
+(MIMIC-IV structured EHR)로 검증하는 과정에서 **그럴듯해 보이는 "성공"이 실은
+다섯 종류의 아티팩트**였음을 적대적 검증(adversarial workflow)으로 밝혀냈습니다:
+
+1. **Score-sign 반전** — `score = -P(y=1)` 관례 버그가 CRC를 뒤집어 escalate-all 붕괴
+2. **Escalate-all 붕괴** — 임계값이 모든 케이스를 에스컬레이션(vacuous coverage)
+3. **Temporal leakage** — outcome/ICU-transfer 이후 charttime 피처 유입
+4. **Informative missingness** — *어떤* lab을 주문했나 자체가 severity proxy
+5. **Definitional leakage** — outcome에서 파생된 피처(예: APACHE)
+
+이 다섯을 각각 **입력·통계량·판정 규칙이 정의된 형식적 탐지기**로 만들고, 아티팩트를
+제거한 뒤 남은 **정직한 음성 결과(leakage-safe floor)** 를 정보이론 상한으로 확정했습니다.
+
+### 0.8.2 다섯 실패 모드 · 다섯 탐지기 ([models/audit_detectors.py](models/audit_detectors.py))
+
+| 탐지기 | 통계량 | 판정 규칙 | 측정 성능 (known-answer benchmark) |
+| --- | --- | --- | --- |
+| **Orientation** | AUROC(s, Y) | flag if < 0.5 | sensitivity 1.00 / specificity 1.00 |
+| **Escalate-all** | λ̂에서 over-escalation | flag if ≥ 0.95 | vacuous(0.95) vs weak-but-real(0.93) 분리 |
+| **Temporal leakage** | outcome 이후 양성 피처 비율 | flag if > 0.05 | 0% 주입 시 FP 0, 5%부터 발화 |
+| **Informative missingness** | flag-only ÷ full above-chance (recover) | flag if ≥ 0.85 | null-calibrated (아래 R28: 임계 z=11.2) |
+| **Definitional leakage** | 최대 단변량 AUROC | flag if ≥ 0.90 | 0 leak 시 FP 0, strength 0.8부터 발화 |
+
+### 0.8.3 검증된 코어 ([models/conformal_escalation.py](models/conformal_escalation.py))
+
+- **StandardCRC** (sup-λ 효율 임계) + **BoundedCRC** (양측 손실)
+- **orientation guard** — 관례 버그를 fit 단계에서 차단, 실패 시 조용한 escalate-all 대신 **명시적 INFEASIBLE**
+- `_evaluate` → `satisfies_crc / high_conf_coverage / vacuous / genuine_win` 판정
+- **10/10 단위 테스트** ([tests/test_conformal_escalation.py](tests/test_conformal_escalation.py)): separable→non-vacuous, noise→high over_esc, inverted-sign→붕괴 재현
+
+### 0.8.4 핵심 결과
+
+| 결과 | 수치 | 위치 |
+| --- | --- | --- |
+| **Leakage-safe floor** (MIMIC-IV 14,000) | CRITICAL FULL AUROC **0.796**, value≈flag (0.795/0.791), over_esc 0.534 — 값이 주문 여부 위에 거의 추가 정보 없음 → **배포 가능한 게이트 없음** | §7, R18 |
+| **정보이론 상한** | 합법적 decision-time 피처가 H(Y)의 **≈29%(I/H=0.29)** 만 해소; 6개 모델·KSG·label-noise 전반 강건 | §7, R22·R25 |
+| **보고 감사** | 24편 dual-coded, Cohen's **κ=0.73**; real-EHR CP 부분집합 n=10 → **0/10** informative-missingness 완전처리(95% CP 상한 0.31) | §6, R26·R29 |
+| **교차기관 전이** | MIMIC 고정 임계 → eICU regime-correct, 27%→74% 커버리지 이동에도 portable | §5.5, R27 |
+| **임계 null-calibration** | 0.85 경보선 = 순열 귀무 대비 z=11.2(보수적); 관측 0.82 = z=10.8(substantive) | §3, R28 |
+| **충실한 CPMORS 24h 재구성** | ordering-recovery 0.62(6h)→0.82(24h) — 신호 82%가 lab 값 아닌 주문 행위 | §5.4, R23 |
+
+### 0.8.5 실험 인벤토리 (R18–R29)
+
+> 실행 전: `export UASEF_BACKEND_NEVER_SEND_PHI=1` (PHI 전송 차단). 원시데이터는
+> PhysioNet credentialed (MIMIC-IV v3.1·eICU-CRD v2.0), 저장소에 재배포하지 않음
+> (`.gitignore` 처리). 모든 연산 로컬, 외부 API $0.
+
+| 실험 | 목적 | 산출물 |
+| --- | --- | --- |
+| [round18_leakage_safe_floor.py](experiments/round18_leakage_safe_floor.py) | decision-time-guarded floor 산출 | `results/round18/` |
+| [round19_eicu_audit.py](experiments/round19_eicu_audit.py) | eICU 독립 데이터셋 감사 검증 | `results/round19/` |
+| [round20_detector_benchmark.py](experiments/round20_detector_benchmark.py) | 탐지기 sens/spec (주입 벤치마크) | `results/round20/` |
+| [round21_audit_published_pipeline.py](experiments/round21_audit_published_pipeline.py) | 재구성 published 파이프라인 감사 (6h) | `results/round21/` |
+| [round22_mi_boundary.py](experiments/round22_mi_boundary.py) | 정보이론 상한 (3-way contrast) | `results/round22/` |
+| [round23_cpmors_24h.py](experiments/round23_cpmors_24h.py) | CPMORS 24h 충실 재구성 감사 | `results/round23/` |
+| [round24_semireal_benchmark.py](experiments/round24_semireal_benchmark.py) | 실 MIMIC에 known leakage 주입 벤치마크 | `results/round24/` |
+| [round25_mi_robustness.py](experiments/round25_mi_robustness.py) | MI 상한 강건성 (6모델+KSG+noise) | `results/round25/` |
+| [round26_interrater_kappa.py](experiments/round26_interrater_kappa.py) | 감사 inter-rater Cohen's κ | `results/lit_audit/kappa.*` |
+| [round27_threshold_transfer.py](experiments/round27_threshold_transfer.py) | MIMIC→eICU 임계 전이 | `results/round27/` |
+| [round28_missingness_null_calibration.py](experiments/round28_missingness_null_calibration.py) | 결측 임계 순열 null-calibration | `results/round28/` |
+| [round29_audit_expand_merge.py](experiments/round29_audit_expand_merge.py) | real-EHR 감사 확장 병합 + κ 재계산 | `results/lit_audit/expanded_audit_stats.*` |
+
+```bash
+# 검증 코어 단위 테스트 (데이터 불필요, ~1초)
+.venv/bin/python -m pytest tests/test_conformal_escalation.py -q      # 10/10
+
+# 탐지기 known-answer 벤치마크 (합성, 데이터 불필요)
+.venv/bin/python experiments/round20_detector_benchmark.py
+
+# 실데이터 실험 (PhysioNet 자격 + 로컬 캐시 필요)
+export UASEF_BACKEND_NEVER_SEND_PHI=1
+.venv/bin/python experiments/round18_leakage_safe_floor.py     # leakage-safe floor
+.venv/bin/python experiments/round22_mi_boundary.py            # 정보이론 상한
+.venv/bin/python experiments/round27_threshold_transfer.py     # 교차기관 전이
+```
+
+### 0.8.6 재현성 · 데이터 컴플라이언스
+
+- **검증 코어 + 탐지기**: 순수 함수 + 단위 테스트. 데이터 없이 실행/검증 가능.
+- **문헌 감사**: `results/lit_audit/` — 24편 dual-coded codings(coder A/B), κ, 확장 통계. 논문 초록·출처만 사용, 원문 재배포 없음.
+- **PHI 보호**: `UASEF_BACKEND_NEVER_SEND_PHI=1` 상시, 원시 EHR·lab 캐시 `.gitignore` 제외, 전량 로컬 처리 (PHI egress 0 bytes, 외부 API $0).
+- **관련 문서**: [paper/ENDPOINT_COLLAPSE_THEOREM.md](paper/ENDPOINT_COLLAPSE_THEOREM.md) (endpoint-collapse 정리), [paper/LITERATURE_AUDIT_PROTOCOL.md](paper/LITERATURE_AUDIT_PROTOCOL.md) (감사 프로토콜), [improvements/round23plus_PLAN.md](improvements/round23plus_PLAN.md) (R23–R29 강화 계획).
+
+---
+
 ## 목차
 
 0. [Quick Start](#0-quick-start-5줄)
 0.5. [v2 Framework — Round 7](#05-v2-framework--round-7-이론적-기여-강화) (Stratified CRC + Multi-Trigger Combination + Cost-Aware)
+0.8. [⭐ 현재 연구 — Diagnostic Framework (Patterns 2026)](#08-현재-연구--diagnostic-framework-patterns-2026) (Five Failure Modes · Five Detectors · Reporting Audit)
 1. [연구 배경 및 동기](#1-연구-배경-및-동기)
 2. [핵심 설계 철학](#2-핵심-설계-철학)
 3. [프로젝트 구조](#3-프로젝트-구조)

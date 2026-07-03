@@ -8,6 +8,67 @@ A research framework in which LLM-based medical agents **quantify their own unce
 
 ---
 
+> ## ⭐ Current focus (2026) — A Diagnostic Framework for Conformal Clinical-Escalation Pipelines
+>
+> The repository's **current primary line of work** has grown from "build an LLM
+> escalation gate" into a **validated *diagnostic framework* for conformal
+> clinical-escalation pipelines**. Core insight: a clinical CP gate can look
+> perfectly covered yet be undeployable because of several **structural traps**
+> (leakage, orientation, informative missingness) — and coverage-only reporting
+> hides them. We formalize these traps as **measurable detectors** and validate
+> them on real MIMIC-IV / eICU-CRD data.
+>
+> - **Target venue**: ***Patterns*** (Cell Press) — data-science methodology
+> - **Paper draft**: [paper/UASEF_PATTERNS_2026.md](paper/UASEF_PATTERNS_2026.md)
+> - **Reproducibility**: verified core 10/10 tests, all-local compute, external API $0, PHI egress 0 bytes
+>
+> Sections **§1–§12** below document the original LLM-escalation framework
+> (v1/v2 — UQM/RTC/EDE, LangGraph ReAct), preserved as a working reference.
+
+### Five failure modes → five detectors
+
+Adversarial verification on real MIMIC-IV structured EHR revealed that several
+plausible-looking "wins" were in fact artifacts. Each is now a formal detector
+([models/audit_detectors.py](models/audit_detectors.py)):
+
+| Detector | Statistic | Rule | Measured (known-answer) |
+| --- | --- | --- | --- |
+| **Orientation** | AUROC(s, Y) | flag if < 0.5 | sensitivity 1.00 / specificity 1.00 |
+| **Escalate-all** | over-escalation at λ̂ | flag if ≥ 0.95 | separates vacuous (0.95) from weak-but-real (0.93) |
+| **Temporal leakage** | frac. of positive features after outcome | flag if > 0.05 | 0 FP at 0% injection; fires from 5% |
+| **Informative missingness** | flag-only ÷ full above-chance | flag if ≥ 0.85 | null-calibrated (threshold z=11.2 above permutation null) |
+| **Definitional leakage** | max univariate AUROC | flag if ≥ 0.90 | 0 FP at 0 leak; fires from strength 0.8 |
+
+### Key results
+
+| Result | Number | Where |
+| --- | --- | --- |
+| **Leakage-safe floor** (MIMIC-IV 14,000) | CRITICAL AUROC 0.796, value≈flag, over-esc 0.534 → no deployable gate | §7 / R18 |
+| **Information ceiling** | legitimate decision-time features resolve only I/H ≈ 0.29 of H(Y); robust over 6 models + KSG + label noise | §7 / R22·R25 |
+| **Reporting audit** | 24 papers dual-coded, Cohen's κ=0.73; real-EHR CP subset n=10 → 0/10 fully handle informative missingness (95% CP upper 0.31) | §6 / R26·R29 |
+| **Cross-institution transfer** | MIMIC-fixed thresholds transfer to eICU (regime-correct across 27%→74% coverage) | §5.5 / R27 |
+| **Threshold null-calibration** | 0.85 alarm = z=11.2 above permutation null (conservative); observed 0.82 = z=10.8 (substantive) | §3 / R28 |
+
+**Verified core** ([models/conformal_escalation.py](models/conformal_escalation.py)):
+StandardCRC (sup-λ) + BoundedCRC + an **orientation guard** that raises an
+explicit **INFEASIBLE** rather than silently collapsing to escalate-all; 10/10
+unit tests ([tests/test_conformal_escalation.py](tests/test_conformal_escalation.py)).
+
+**Experiments R18–R29** live in [experiments/](experiments/) (`round18…round29`);
+`results/round18–29/` and `results/lit_audit/` hold the outputs. Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_conformal_escalation.py -q   # 10/10, no data needed
+.venv/bin/python experiments/round20_detector_benchmark.py         # synthetic detector benchmark
+export UASEF_BACKEND_NEVER_SEND_PHI=1                               # PHI egress guard for real-data runs
+.venv/bin/python experiments/round18_leakage_safe_floor.py
+```
+
+Raw MIMIC-IV/eICU are PhysioNet-credentialed and never redistributed (`.gitignore`);
+all compute is local (PHI egress 0 bytes, external API $0).
+
+---
+
 ## Table of Contents
 
 1. [Background and Motivation](#1-background-and-motivation)
