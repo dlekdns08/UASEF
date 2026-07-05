@@ -54,9 +54,13 @@ def _prompt(item: QAItem) -> str:
             f"Confidence: <integer 0-100>")
 
 
+def _strip_md(text: str) -> str:
+    return re.sub(r"[*#`]", "", text or "")
+
+
 def _parse_answer(text: str, mcq: bool) -> str:
-    t = text or ""
-    m = re.search(r"Answer:\s*([A-Da-d]|yes|no|maybe)", t, re.I)
+    t = _strip_md(text)
+    m = re.search(r"Answer:\s*\(?([A-Da-d]|yes|no|maybe)\b", t, re.I)
     if m:
         return m.group(1).strip().upper() if mcq else m.group(1).strip().lower()
     # fallback: last standalone token
@@ -68,15 +72,16 @@ def _parse_answer(text: str, mcq: bool) -> str:
 
 
 def _parse_conf(text: str):
-    m = re.search(r"Confidence:\s*(\d{1,3})", text or "", re.I)
+    m = re.search(r"Confidence:\s*(\d{1,3})", _strip_md(text), re.I)
     if not m:
         return None
     return max(0.0, min(1.0, int(m.group(1)) / 100.0))
 
 
 def _parse_reasoning(text: str) -> str:
-    m = re.search(r"Reasoning:\s*(.+?)(?:\nAnswer:|$)", text or "", re.I | re.S)
-    return (m.group(1).strip() if m else (text or "").strip())[:1000]
+    t = _strip_md(text)
+    m = re.search(r"Reasoning:\s*(.+?)(?:\nAnswer:|Answer:|$)", t, re.I | re.S)
+    return (m.group(1).strip() if m else t.strip())[:1000]
 
 
 def make_draft(item: QAItem, k: int, temp: float) -> DraftRecord:
