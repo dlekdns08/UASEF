@@ -107,26 +107,32 @@ Phase-0 pipeline; the real go/no-go number requires real drafts.
 - **Verified (code):** label-conditional conformal core (11/11 Monte-Carlo),
   risk-feature extractor, MedMCQA/PubMedQA loaders, Phase-0 gatekeeper, Phase-1
   Stage-A runner (synthetic end-to-end), draft generator (real gpt-oss-120b).
-- **Real Phase 0 (LMStudio gpt-oss-120b, n=279 = 199 MedMCQA + 80 PubMedQA):**
-  **GO** — pooled CV AUROC(risk,error) = **0.825** (MedMCQA 0.822, PubMedQA
-  0.693); error prevalence 0.355 (99 error cases); every draft parsed, all with
-  logprobs. Strongest single feature: **verbalized_uncertainty (AUROC 0.845)** —
-  flagged for the Phase-2 verbalized-confidence / self-deception audit (§0.6 of
-  the plan). Results: `results/phase0/phase0_gatekeeper.json`.
-- **Real Phase 1 Stage-A (same n=279):** the mechanism runs (risk AUROC(test)
-  0.84) but **n is too small for a stable single-split guarantee** — a single
-  locked test carries ~35 error cases, so the empirical `P(release|incorrect)`
-  fluctuates around α (α=0.10 landed at 0.114, within sampling noise; α=0.05
-  collapses toward escalate-all because the cal error count is small). The
-  marginal guarantee **is confirmed on real data by a 200-split Monte-Carlo**
-  (`results/phase1/phase1_multisplit_verification.json`): mean
-  `P(release|incorrect)` = **0.085** (α=0.10) / **0.033** (α=0.05), both ≤ α,
-  feasible 200/200 — but per-split satisfaction is only 66–75% at this n, so a
-  **powered single-locked-test claim needs the full ~3000+800 corpus**
-  (`N_MEDMCQA=3000 N_PUBMEDQA=800 bash run_phase0.sh`, resumable).
-- **Next:** scale drafts to the full corpus → powered Phase-1 gate + full
-  baselines (B0–B7) → Phase-2 QA audit (esp. verbalized-confidence contamination)
-  → Phase-3 Stage-B objective-label contrast.
+- **Real Phase 0 — FULL corpus (LMStudio gpt-oss-120b, n=3800 = 3000 MedMCQA +
+  800 PubMedQA):** **GO** — pooled CV AUROC(risk,error) = **0.841** (MedMCQA
+  0.813, PubMedQA 0.730); error prevalence 0.284 (1,079 error cases); per-subject
+  (22) min 0.61 / median 0.80 / max 0.91. Strongest single feature:
+  **verbalized_uncertainty (AUROC 0.832)** — near the 0.85 self-deception line,
+  **flagged for the Phase-2 verbalized-confidence audit** (§0.6). Results:
+  `results/phase0/phase0_gatekeeper.json`. (A 279-item pilot gave the same GO at
+  AUROC 0.825.)
+- **Real Phase 1 Stage-A — FULL corpus (n=3800; train 1509 / cal 1140 / test
+  1151):** with ~324 error cases in the calibration split (far above the
+  min-sample floor), the **single-locked-test guarantee now HOLDS**: conformal
+  `P(release|incorrect)` = **0.077 ≤ 0.10** (release 0.379) and **0.044 ≤ 0.05**
+  (release 0.272); risk AUROC(test) 0.822. Baselines at the matched target:
+  confidence-threshold (B2) is competitive on utility (release 0.426 @ α=0.10)
+  **but has no distribution-free guarantee and rides the self-deception-flagged
+  feature**; self-consistency-only (B3) collapses to escalate-all; release-all
+  (B0) violates (rel|inc 1.0). Verdict: α met, release 0.38 at α=0.10 →
+  **OVER_ESCALATION_AUDIT** (a strong model + strict safety yields moderate
+  autonomy — the honest "over-escalation required" branch of the plan).
+  Results: `results/phase1/phase1_stage_a.json`. (The 279-pilot's apparent
+  single-split miss, and its 200-split-mean confirmation, are in
+  `phase1_multisplit_verification.json`.)
+- **Next:** Phase-2 QA audit — port the 5 detectors to the QA risk score and add
+  the verbalized-confidence / self-deception check (option-shuffle, paraphrase,
+  held-out cutoff) on the strong B2 feature; then Phase-3 Stage-B objective-label
+  contrast (MIMIC/eICU) linking to the §7 information boundary.
 
 **Standing Discussion caveat (verbatim for the paper):** *This study controls
 benchmark-defined error and objective-label high-risk release, not real-world
