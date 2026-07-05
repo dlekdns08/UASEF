@@ -83,3 +83,4 @@ data/raw/mimic-iv/mimic4_labvalues_24h_unguarded.jsonl
 
 # Phase 0-3 LLM draft caches (generated model outputs; regenerate via models/qa_drafts.py)
 data/raw/drafts_*.jsonl
+data/raw/verifier_*.jsonl
