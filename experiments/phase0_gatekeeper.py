@@ -151,13 +151,13 @@ def main():
     # per-dataset and per-subject AUROC of the best model's OOF risk
     ds = np.array([d.dataset for d in drafts])
     sub = np.array([d.subject for d in drafts])
-    by_ds = {d: round(_auroc(risk[ds == d], y[ds == d]), 3)
+    by_ds = {str(d): round(_auroc(risk[ds == d], y[ds == d]), 3)
              for d in sorted(set(ds)) if (y[ds == d].sum() and (y[ds == d] == 0).sum())}
     by_sub = {}
     for s in sorted(set(sub)):
         m = sub == s
         if y[m].sum() >= 3 and (y[m] == 0).sum() >= 3:
-            by_sub[s] = round(_auroc(risk[m], y[m]), 3)
+            by_sub[str(s)] = round(_auroc(risk[m], y[m]), 3)
     # univariate feature AUROC (direction-robust)
     uni = {names[j]: round(max(_auroc(np.nan_to_num(X[:, j], nan=np.nanmedian(X[:, j])), y),
                                1 - _auroc(np.nan_to_num(X[:, j], nan=np.nanmedian(X[:, j])), y)), 3)
