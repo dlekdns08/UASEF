@@ -104,11 +104,29 @@ Phase-0 pipeline; the real go/no-go number requires real drafts.
 
 ## 6. Status (2026-07)
 
-- **Verified now:** label-conditional conformal core (11/11), risk-feature
-  extractor, MedMCQA/PubMedQA loaders, Phase-0 gatekeeper (synthetic end-to-end
-  → GO on injected signal).
-- **Next:** choose a backend → generate real drafts → real Phase-0 AUROC →
-  Phase-1 Stage-A gate + baselines → Phase-2 QA audit → Phase-3 Stage-B contrast.
+- **Verified (code):** label-conditional conformal core (11/11 Monte-Carlo),
+  risk-feature extractor, MedMCQA/PubMedQA loaders, Phase-0 gatekeeper, Phase-1
+  Stage-A runner (synthetic end-to-end), draft generator (real gpt-oss-120b).
+- **Real Phase 0 (LMStudio gpt-oss-120b, n=279 = 199 MedMCQA + 80 PubMedQA):**
+  **GO** — pooled CV AUROC(risk,error) = **0.825** (MedMCQA 0.822, PubMedQA
+  0.693); error prevalence 0.355 (99 error cases); every draft parsed, all with
+  logprobs. Strongest single feature: **verbalized_uncertainty (AUROC 0.845)** —
+  flagged for the Phase-2 verbalized-confidence / self-deception audit (§0.6 of
+  the plan). Results: `results/phase0/phase0_gatekeeper.json`.
+- **Real Phase 1 Stage-A (same n=279):** the mechanism runs (risk AUROC(test)
+  0.84) but **n is too small for a stable single-split guarantee** — a single
+  locked test carries ~35 error cases, so the empirical `P(release|incorrect)`
+  fluctuates around α (α=0.10 landed at 0.114, within sampling noise; α=0.05
+  collapses toward escalate-all because the cal error count is small). The
+  marginal guarantee **is confirmed on real data by a 200-split Monte-Carlo**
+  (`results/phase1/phase1_multisplit_verification.json`): mean
+  `P(release|incorrect)` = **0.085** (α=0.10) / **0.033** (α=0.05), both ≤ α,
+  feasible 200/200 — but per-split satisfaction is only 66–75% at this n, so a
+  **powered single-locked-test claim needs the full ~3000+800 corpus**
+  (`N_MEDMCQA=3000 N_PUBMEDQA=800 bash run_phase0.sh`, resumable).
+- **Next:** scale drafts to the full corpus → powered Phase-1 gate + full
+  baselines (B0–B7) → Phase-2 QA audit (esp. verbalized-confidence contamination)
+  → Phase-3 Stage-B objective-label contrast.
 
 **Standing Discussion caveat (verbatim for the paper):** *This study controls
 benchmark-defined error and objective-label high-risk release, not real-world
