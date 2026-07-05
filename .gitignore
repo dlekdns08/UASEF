@@ -80,3 +80,6 @@ data/raw/eicu_labvalues_6h.jsonl
 
 
 data/raw/mimic-iv/mimic4_labvalues_24h_unguarded.jsonl
+
+# Phase 0-3 LLM draft caches (generated model outputs; regenerate via models/qa_drafts.py)
+data/raw/drafts_*.jsonl
