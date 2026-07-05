@@ -100,6 +100,17 @@ def run(drafts, alphas=(0.10, 0.05), seed=0):
         tau_nc = _threshold_for_target(risk[ca], y[ca], alpha)     # B6 non-conformal
         b6 = _metrics(risk[te] < tau_nc, y[te], alpha)
         b0 = _metrics(np.ones(len(te), bool), y[te], alpha)        # B0 release-all
+        # single-feature heuristic baselines (B2 verbalized confidence, B3 self-consistency),
+        # each calibrated on CAL to the same incorrect-release target
+        feat_bl = {}
+        for bname, fname in [("confidence_B2", "verbalized_uncertainty"),
+                             ("self_consistency_B3", "self_consistency_disagreement")]:
+            j = names.index(fname)
+            med = np.nanmedian(X[ca][:, j])
+            fcal = np.nan_to_num(X[ca][:, j], nan=med)
+            ftest = np.nan_to_num(X[te][:, j], nan=med)
+            tau_f = _threshold_for_target(fcal, y[ca], alpha)
+            feat_bl[bname] = _metrics(ftest < tau_f, y[te], alpha)
         out["by_alpha"][str(alpha)] = {
             "conformal_B7": {
                 "feasible": gate._fit.feasible, "n_err_cal": gate._fit.n_err_cal,
@@ -111,6 +122,7 @@ def run(drafts, alphas=(0.10, 0.05), seed=0):
                 "alpha_satisfied": conf.extra["alpha_satisfied"]},
             "nonconformal_B6": b6,
             "release_all_B0": b0,
+            **feat_bl,
         }
     # go/no-go: conformal holds alpha on test AND is non-vacuous vs release-all
     a0 = out["by_alpha"][str(alphas[0])]["conformal_B7"]
