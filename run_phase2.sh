@@ -14,6 +14,10 @@ echo "[phase2] cross-model verifier ($VERIFIER_MODEL) on $N_VERIFIER drafts"
 VERIFIER_MODEL="$VERIFIER_MODEL" $PY experiments/phase2_cross_verifier.py \
     --drafts data/raw/drafts_phase0_all.jsonl --n "$N_VERIFIER"
 
+echo "[phase2] repair pass — re-query empty-response rows"
+VERIFIER_MODEL="$VERIFIER_MODEL" $PY experiments/phase2_cross_verifier.py \
+    --drafts data/raw/drafts_phase0_all.jsonl --n "$N_VERIFIER" --repair
+
 echo "[phase2] option-shuffle audit (gpt-oss) on $N_SHUFFLE MedMCQA items"
 LMSTUDIO_MODEL="openai/gpt-oss-120b" $PY experiments/phase2_shuffle_audit.py --n "$N_SHUFFLE"
 
