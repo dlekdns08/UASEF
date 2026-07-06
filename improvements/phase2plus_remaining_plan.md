@@ -32,8 +32,9 @@
 | # | 모델 | LLM 작업 | 증명 | 출력 |
 |---|---|---|---|---|
 | 1 | gemma | gpt-oss 답 판정 1500 | 독립 verifier > 자기신뢰 (메인) | `verifier_cross.jsonl` |
-| 2 | qwen3.6 | 〃 | 다른 계열 verifier도 작동 | `verifier_qwen35.jsonl` |
-| 3 | qwen-coder | 〃 | off-domain verifier도? | `verifier_qwencoder.jsonl` |
+| **B1** | **gemma** | **자문자답 1500** | **gemma 신호=독립성 vs 능력 분해** | `selfanswer_gemma.jsonl` |
+| 2 | qwen3.6 | gpt-oss 답 판정 1500 | 다른 계열 verifier도 작동 | `verifier_qwen27.jsonl` |
+| **B1'** | **qwen3.6** | **자문자답 1500** | **qwen3.6 신호=독립성 vs 능력 (대칭)** | `selfanswer_qwen27.jsonl` |
 | 4a | gpt-oss | 자기 답 판정 1500 | same-model verifier 대조(순환성) | `verifier_gptoss.jsonl` |
 | 4b | gpt-oss | 셔플 재생성 400 | gpt-oss confidence 암기 여부 | `drafts_medmcqa_shuffled.jsonl` |
 | 5 | gemma | gpt-oss 셔플 답 판정 400 | gemma verifier 암기 여부 | `verifier_shuffled.jsonl` |
@@ -49,7 +50,8 @@
 - **A3. Qwen Tier 1 + Phase 1** (6a 후): Qwen 자기 feature로 AUROC(risk, Qwen-error) [Phase 0 복제] + Qwen drafts로 conformal 게이트 보장 → **"feature+게이트 일반화"** (위험2).
 - **A4. Qwen dual-shuffle** (6b 후): Qwen confidence 셔플 강건성 → **self-deception이 model-specific인가 일반적인가**.
 - **A5. Qwen Tier 2** (7 후): gemma가 Qwen 답 예측 AUROC → **"독립 verifier가 다른 답변자에도"** (해법 일반화).
-- **A6. verifier→Phase 1 feature 통합 + 실용성** (1~4 후 언제든): 게이트에 독립 verifier feature 추가 → **같은 α에서 공개율↑?** (위험4: 실용성을 논거로).
+- **A6. verifier→Phase 1 feature 통합 + 실용성** (1~4 후 언제든): 게이트에 독립 verifier feature 추가 → **같은 α에서 공개율↑?** (위험4: 실용성을 논거로). **[완료: base 0.824→aug 0.895, 공개율 +7%p, 양쪽 α 성립]**
+- **A7. 능력 vs 독립성 분해** (B1/B1' 후): verifier가 **스스로 틀린 문항**에서도 verifier_risk가 gpt-oss 오답을 예측하나? gemma·qwen3.6 대칭. AUROC(verifier-WRONG subset)이 0.5보다 유의하게 높으면 → **신호는 구조적(독립성), 단순 능력 아님** (위험1 심화: "왜 독립 verifier가 이기나"에 답).
 
 ## 총 비용 (대략, 1500 공통 기준)
 
