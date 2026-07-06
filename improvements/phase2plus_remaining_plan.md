@@ -5,11 +5,17 @@
 
 ## 모델 스왑 시퀀스 (7 로드, gemma 3회는 의존성상 불가피)
 
+> **능력 vs 독립성 분해(B1)는 모든 독립 verifier에 대칭 적용** — verifier가 gpt-oss
+> 오답을 잡는 게 (a)독립성(구조적)인지 (b)능력(정답 앎)인지 가르려면, verifier가 **같은
+> 문항을 스스로 답**해야 함. 그래서 gemma·qwen3.6은 로드된 김에 `cross-verify + 자문자답`을
+> 함께 수행(스왑 0 추가). 판정 지표: verifier 자신이 **틀린 문항에서도** verifier_risk가
+> gpt-oss 오답을 예측하면 → 신호는 **독립성**. (gpt-oss는 답변자라 자문자답 자명 → 순환성 대조만)
+
 ```
-1. gemma        V1  cross-verifier(gpt-oss 답) 1500          [진행 중]  → 완료 보고 + 허락 ★
+1. gemma        V1  cross-verifier(gpt-oss 답) 1500          [완료]
+   gemma        B1  자문자답 1500 (능력/독립성 분해)          [진행 중]  → 완료 보고 + 허락 ★
 ──── multi-verifier: 나머지 verifier가 gpt-oss 원본 답 판정 ────
-2. qwen3.6-27b  V2  cross-verifier 1500                      [스왑]
-3. qwen-coder   V3  cross-verifier 1500                      [스왑]
+2. qwen3.6-27b  V2  cross-verifier 1500  +  B1' 자문자답 1500 [스왑]  ← 로드 김에 둘 다(분해 대칭)
 4. gpt-oss      V4  self-verifier 1500  +  S1 셔플 재생성 400 [스왑]  ← gpt-oss 로드 김에 둘 다
 ──── dual-shuffle(gpt-oss) 마무리 ────
 5. gemma        S2  셔플-verify(gpt-oss 셔플 답) 400          [스왑]
@@ -18,7 +24,8 @@
 7. gemma        T2  Qwen 답 판정 1500  +  QS2 Qwen 셔플 답 판정 400 [스왑]  ← gemma 복귀, 둘 다
 ```
 
-**허락 게이트 ★**: 1(gemma verifier) 완료 시 보고 → 허락받고 2~7 진행. 각 스왑은 그때 요청.
+**허락 게이트 ★**: 1(gemma verifier+B1) 완료 시 보고 → 허락받고 2~7 진행. 각 스왑은 그때 요청.
+(qwen-coder는 사용자 지시로 제외 — qwen3.6-27b만.)
 
 ## 각 단계 = 무엇을 증명하나 + 산출물
 
