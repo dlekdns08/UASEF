@@ -84,17 +84,19 @@ def _parse_reasoning(text: str) -> str:
     return (m.group(1).strip() if m else t.strip())[:1000]
 
 
-def make_draft(item: QAItem, k: int, temp: float) -> DraftRecord:
+def make_draft(item: QAItem, k: int, temp: float, max_tokens: int = 512) -> DraftRecord:
     mcq = bool(item.options)
-    # decision draft (temp 0, logprobs if the backend exposes them)
+    # decision draft (temp 0, logprobs if the backend exposes them). max_tokens must
+    # cover the model's thinking phase for reasoning models (gpt-oss fits 512; a
+    # thinking model like Qwen3.5 needs ~4096 or the visible answer is truncated).
     dec = query_model(backend="lmstudio", system_prompt=SYS, user_prompt=_prompt(item),
-                      temperature=0.0, max_completion_tokens=512, logprobs=True)
+                      temperature=0.0, max_completion_tokens=max_tokens, logprobs=True)
     decision = _parse_answer(dec.text, mcq)
     # k temperature samples (answers only)
     samples = []
     for _ in range(k):
         s = query_model(backend="lmstudio", system_prompt=SYS, user_prompt=_prompt(item),
-                        temperature=temp, max_completion_tokens=512, logprobs=False)
+                        temperature=temp, max_completion_tokens=max_tokens, logprobs=False)
         samples.append(_parse_answer(s.text, mcq))
     return DraftRecord(
         item_id=item.item_id, dataset=item.dataset, subject=item.subject,
@@ -125,6 +127,8 @@ def main():
     ap.add_argument("--temp", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--model", type=str, default=None)
+    ap.add_argument("--max-tokens", type=int, default=512,
+                    help="512 fits gpt-oss; use 4096 for thinking models (Qwen3.5) to avoid truncation")
     ap.add_argument("--out", type=str, required=True)
     a = ap.parse_args()
 
@@ -144,7 +148,7 @@ def main():
     with open(out, "a") as f:
         for i, it in enumerate(todo):
             try:
-                d = make_draft(it, a.k, a.temp)
+                d = make_draft(it, a.k, a.temp, a.max_tokens)
                 f.write(json.dumps(asdict(d)) + "\n")
                 f.flush()
                 n_ok += 1
