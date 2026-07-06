@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--out", default="data/raw/drafts_medmcqa_shuffled.jsonl")
     a = ap.parse_args()
     os.environ["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "openai/gpt-oss-120b")
+    # NOTE: model swap (unload gemma, load gpt-oss) is done MANUALLY by the operator
+    # before running this — the script does not touch model loading.
     from data.qa_datasets import load_medmcqa
     items = load_medmcqa(a.n, seed=a.seed)
     out = Path(a.out)
@@ -68,10 +70,11 @@ def main():
             try:
                 r = query_model(backend="lmstudio", system_prompt=SYS,
                                 user_prompt=_draft_prompt(sit), temperature=0.0,
-                                max_completion_tokens=512, logprobs=False)
+                                max_completion_tokens=2048, logprobs=False)
                 ans = _parse_answer(r.text, mcq=True)
                 chosen_value = shuffled.get(ans, "")
                 rec = {"item_id": it.item_id, "subject": it.subject,
+                       "question": it.question, "shuffled_options": shuffled,
                        "orig_gold_letter": it.gold_answer, "new_gold_letter": new_gold,
                        "chosen_letter": ans, "chosen_value_correct": int(chosen_value == gold_value),
                        "confidence": _parse_conf(r.text)}
