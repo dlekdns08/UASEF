@@ -92,6 +92,9 @@ def _query_verifier(item, proposed, retries: int = 2):
         last = r.text or ""
         if last.strip():
             return _parse_risk(last), last[:300]
+    # ~0.3% of items: the thinking model never emits a visible answer (non-terminating
+    # reasoning even at the token cap). We leave these as None and report the rate
+    # factually rather than force a different prompt (which would bias those items).
     return _parse_risk(last), last[:300]
 
 
