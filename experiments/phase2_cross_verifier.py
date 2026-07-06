@@ -64,13 +64,35 @@ def _prompt(item, proposed):
 
 def _parse_risk(text):
     t = re.sub(r"[*#`]", "", text or "")
-    m = re.search(r"Risk:\s*(\d{1,3})", t, re.I)
+    m = re.search(r"Risk[:\s]*\(?(\d{1,3})", t, re.I) or re.search(r"(\d{1,3})\s*/\s*100", t)
     if m:
         return max(0.0, min(1.0, int(m.group(1)) / 100.0))
     v = re.search(r"Verdict:\s*(correct|incorrect)", t, re.I)
     if v:
         return 0.8 if v.group(1).lower() == "incorrect" else 0.2
+    if re.search(r"\b(incorrect|likely wrong|probably wrong)\b", t, re.I):
+        return 0.8
+    if re.search(r"\b(correct|likely right)\b", t, re.I):
+        return 0.2
     return None
+
+
+def _query_verifier(item, proposed, retries: int = 2):
+    """Query the verifier with a budget large enough for the model's thinking
+    phase (gemma-4-31b consumes ~1.3k tokens reasoning before the visible answer;
+    a 512-token cap truncated mid-thought -> finish_reason='length', empty text).
+    A 4096-token ceiling leaves ample headroom so the visible answer always
+    emerges; retry with an even larger budget on the rare remaining empty.
+    Returns (risk, raw_text)."""
+    last = ""
+    for attempt in range(retries):
+        r = query_model(backend="lmstudio", system_prompt=VSYS,
+                        user_prompt=_prompt(item, proposed), temperature=0.0,
+                        max_completion_tokens=4096 + 1024 * attempt, logprobs=False)
+        last = r.text or ""
+        if last.strip():
+            return _parse_risk(last), last[:300]
+    return _parse_risk(last), last[:300]
 
 
 def main():
@@ -78,35 +100,62 @@ def main():
     ap.add_argument("--drafts", required=True)
     ap.add_argument("--n", type=int, default=1500)
     ap.add_argument("--out", default="data/raw/verifier_cross.jsonl")
+    ap.add_argument("--repair", action="store_true",
+                    help="re-query only rows whose verifier_risk is None (empty responses)")
     a = ap.parse_args()
     vmodel = os.getenv("VERIFIER_MODEL", "qwen/qwen3.6-35b-a3b")
     os.environ["LMSTUDIO_MODEL"] = vmodel
 
-    drafts = load_drafts(a.drafts)[: a.n]
+    import random as _r
+    _all = load_drafts(a.drafts)
+    _r.Random(0).shuffle(_all)          # mix MedMCQA + PubMedQA (else [:n] is all MedMCQA)
+    drafts = _all[: a.n]
     imap = _item_map()
+    dmap = {d.item_id: d for d in drafts}
     out = Path(a.out)
-    done = set()
-    if out.exists():
-        for line in open(out):
-            line = line.strip()
-            if line:
-                done.add(json.loads(line)["item_id"])
-    todo = [d for d in drafts if d.item_id not in done and d.item_id in imap]
-    print(f"[cross-verifier] model={vmodel}  {len(drafts)} drafts, {len(done)} cached, {len(todo)} to judge")
-    with open(out, "a") as f:
-        for i, d in enumerate(todo):
+
+    if a.repair:
+        # re-query every cached row whose verifier_risk is None (empty response)
+        rows = [json.loads(l) for l in open(out) if l.strip()]
+        bad = [r for r in rows if r["verifier_risk"] is None and r["item_id"] in imap]
+        print(f"[cross-verifier REPAIR] model={vmodel}  {len(rows)} rows, {len(bad)} to re-query")
+        fixed = 0
+        for i, r in enumerate(bad):
+            d = dmap.get(r["item_id"])
             try:
-                r = query_model(backend="lmstudio", system_prompt=VSYS,
-                                user_prompt=_prompt(imap[d.item_id], d.decision_answer),
-                                temperature=0.0, max_completion_tokens=400, logprobs=False)
-                vr = _parse_risk(r.text)
-                f.write(json.dumps({"item_id": d.item_id, "verifier_risk": vr,
-                                    "gpt_oss_conf": d.verbalized_confidence,
-                                    "error": error_label(d)}) + "\n"); f.flush()
+                vr, vtext = _query_verifier(imap[r["item_id"]], d.decision_answer)
+                r["verifier_risk"] = vr; r["vtext"] = vtext
+                if vr is not None:
+                    fixed += 1
             except Exception as e:
-                print(f"  [skip {d.item_id}] {type(e).__name__}: {str(e)[:60]}")
+                print(f"  [skip {r['item_id']}] {type(e).__name__}: {str(e)[:60]}")
             if (i + 1) % 50 == 0:
-                print(f"  ...{i + 1}/{len(todo)}")
+                print(f"  ...{i + 1}/{len(bad)} ({fixed} recovered)")
+        with open(out, "w") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        still = sum(1 for r in rows if r["verifier_risk"] is None)
+        print(f"[cross-verifier REPAIR] recovered {fixed}/{len(bad)}; still None {still}")
+    else:
+        done = set()
+        if out.exists():
+            for line in open(out):
+                line = line.strip()
+                if line:
+                    done.add(json.loads(line)["item_id"])
+        todo = [d for d in drafts if d.item_id not in done and d.item_id in imap]
+        print(f"[cross-verifier] model={vmodel}  {len(drafts)} drafts, {len(done)} cached, {len(todo)} to judge")
+        with open(out, "a") as f:
+            for i, d in enumerate(todo):
+                try:
+                    vr, vtext = _query_verifier(imap[d.item_id], d.decision_answer)
+                    f.write(json.dumps({"item_id": d.item_id, "verifier_risk": vr, "vtext": vtext,
+                                        "gpt_oss_conf": d.verbalized_confidence,
+                                        "error": error_label(d)}) + "\n"); f.flush()
+                except Exception as e:
+                    print(f"  [skip {d.item_id}] {type(e).__name__}: {str(e)[:60]}")
+                if (i + 1) % 50 == 0:
+                    print(f"  ...{i + 1}/{len(todo)}")
 
     # analyze
     from models.label_conditional_conformal import _auroc
