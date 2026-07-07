@@ -35,9 +35,6 @@ from models.qa_drafts import make_draft
 from models.label_conditional_conformal import _auroc
 from experiments.phase2_cross_verifier import _item_map
 
-VER = ROOT / "data" / "raw" / "verifier_cross.jsonl"
-
-
 def _norm(s):
     return (s or "").strip().lower()
 
@@ -45,15 +42,20 @@ def _norm(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", required=True, help="verifier tag, e.g. gemma / qwen27")
+    ap.add_argument("--verifier-file", default="data/raw/verifier_cross.jsonl",
+                    help="THIS verifier's cross-verifier output — supplies the item set AND the "
+                         "verifier_risk used in the decomposition. Must be the SAME model's file "
+                         "(gemma->verifier_cross.jsonl, qwen27->verifier_qwen27.jsonl).")
     ap.add_argument("--max-tokens", type=int, default=4096)
     a = ap.parse_args()
     model = os.getenv("SELFANSWER_MODEL")
     if not model:
         sys.exit("set SELFANSWER_MODEL (the verifier model answering the questions itself)")
     os.environ["LMSTUDIO_MODEL"] = model
+    VER = ROOT / a.verifier_file
     out = ROOT / "data" / "raw" / f"selfanswer_{a.tag}.jsonl"
 
-    # item set = the cross-verifier's items (matched by id)
+    # item set = this verifier's items (matched by id)
     ver = [json.loads(l) for l in open(VER) if l.strip()]
     imap = _item_map()
     items = [imap[r["item_id"]] for r in ver if r["item_id"] in imap]
