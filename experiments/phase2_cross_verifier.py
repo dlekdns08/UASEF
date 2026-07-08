@@ -25,7 +25,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +39,34 @@ load_dotenv(ROOT / ".env")
 from models.model_interface import query_model
 from models.qa_risk_features import error_label
 from experiments.phase0_gatekeeper import load_drafts
+
+LMS = os.path.expanduser("~/.lmstudio/bin/lms")
+
+
+def reload_model(model, ctx, par):
+    """Unload+reload the SAME model to reset long-run slowdown (Apple-Silicon memory
+    pressure). Memory-safe (one model). Matches operator's context/parallel; the
+    thinking template lives in the model config and persists across reloads."""
+    try:
+        subprocess.run([LMS, "unload", "--all"], capture_output=True, timeout=120)
+        cmd = [LMS, "load", model, "-y"]
+        if ctx:
+            cmd += ["-c", str(ctx)]
+        if par:
+            cmd += ["--parallel", str(par)]
+        subprocess.run(cmd, capture_output=True, timeout=600)
+    except Exception as e:
+        print(f"  [reload] 명령 오류: {type(e).__name__}: {str(e)[:60]}")
+    for _ in range(40):
+        try:
+            query_model(backend="lmstudio", system_prompt="", user_prompt="ok",
+                        temperature=0.0, max_completion_tokens=1, logprobs=False)
+            return True
+        except Exception:
+            time.sleep(5)
+    print("  [reload] 준비 확인 실패 — 계속 시도")
+    return False
+
 
 VSYS = ("You are a careful medical reviewer. You are shown a question and a "
         "proposed answer from another AI. Judge how likely the proposed answer "
@@ -105,6 +135,10 @@ def main():
     ap.add_argument("--out", default="data/raw/verifier_cross.jsonl")
     ap.add_argument("--repair", action="store_true",
                     help="re-query only rows whose verifier_risk is None (empty responses)")
+    ap.add_argument("--reload-every", type=int, default=0,
+                    help="unload+reload the SAME verifier model every N items to reset slowdown (0=off)")
+    ap.add_argument("--reload-context", type=int, default=0)
+    ap.add_argument("--reload-parallel", type=int, default=0)
     a = ap.parse_args()
     vmodel = os.getenv("VERIFIER_MODEL", "qwen/qwen3.6-35b-a3b")
     os.environ["LMSTUDIO_MODEL"] = vmodel
@@ -150,6 +184,9 @@ def main():
         print(f"[cross-verifier] model={vmodel}  {len(drafts)} drafts, {len(done)} cached, {len(todo)} to judge")
         with open(out, "a") as f:
             for i, d in enumerate(todo):
+                if a.reload_every and i > 0 and i % a.reload_every == 0:
+                    print(f"  [reload] {i}개 판정 후 {vmodel} 재로드(속도 리셋)...", flush=True)
+                    reload_model(vmodel, a.reload_context, a.reload_parallel)
                 try:
                     vr, vtext = _query_verifier(imap[d.item_id], d.decision_answer)
                     f.write(json.dumps({"item_id": d.item_id, "verifier_risk": vr, "vtext": vtext,
@@ -158,7 +195,7 @@ def main():
                 except Exception as e:
                     print(f"  [skip {d.item_id}] {type(e).__name__}: {str(e)[:60]}")
                 if (i + 1) % 50 == 0:
-                    print(f"  ...{i + 1}/{len(todo)}")
+                    print(f"  ...{i + 1}/{len(todo)}", flush=True)
 
     # analyze
     from models.label_conditional_conformal import _auroc
