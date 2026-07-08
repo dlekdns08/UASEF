@@ -17,7 +17,7 @@ Resumable. Run:
 """
 from __future__ import annotations
 
-import argparse, json, os, sys
+import argparse, json, os, subprocess, sys, time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -25,10 +25,39 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
+from models.model_interface import query_model
 from models.qa_drafts import make_draft
 from experiments.phase2_cross_verifier import _item_map
 
 VER = ROOT / "data" / "raw" / "verifier_cross.jsonl"  # defines the common 1500 item set
+LMS = os.path.expanduser("~/.lmstudio/bin/lms")
+
+
+def reload_model(model, ctx, par):
+    """Unload+reload the SAME model to reset the slowdown that accrues over long runs
+    (Apple-Silicon memory pressure / KV fragmentation). Memory-safe (one model at a
+    time). Matches the operator's context/parallel so the reloaded config is identical;
+    the thinking template lives in the model config and persists across reloads."""
+    try:
+        subprocess.run([LMS, "unload", "--all"], capture_output=True, timeout=120)
+        cmd = [LMS, "load", model, "-y"]
+        if ctx:
+            cmd += ["-c", str(ctx)]
+        if par:
+            cmd += ["--parallel", str(par)]
+        subprocess.run(cmd, capture_output=True, timeout=600)
+    except Exception as e:
+        print(f"  [reload] 명령 오류: {type(e).__name__}: {str(e)[:60]}")
+    # readiness: retry a trivial query until the model answers again
+    for _ in range(40):
+        try:
+            query_model(backend="lmstudio", system_prompt="", user_prompt="ok",
+                        temperature=0.0, max_completion_tokens=1, logprobs=False)
+            return True
+        except Exception:
+            time.sleep(5)
+    print("  [reload] 준비 확인 실패 — 계속 시도")
+    return False
 
 
 def main():
@@ -39,6 +68,10 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=640)
     ap.add_argument("--item-source", default=str(VER),
                     help="jsonl whose item_ids define the common set (default verifier_cross.jsonl)")
+    ap.add_argument("--reload-every", type=int, default=0,
+                    help="unload+reload the SAME model every N items to reset long-run slowdown (0=off)")
+    ap.add_argument("--reload-context", type=int, default=0, help="context length for reload (match operator's load)")
+    ap.add_argument("--reload-parallel", type=int, default=0, help="parallel count for reload")
     a = ap.parse_args()
     model = os.getenv("ANSWERER_MODEL")
     if not model:
@@ -60,13 +93,16 @@ def main():
           f"(k={a.k}, ~{a.k + 1} calls/item)")
     with open(out, "a") as f:
         for i, it in enumerate(todo):
+            if a.reload_every and i > 0 and i % a.reload_every == 0:
+                print(f"  [reload] {i}개 처리 후 {model} 재로드(속도 리셋)...", flush=True)
+                reload_model(model, a.reload_context, a.reload_parallel)
             try:
                 d = make_draft(it, k=a.k, temp=a.temp, max_tokens=a.max_tokens)
                 f.write(json.dumps(asdict(d)) + "\n"); f.flush()
             except Exception as e:
                 print(f"  [skip {it.item_id}] {type(e).__name__}: {str(e)[:60]}")
             if (i + 1) % 25 == 0:
-                print(f"  ...{i + 1}/{len(todo)}")
+                print(f"  ...{i + 1}/{len(todo)}", flush=True)
     print(f"[answerer:{a.tag}] done -> {out}  (다음: 각 verifier가 --drafts {out.name} 판정)")
 
 
