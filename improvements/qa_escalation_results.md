@@ -140,6 +140,11 @@ Apple MLX 백엔드 혼용). 외부 API $0, 모든 처리 로컬, PHI egress 0. 
 - 오류 라벨 = gold(외부 벤치마크). 디코딩: 결정 temp=0.0, self-consistency 샘플 k=5 temp>0.
   verifier max_completion_tokens=4096(thinking 여유). 재현: JSONL 캐시 + 결정적 셔플(seed 0).
 - **런타임 혼용 주의**: gpt-oss·gemma·Qwen3.5는 llama.cpp(GGUF), qwen3.6-27b만 **MLX**. 수치 미세차 가능.
+- **Qwen3.5 답변자 = non-thinking mode**: Q3_K_S 빌드가 항상 thinking(끌 수 없는 소프트스위치, `/no_think`·
+  `enable_thinking=false` API 무시)이라 절단 42%·저속(~75s/call). **Jinja 템플릿에 `{%- set enable_thinking
+  = false %}`로 thinking 비활성화** → ~4s/call·빈응답 0. 답변자의 *답*만 쓰므로(과정 아님) 법칙에 무해;
+  단 acc가 think-mode보다 낮을 수 있어 **"Qwen3.5 non-thinking"으로 정직 기재**. k=0(결정답+verbalized conf,
+  A8/A9 기준선과 정합). think-mode 100행은 폐기(`_drafts_qwen35_thinkmode_discard.jsonl`).
 
 **양자화 confound (한계에 명시)**:
 1. 모든 수치는 **위 특정 양자화 수준**에서의 값 — full precision 아님. 답변자 오류율·verifier 판정 모두
