@@ -136,16 +136,17 @@ gemma 자기정확도 **0.816 > gpt-oss 0.712**(더 강한 verifier → "약한 
 
 ## 14. 모델 인벤토리 & 역할
 
-| 모델 | ID | 역할 | 크기 |
-|---|---|---|---|
-| gemma-4-31b | `google/gemma-4-31b` | verifier 메인 | 31B |
-| qwen3.6-27b | `qwen/qwen3.6-27b` | verifier #2 (dense) | 27B |
-| gpt-oss-120b | `openai/gpt-oss-120b` | **답변자 #1** + self-verifier + 셔플 | 120B |
-| Qwen3.5-122B-A10B | (다운로드 예정) | **답변자 #2**(일반화) | 122B MoE A10B |
-| ~~qwen3-coder-next~~ | `qwen/qwen3-coder-next` | *미사용* (제외) | 80B |
-| ~~qwen3.6-35b-a3b~~ | `qwen/qwen3.6-35b-a3b` | *미사용* | 35B MoE |
+| 모델 | ID | 역할 | 크기 | 포맷/런타임 | 양자화 |
+|---|---|---|---|---|---|
+| gemma-4-31b-it | `google/gemma-4-31b` | verifier 메인 | 31B | GGUF/llama.cpp | Q4_K_M |
+| qwen3.6-27b | `qwen/qwen3.6-27b` | verifier #2 (dense) | 27B | **MLX/Apple** | 4-bit affine gs64 |
+| gpt-oss-120b | `openai/gpt-oss-120b` | **답변자 #1** + self-verifier + 셔플 | 120B | GGUF/llama.cpp | MXFP4(네이티브) |
+| Qwen3.5-122B-A10B | `Qwen3.5-122B-A10B`(unsloth) | **답변자 #2**(일반화) | 122B MoE A10B | GGUF/llama.cpp | **Q3_K_S(공격적)** |
+| ~~qwen3-coder-next~~ | `qwen/qwen3-coder-next` | *미사용* (제외) | 80B | GGUF | 4bit |
+| ~~qwen3.6-35b-a3b~~ | `qwen/qwen3.6-35b-a3b` | *미사용* | 35B MoE | GGUF | Q4_K_M |
 
-verifier 3종 = **gemma · qwen3.6-27b · gpt-oss(self)**.
+verifier 3종 = **gemma · qwen3.6-27b · gpt-oss(self)**. HW = **Apple M3 Ultra 96GB**, LMStudio, 한 번에 하나 로드.
+런타임 혼용(qwen3.6=MLX, 나머지=GGUF)·양자화 confound는 결과원장 §8.5에 상세. Qwen3.5 Q3_K_S는 품질 하한.
 
 오류 라벨 = gold(외부). 스왑은 **운영자 수동**(항상 한 모델만 로드, 메모리).
 
