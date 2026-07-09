@@ -143,15 +143,16 @@ verifier 가치는 **추론**에서 옴. 4모델로 확장 예정(§4).
 
 ### 4.2 dual-shuffle (완전 대칭, think+no-think, ~400 MedMCQA)
 암기/위치편향 검문 + no-think 붕괴 메커니즘. **의존성 규칙: 답변자 셔플 재답변이 먼저 → verifier 판정.**
-| 종류 | 패스 |
+셔플 items = **공통 1500의 MedMCQA 부분집합**(원본 baseline이 이미 존재하도록).
+| 종류 | 패스 · 규모 |
 |---|---|
-| 답변자 셔플 재답변 (2) | gpt-oss, Qwen3.5-think |
-| gpt-oss 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, Qwen3.5-T/N |
-| Qwen3.5 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, gpt-oss-T/N |
-→ **14 패스**. (트림: Qwen3.5-셔플답 no-think 3개 빼면 11 — 메커니즘은 gpt-oss-셔플답으로 확보)
-스크립트 재작성(방법론 안전): `phase2_shuffle_answer.py`(원시 12필드 저장·**text 기준 채점**·결정적 순열) +
-`phase2_shuffle_judge.py`(verifier에 `letter) text` 전달·**agreement_by_text**·불일치-text 신호). label≠text
-분리, parser-artifact 진단 카운터 포함.
+| 답변자 셔플 재답변 (2) | gpt-oss, Qwen3.5-think — 각 ~400 |
+| gpt-oss 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, Qwen3.5-T/N — **각 셔플 400만** |
+| Qwen3.5 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, gpt-oss-T/N — **각 셔플 400만** |
+→ **14 패스** (셔플 400/셀). **원본은 재판정 X** — 매트릭스 판정(risk) + 기존 self-answer(불일치-text)에서
+조인(LLM 0). 원본 vs 셔플 AUROC 비교로 강건성. *(caveat: 원본 self-answer 프롬프트 미세차 → 기재)*
+스크립트 재작성(방법론 안전): `phase2_shuffle_answer.py`(원시 12필드 저장·**text 기준 채점**·결정적 순열·
+공통셋에서 추출) + `phase2_shuffle_judge.py`(verifier에 `letter) text` 전달·**agreement_by_text**·불일치-text).
 
 ### 4.3 스왑 순서 (9 세션, 수정판 — 의존성 준수, 리로드 활성)
 **Phase 1 — 두 답변자 셔플 재답변 먼저** (그래야 verifier가 판정 가능):
@@ -182,8 +183,8 @@ verifier 가치는 **추론**에서 옴. 4모델로 확장 예정(§4).
 - **dual-shuffle 분석**: 원본 vs 셔플 AUROC(강건성) + **no-think 붕괴 2×2**(추론 없으면 암기라서 셔플에 무너짐).
 
 ### 4.5 비용
-LLM 패스 **23개** (매트릭스 9 + 셔플 14; 셔플은 ~400이라 각 작음), **9 로드 세션** (4모델×think/no-think).
-≈ **~3일**, 컴퓨트 $0 로컬, 전부 재개가능(리로드로 속도 유지).
+LLM 패스 **23개** (매트릭스 9×1500 + 셔플 14×400), **9 로드 세션** (4모델×think/no-think + Qwen3.5-T 재방문).
+셔플 원본은 재판정 없이 기존 재활용(400/셀). ≈ **~3일**, 컴퓨트 $0 로컬, 전부 재개가능(리로드로 속도 유지).
 
 ---
 
