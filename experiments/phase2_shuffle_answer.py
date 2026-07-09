@@ -62,8 +62,15 @@ def main():
     os.environ["LMSTUDIO_MODEL"] = model
     out = ROOT / "data" / "raw" / f"shuffle_answer_{a.tag}.jsonl"
 
-    from data.qa_datasets import load_medmcqa
-    items = load_medmcqa(a.n, seed=a.seed)
+    # draw the shuffle subset from the COMMON 1500's MedMCQA items so the ORIGINAL
+    # baselines (matrix judgments + verifier self-answers) already cover them → the
+    # original-vs-shuffled comparison needs no extra original re-judge (400/cell).
+    from experiments.phase2_cross_verifier import _item_map
+    common = ROOT / "data" / "raw" / "verifier_cross.jsonl"
+    common_ids = [json.loads(l)["item_id"] for l in open(common) if l.strip()]
+    mc_ids = [i for i in common_ids if i.startswith("medmcqa")][: a.n]
+    imap = _item_map()
+    items = [imap[i] for i in mc_ids if i in imap]
     done = set()
     if out.exists():
         for line in open(out):
