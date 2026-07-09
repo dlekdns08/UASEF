@@ -55,6 +55,10 @@ def main():
     ap.add_argument("--n", type=int, default=400)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--no-shuffle", action="store_true",
+                    help="identity permutation: re-answer the ORIGINAL options with the SAME "
+                         "generation conditions as the shuffle run (clean paired answer-gen). "
+                         "Use --tag <a>_orig. Options unchanged, no shuffle.")
     a = ap.parse_args()
     model = os.getenv("ANSWERER_MODEL")
     if not model:
@@ -87,7 +91,8 @@ def main():
             # reproducible permutation seeded by item id (stable across resumes)
             rng = np.random.default_rng(_seed(it.item_id))
             perm = list(range(len(letters)))
-            rng.shuffle(perm)
+            if not a.no_shuffle:
+                rng.shuffle(perm)          # --no-shuffle → identity (original, same conditions)
             # shuffled_options[new_letter] = original value at perm position
             shuffled = {letters[j]: it.options[letters[perm[j]]] for j in range(len(letters))}
             # permutation_map: original letter -> shuffled letter (where its content went)
