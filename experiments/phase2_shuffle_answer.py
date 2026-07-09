@@ -59,6 +59,9 @@ def main():
                     help="identity permutation: re-answer the ORIGINAL options with the SAME "
                          "generation conditions as the shuffle run (clean paired answer-gen). "
                          "Use --tag <a>_orig. Options unchanged, no shuffle.")
+    ap.add_argument("--reload-every", type=int, default=0)
+    ap.add_argument("--reload-context", type=int, default=0)
+    ap.add_argument("--reload-parallel", type=int, default=0)
     a = ap.parse_args()
     model = os.getenv("ANSWERER_MODEL")
     if not model:
@@ -69,7 +72,7 @@ def main():
     # draw the shuffle subset from the COMMON 1500's MedMCQA items so the ORIGINAL
     # baselines (matrix judgments + verifier self-answers) already cover them → the
     # original-vs-shuffled comparison needs no extra original re-judge (400/cell).
-    from experiments.phase2_cross_verifier import _item_map
+    from experiments.phase2_cross_verifier import _item_map, reload_model
     common = ROOT / "data" / "raw" / "verifier_cross.jsonl"
     common_ids = [json.loads(l)["item_id"] for l in open(common) if l.strip()]
     mc_ids = [i for i in common_ids if i.startswith("medmcqa")][: a.n]
@@ -86,6 +89,9 @@ def main():
     print(f"[shuffle-answer:{a.tag}] model={model}  {len(items)} items, {len(done)} cached, {len(todo)} to answer")
     with open(out, "a") as f:
         for idx, it in enumerate(todo):
+            if a.reload_every and idx > 0 and idx % a.reload_every == 0:
+                print(f"  [reload] {idx}개 후 {model} 재로드...", flush=True)
+                reload_model(model, a.reload_context, a.reload_parallel)
             letters = [L for L in LETTERS if L in it.options]
             gold_text = it.options.get(it.gold_answer, "")
             # reproducible permutation seeded by item id (stable across resumes)

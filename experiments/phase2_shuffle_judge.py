@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 from models.model_interface import query_model
 from models.label_conditional_conformal import _auroc
+from experiments.phase2_cross_verifier import reload_model
 
 VJSYS = ("You are a careful medical expert. You are shown a multiple-choice question, its "
          "options, and another AI's proposed answer. First give YOUR OWN best answer (a "
@@ -69,6 +70,9 @@ def main():
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--limit", type=int, default=0,
                     help="cap #items (e.g. 100 for the original-reference sanity re-judge; 0=all)")
+    ap.add_argument("--reload-every", type=int, default=0)
+    ap.add_argument("--reload-context", type=int, default=0)
+    ap.add_argument("--reload-parallel", type=int, default=0)
     a = ap.parse_args()
     vmodel = os.getenv("VERIFIER_MODEL")
     if not vmodel:
@@ -96,6 +100,9 @@ def main():
           + (f" (limit {a.limit})" if a.limit else ""))
     with open(out, "a") as f:
         for i, s in enumerate(todo):
+            if a.reload_every and i > 0 and i % a.reload_every == 0:
+                print(f"  [reload] {i}개 후 {vmodel} 재로드...", flush=True)
+                reload_model(vmodel, a.reload_context, a.reload_parallel)
             opts = s["shuffled_options"]
             prop_label = s.get("answerer_output_label", "")
             prop_text = s.get("canonical_answer_text", "")
