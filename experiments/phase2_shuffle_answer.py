@@ -96,9 +96,13 @@ def main():
             gold_text = it.options.get(it.gold_answer, "")
             # reproducible permutation seeded by item id (stable across resumes)
             rng = np.random.default_rng(_seed(it.item_id))
-            perm = list(range(len(letters)))
+            identity = list(range(len(letters)))
+            perm = list(identity)
             if not a.no_shuffle:
                 rng.shuffle(perm)          # --no-shuffle → identity (original, same conditions)
+                tries = 0
+                while perm == identity and len(letters) > 1 and tries < 20:
+                    rng.shuffle(perm); tries += 1   # force NON-identity (else shuffle==original, uninformative)
             # shuffled_options[new_letter] = original value at perm position
             shuffled = {letters[j]: it.options[letters[perm[j]]] for j in range(len(letters))}
             # permutation_map: original letter -> shuffled letter (where its content went)
