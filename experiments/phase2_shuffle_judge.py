@@ -67,6 +67,8 @@ def main():
     ap.add_argument("--tag", required=True, help="this verifier+mode tag, e.g. gemma_T / gemma_N")
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--retries", type=int, default=2)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="cap #items (e.g. 100 for the original-reference sanity re-judge; 0=all)")
     a = ap.parse_args()
     vmodel = os.getenv("VERIFIER_MODEL")
     if not vmodel:
@@ -84,8 +86,14 @@ def main():
             if l:
                 done.add(json.loads(l)["item_id"])
     todo = [s for s in shuf.values() if s["item_id"] not in done]
+    if a.limit:
+        # deterministic subset (sorted by item_id) so the sanity sample is reproducible
+        capped = sorted(shuf.values(), key=lambda s: s["item_id"])[: a.limit]
+        cap_ids = {s["item_id"] for s in capped}
+        todo = [s for s in todo if s["item_id"] in cap_ids]
     print(f"[shuffle-judge:{a.tag}] verifier={vmodel} on answerer={a.answerer}  "
-          f"{len(shuf)} items, {len(done)} cached, {len(todo)} to judge")
+          f"{len(shuf)} items, {len(done)} cached, {len(todo)} to judge"
+          + (f" (limit {a.limit})" if a.limit else ""))
     with open(out, "a") as f:
         for i, s in enumerate(todo):
             opts = s["shuffled_options"]
