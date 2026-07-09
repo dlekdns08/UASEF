@@ -149,10 +149,18 @@ verifier 가치는 **추론**에서 옴. 4모델로 확장 예정(§4).
 | 답변자 셔플 재답변 (2) | gpt-oss, Qwen3.5-think — 각 ~400 |
 | gpt-oss 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, Qwen3.5-T/N — **각 셔플 400만** |
 | Qwen3.5 셔플답 판정 (6) | gemma-T/N, qwen3.6-T/N, gpt-oss-T/N — **각 셔플 400만** |
-→ **14 패스** (셔플 400/셀). **원본은 재판정 X** — 매트릭스 판정(risk) + 기존 self-answer(불일치-text)에서
-조인(LLM 0). 원본 vs 셔플 AUROC 비교로 강건성. *(caveat: 원본 self-answer 프롬프트 미세차 → 기재)*
-스크립트 재작성(방법론 안전): `phase2_shuffle_answer.py`(원시 12필드 저장·**text 기준 채점**·결정적 순열·
-공통셋에서 추출) + `phase2_shuffle_judge.py`(verifier에 `letter) text` 전달·**agreement_by_text**·불일치-text).
+→ **14 패스** (셔플 400/셀). **원본은 전체 재판정 X** — 매트릭스 판정(risk) + 기존 self-answer(불일치-text)에서
+조인(item_id paired). 원본 vs 셔플 AUROC 비교로 강건성.
+**모든 셀 원본 baseline은 존재/생성 확정**: A1(gpt-oss 답)의 gemma-N·qwen3.6-N은 매트릭스 A1 패스로 생성,
+Qwen3.5-N=B-1b, gemma-T·qwen3.6-T=A0; A2(Qwen3.5 답) 6셀은 매트릭스 A2 패스. self-answer는 gemma/qwen3.6/
+gpt-oss(drafts)/Qwen3.5(drafts) 전부 1500 존재. → **셔플 때문에 추가 원본 판정 불필요.**
+
+**prompt-confound sanity check (모든 셀, 100개만)**: 각 셀 원본 100개를 shuffle-judge 프롬프트로 재판정 →
+기존 원본과 비교. **통과 기준**: answer agreement(text) ≥90–95% · risk Spearman ≥0.80 · AUROC 차 ≤0.03–0.05 ·
+lift 부호 불변 · P(오류|불일치) 해석 유지. **실패 셀만 원본 400 전체 재판정**(트리거: AUROC ≥0.07·lift flip·
+no-think 불안정). no-think 셀은 100 보수적. 비용: 12셀×100=1,200 (전체 4,800 대신).
+스크립트: `phase2_shuffle_answer.py`(원시 12필드·text 채점·결정적 순열·공통셋 추출) + `phase2_shuffle_judge.py`
+(verifier에 `letter) text`·**agreement_by_text**·불일치-text) + [만들 것] 원본-reference 생성(LLM0) + sanity 비교(LLM0).
 
 ### 4.3 스왑 순서 (9 세션, 수정판 — 의존성 준수, 리로드 활성)
 **Phase 1 — 두 답변자 셔플 재답변 먼저** (그래야 verifier가 판정 가능):
