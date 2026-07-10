@@ -46,6 +46,7 @@
 
 ### 세션 4 · **gemma-T**
 - 매트릭스 gemma-T→A2: `VERIFIER_MODEL=google/gemma-4-31b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gemT_q35.jsonl --reload-every 100 --reload-parallel 4`
+- **[Exp2] self-answer + features 재생성**: `SELFANSWER_MODEL=google/gemma-4-31b … selfanswer.py --tag gemma --verifier-file data/raw/verifier_cross.jsonl --max-tokens 4096 --reload-every 100 --reload-parallel 4` (verbalized conf·logprob·hedging 저장 → competence proxy)
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag gem_T --max-tokens 4096` · `… --answerer qwen35 --tag gem_T --max-tokens 4096`
 - 원본판정×2: `… shuffle_judge.py --answerer gptoss_orig --tag gem_T --max-tokens 4096` · `… --answerer qwen35_orig --tag gem_T --max-tokens 4096`
 

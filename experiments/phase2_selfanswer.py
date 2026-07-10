@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 from models.qa_drafts import make_draft
 from models.label_conditional_conformal import _auroc
-from experiments.phase2_cross_verifier import _item_map
+from experiments.phase2_cross_verifier import _item_map, reload_model
 
 def _norm(s):
     return (s or "").strip().lower()
@@ -47,6 +47,11 @@ def main():
                          "verifier_risk used in the decomposition. Must be the SAME model's file "
                          "(gemma->verifier_cross.jsonl, qwen27->verifier_qwen27.jsonl).")
     ap.add_argument("--max-tokens", type=int, default=4096)
+    ap.add_argument("--k", type=int, default=0, help="self-consistency samples (>0 adds disagreement feature for Exp2)")
+    ap.add_argument("--temp", type=float, default=0.7)
+    ap.add_argument("--reload-every", type=int, default=0)
+    ap.add_argument("--reload-context", type=int, default=0)
+    ap.add_argument("--reload-parallel", type=int, default=0)
     a = ap.parse_args()
     model = os.getenv("SELFANSWER_MODEL")
     if not model:
@@ -69,10 +74,23 @@ def main():
     print(f"[selfanswer:{a.tag}] model={model}  {len(items)} items, {len(done)} cached, {len(todo)} to answer")
     with open(out, "a") as f:
         for i, it in enumerate(todo):
+            if a.reload_every and i > 0 and i % a.reload_every == 0:
+                print(f"  [reload] {i}개 후 {model} 재로드...", flush=True)
+                reload_model(model, a.reload_context, a.reload_parallel)
             try:
-                d = make_draft(it, k=0, temp=0.0, max_tokens=a.max_tokens)
+                d = make_draft(it, k=a.k, temp=a.temp, max_tokens=a.max_tokens)
+                lp = d.token_logprobs or []
+                # Exp2 competence-proxy features: verifier's own uncertainty when it self-answers
+                samp = [s for s in (d.samples or []) if (s or "").strip()]
+                sc_disagree = (1 - max((samp.count(x) for x in set(samp)), default=0) / len(samp)) if samp else None
                 f.write(json.dumps({"item_id": it.item_id, "self_answer": d.decision_answer,
-                                    "self_correct": int(_norm(d.decision_answer) == _norm(it.gold_answer))}) + "\n")
+                                    "self_correct": int(_norm(d.decision_answer) == _norm(it.gold_answer)),
+                                    "verbalized_confidence": d.verbalized_confidence,
+                                    "neg_logprob_mean": (round(-float(np.mean(lp)), 4) if lp else None),
+                                    "reasoning_len": len(d.reasoning_text or ""),
+                                    "parser_ok": int(bool((d.decision_answer or "").strip())),
+                                    "self_consistency_disagree": sc_disagree,
+                                    "samples": d.samples}) + "\n")
                 f.flush()
             except Exception as e:
                 print(f"  [skip {it.item_id}] {type(e).__name__}: {str(e)[:60]}")
