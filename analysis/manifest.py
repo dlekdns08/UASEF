@@ -40,9 +40,10 @@ SELFANS  = "verifier_self_answer"
 
 # ── explicit fixed-name files: stem -> (a_model, a_mode, v_model, v_mode, role, split) ──
 FILES = {
-    # core answerer sets (A1 = gpt-oss, A2 = Qwen3.5-T)
-    "drafts_phase0_all":   ("gptoss", "T", None, None, ANSWERER, "matrix"),
-    "drafts_qwen35_think": ("qwen35", "T", None, None, ANSWERER, "matrix"),
+    # core answerer sets (A1 = gpt-oss-T, A2 = Qwen3.5-T, A2-N = Qwen3.5-N ablation pair)
+    "drafts_phase0_all":     ("gptoss", "T", None, None, ANSWERER, "matrix"),
+    "drafts_qwen35_think":   ("qwen35", "T", None, None, ANSWERER, "matrix"),
+    "drafts_qwen35_nothink": ("qwen35", "N", None, None, ANSWERER, "matrix"),  # answerer T/N ablation (B-lite)
 
     # matrix verifier judgments (verifier judges an answerer set)
     "verifier_cross":            ("gptoss", "T", "gemma",  "T", JUDGMENT, "matrix"),
@@ -52,6 +53,8 @@ FILES = {
     "verifier_gptT_q35":         ("qwen35", "T", "gptoss", "T", JUDGMENT, "matrix"),  # negative-Δ anchor
     "verifier_gptN_q35":         ("qwen35", "T", "gptoss", "N", JUDGMENT, "matrix"),
     "verifier_gemT_q35":         ("qwen35", "T", "gemma",  "T", JUDGMENT, "matrix"),
+    "verifier_gemT_q35N":        ("qwen35", "N", "gemma",  "T", JUDGMENT, "matrix"),  # answerer T/N ablation
+    "verifier_q36T_q35N":        ("qwen35", "N", "qwen36", "T", JUDGMENT, "matrix"),  # answerer T/N ablation
     "verifier_gemN_gptoss":      ("gptoss", "T", "gemma",  "N", JUDGMENT, "matrix"),
     "verifier_gemN_q35":         ("qwen35", "T", "gemma",  "N", JUDGMENT, "matrix"),
     "verifier_q36T_q35":         ("qwen35", "T", "qwen36", "T", JUDGMENT, "matrix"),
@@ -64,16 +67,20 @@ FILES = {
     "verifier_q35T_q35":         ("qwen35", "T", "qwen35", "T", JUDGMENT, "matrix"),  # session 8
 
     # verifier self-answers (verifier solves items itself -> Z, competence proxy q)
-    "drafts_qwen35_nothink": (None, None, "qwen35", "N", SELFANS, "matrix"),  # B-1b symmetric
     "selfanswer_gemma":      (None, None, "gemma",  "T", SELFANS, "matrix"),
     "selfanswer_qwen27":     (None, None, "qwen36", "T", SELFANS, "matrix"),
-    "selfanswer_gptossN":    (None, None, "gptoss", "N", SELFANS, "matrix"),  # session 3 add
+    "selfanswer_gptossN":    (None, None, "gptoss", "N", SELFANS, "matrix"),  # session 3
+    "selfanswer_gemmaN":     (None, None, "gemma",  "N", SELFANS, "matrix"),  # session 5
+    "selfanswer_qwen27N":    (None, None, "qwen36", "N", SELFANS, "matrix"),  # session 7
 }
 
-# dual-role: core answerer drafts ALSO serve as those models' T-mode verifier self-answers
+# dual-role: answerer drafts ALSO serve as that model+mode's verifier self-answers
+# (drafts are the model solving items itself, no proposed answer shown — definitionally
+# a self-answer; provenance marked reused_answerer_draft in consolidation)
 DUAL_SELFANS = {
-    "drafts_phase0_all":   (None, None, "gptoss", "T", SELFANS, "matrix"),
-    "drafts_qwen35_think": (None, None, "qwen35", "T", SELFANS, "matrix"),
+    "drafts_phase0_all":     (None, None, "gptoss", "T", SELFANS, "matrix"),
+    "drafts_qwen35_think":   (None, None, "qwen35", "T", SELFANS, "matrix"),
+    "drafts_qwen35_nothink": (None, None, "qwen35", "N", SELFANS, "matrix"),  # B-1b symmetric
 }
 
 # shuffle answerer --tag -> (a_model, a_mode, split)

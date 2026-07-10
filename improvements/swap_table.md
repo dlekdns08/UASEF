@@ -53,26 +53,30 @@
 - 원본판정: `… shuffle_judge.py --answerer qwen35_orig --tag gpt_N --max-tokens 1024`
 
 ### 세션 4 · **gemma-T**
-- 매트릭스 gemma-T→A2: `VERIFIER_MODEL=google/gemma-4-31b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gemT_q35.jsonl --reload-every 100 --reload-parallel 4`
+- 매트릭스 gemma-T→A2: `VERIFIER_MODEL=google/gemma-4-31b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gemT_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- **[answerer T/N ablation] 매트릭스 gemma-T→A2-N**: `… cross_verifier.py --drafts data/raw/drafts_qwen35_nothink.jsonl --n 1500 --out data/raw/verifier_gemT_q35N.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4` (A2-N = drafts_qwen35_nothink 재사용 — A2-T와 동일 파이프라인·동일 1500 검증됨. 같은 verifier가 같은 문항의 T/N 답변 판정 → answerer ablation 성립)
 - **[Exp2] self-answer + features 재생성**: `SELFANSWER_MODEL=google/gemma-4-31b … selfanswer.py --tag gemma --verifier-file data/raw/verifier_cross.jsonl --max-tokens 4096 --reload-every 100 --reload-parallel 4` (verbalized conf·logprob·hedging 저장 → competence proxy)
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag gem_T --max-tokens 4096` · `… --answerer qwen35 --tag gem_T --max-tokens 4096`
 - 원본판정×2: `… shuffle_judge.py --answerer gptoss_orig --tag gem_T --max-tokens 4096` · `… --answerer qwen35_orig --tag gem_T --max-tokens 4096`
 
 ### 세션 5 · **gemma-N** (no-think 토글)
-- 매트릭스 gemma-N→A1: `… cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_gemN_gptoss.jsonl --reload-every 100 --reload-parallel 4`
-- 매트릭스 gemma-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gemN_q35.jsonl --reload-every 100 --reload-parallel 4`
+- 매트릭스 gemma-N→A1: `… cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_gemN_gptoss.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- 매트릭스 gemma-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gemN_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- **[Exp2/B1] self-answer gemma-N**: `SELFANSWER_MODEL=google/gemma-4-31b … selfanswer.py --tag gemmaN --verifier-file data/raw/verifier_gemN_gptoss.jsonl --max-tokens 4096 --reload-every 100 --reload-parallel 4` (**매트릭스 후 실행**; N verifier의 Z/q/Δ — "능력 부족 vs 판정 불능" 분리)
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag gem_N --max-tokens 1024` · `… --answerer qwen35 --tag gem_N --max-tokens 1024`
 - 원본판정×2: `… --answerer gptoss_orig --tag gem_N --max-tokens 1024` · `… --answerer qwen35_orig --tag gem_N --max-tokens 1024`
 
 ### 세션 6 · **qwen3.6-T**
-- 매트릭스 qwen3.6-T→A2: `VERIFIER_MODEL=qwen/qwen3.6-27b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q36T_q35.jsonl --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- 매트릭스 qwen3.6-T→A2: `VERIFIER_MODEL=qwen/qwen3.6-27b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q36T_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- **[answerer T/N ablation] 매트릭스 qwen3.6-T→A2-N**: `… cross_verifier.py --drafts data/raw/drafts_qwen35_nothink.jsonl --n 1500 --out data/raw/verifier_q36T_q35N.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-context 13649 --reload-parallel 4`
 - **[Exp2] self-answer + features 재생성**: `SELFANSWER_MODEL=qwen/qwen3.6-27b … selfanswer.py --tag qwen27 --verifier-file data/raw/verifier_qwen27.jsonl --max-tokens 4096 --reload-every 100 --reload-context 13649 --reload-parallel 4`
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag q36_T --max-tokens 4096` · `… --answerer qwen35 --tag q36_T --max-tokens 4096`
 - 원본판정×2: `… --answerer gptoss_orig --tag q36_T --max-tokens 4096` · `… --answerer qwen35_orig --tag q36_T --max-tokens 4096`
 
 ### 세션 7 · **qwen3.6-N** (no-think 토글)
-- 매트릭스 qwen3.6-N→A1: `… cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_q36N_gptoss.jsonl --reload-every 100 --reload-context 13649 --reload-parallel 4`
-- 매트릭스 qwen3.6-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q36N_q35.jsonl --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- 매트릭스 qwen3.6-N→A1: `… cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_q36N_gptoss.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- 매트릭스 qwen3.6-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q36N_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- **[Exp2/B1] self-answer qwen3.6-N**: `SELFANSWER_MODEL=qwen/qwen3.6-27b … selfanswer.py --tag qwen27N --verifier-file data/raw/verifier_q36N_gptoss.jsonl --max-tokens 4096 --reload-every 100 --reload-context 13649 --reload-parallel 4` (**매트릭스 후 실행**)
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag q36_N --max-tokens 1024` · `… --answerer qwen35 --tag q36_N --max-tokens 1024`
 - 원본판정×2: `… --answerer gptoss_orig --tag q36_N --max-tokens 1024` · `… --answerer qwen35_orig --tag q36_N --max-tokens 1024`
 
@@ -105,12 +109,12 @@
 **★ Exp2 (필수) 배포가능 verifier competence proxy** `phase2_competence_proxy.py` [만들 것]
 - q=P(verifier 자기정답 | verifier uncertainty features) 학습(logistic). features: verbalized conf·logprob·hedging·length·(k>0시 self-consistency).
 - gpt-oss-T(drafts_phase0_all) + Qwen3.5-T(drafts_qwen35_think) + Qwen3.5-N(drafts_qwen35_nothink) = 무료(기존). gemma-T·qwen3.6-T = 세션4·6 self-answer 재생성(feature). **gpt-oss-N = 세션3 self-answer(selfanswer_gptossN, B-1b 대칭짝)**.
-- **no-think verifier self-answer 대칭 + 해석 규칙**:
-  - Qwen3.5-N ✅(drafts_qwen35_nothink) · gpt-oss-N ✅(selfanswer_gptossN, 세션3) · **gemma-N·qwen3.6-N = self-answer 없음**.
-  - **트리거(명시)**: gemma-N/qwen3.6-N이 **의미 있는 lift**를 보이면 → 세션5·7에 N self-answer 추가. (단순 "결과 나쁘면"이 아니라, N verifier가 신호가 있을 때만 Z/q 규명이 값어치)
-  - **해석 범위 분리(논문에 명시)**:
-    - **T verifier 셀** = Z-gating · q proxy · Δ-lift · calibration gating까지 **메인 분석**.
-    - **N verifier 셀(self-answer 없는)** = reasoning ablation · shuffle robustness · parser/empty 중심. **Z/q/Δ는 계산 안 함**(self-answer 없어 불가) → 논문에서 T셀 중심이라고 못박음.
+- **verifier self-answer 전원 확보 (Z/q/Δ 전셀 가능)**:
+  - gpt-oss-T = **A1 drafts 재사용**(provenance: reused_answerer_draft) · gpt-oss-N ✅(selfanswer_gptossN, 세션3)
+  - Qwen3.5-T ✅(drafts_qwen35_think) · Qwen3.5-N ✅(drafts_qwen35_nothink)
+  - gemma-T ✅(세션4) · **gemma-N ✅(세션5 추가)** · qwen3.6-T ✅(세션6) · **qwen3.6-N ✅(세션7 추가)**
+  - → T/N 차이의 메커니즘 분리 가능: "N은 문제를 못 풀어서 약한가(능력), 풀 수 있는데 판정 출력만 나쁜가(표현)"
+- **answerer T/N ablation (B-lite)**: A2-N = drafts_qwen35_nothink 재사용(동일 파이프라인·1500 검증) → 세션4·6에서 gemma-T·qwen3.6-T가 A2-T와 A2-N을 **모두 판정** (verifier 고정, answerer mode만 변화). A1은 T 고정(gpt-oss 기본 thinking).
 - high/mid/low q tertile별 V lift 비교 + Y~pC+pV+q+pV×q → **gold 없이 competence로 signal 조절 가능**.
 
 **★ Exp3 threshold/shift transfer robustness** `phase2_threshold_transfer.py` [만들 것]
@@ -129,7 +133,7 @@
 
 ## 매트릭스 9 출력 체크리스트
 - [완료] verifier_cross(gemT→A1) · verifier_qwen27(q36T→A1) · verifier_qwen35_of_gptoss(q35N→A1=B-1b)
-- [신규] verifier_q35T_gptoss · verifier_gptT_q35 · verifier_gptN_q35 · verifier_gemT_q35 · verifier_gemN_gptoss · verifier_gemN_q35 · verifier_q36T_q35 · verifier_q36N_gptoss · verifier_q36N_q35
+- [신규] verifier_q35T_gptoss · verifier_gptT_q35 · verifier_gptN_q35 · verifier_gemT_q35 · **verifier_gemT_q35N** · verifier_gemN_gptoss · verifier_gemN_q35 · verifier_q36T_q35 · **verifier_q36T_q35N** · verifier_q36N_gptoss · verifier_q36N_q35 · ⬦verifier_gptT_gptoss · ⬦verifier_q35T_q35 · selfanswer_gptossN · **selfanswer_gemmaN · selfanswer_qwen27N**
 
 ## 셔플 총량 (Option B, --no-shuffle 재생성)
 - verifier 판정: 12셀 × (셔플400 + 원본400) = **9,600**

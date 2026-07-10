@@ -73,18 +73,24 @@ def main():
     Z = np.array([vf[i]["Z"] for i in ids])
     F = np.array([[vf[i]["conf"], vf[i]["neglp"], vf[i]["rlen"], vf[i]["parser"], vf[i]["scd"]] for i in ids], float)
 
-    rng = np.random.default_rng(0); idx = rng.permutation(len(ids)); h = len(ids) // 2
-    cal, te = idx[:h], idx[h:]
-    # standardize + train q = P(Z=1|features) on cal
-    mu, sd = F[cal].mean(0), F[cal].std(0) + 1e-9
-    Fs = (F - mu) / sd
-    qmodel = LogisticRegression(max_iter=1000).fit(Fs[cal], Z[cal])
-    q = qmodel.predict_proba(Fs)[:, 1]
-    # proxy quality: does q predict Z on test?
-    q_auroc = round(sym(q[te], Z[te]), 3)
+    # cross-fitted q on the COMMON item-grouped fold manifest (analysis_plan §5):
+    # every q prediction is out-of-fold, and all rows of one canonical item share a fold
+    # (no leakage across cells/analyses). Replaces the old ad-hoc 50/50 split.
+    from analysis.splits import load_folds
+    fmap = load_folds()
+    fold = np.array([fmap[i] for i in ids])
+    q = np.full(len(ids), np.nan)
+    for k in sorted(set(fold)):
+        tr, te_k = fold != k, fold == k
+        mu, sd = F[tr].mean(0), F[tr].std(0) + 1e-9
+        qm = LogisticRegression(max_iter=1000).fit((F[tr] - mu) / sd, Z[tr])
+        q[te_k] = qm.predict_proba((F[te_k] - mu) / sd)[:, 1]
+    # proxy quality: out-of-fold q vs Z on ALL items
+    q_auroc = round(sym(q, Z), 3)
 
-    # tertiles on test by predicted competence q
-    qt = q[te]; e = err[te]; v = V[te]; c = C[te]
+    # tertiles over all items by cross-fitted (out-of-fold) q
+    te = np.arange(len(ids))
+    qt = q; e = err; v = V; c = C
     order = np.argsort(qt); n = len(te); t1, t2 = n // 3, 2 * n // 3
     groups = {"low_q": order[:t1], "mid_q": order[t1:t2], "high_q": order[t2:]}
     tert = {}

@@ -121,12 +121,14 @@ def judgment_row(r, cond):
 
 
 def selfanswer_row(r, cond):
-    if "self_answer" in r:                       # selfanswer_*.jsonl
+    if "self_answer" in r:                       # selfanswer_*.jsonl (generated for this purpose)
+        src = "generated"
         canon = r.get("self_answer"); z = r.get("self_correct")
         conf = r.get("verbalized_confidence"); neglp = r.get("neg_logprob_mean")
         rlen = r.get("reasoning_len"); scd = r.get("self_consistency_disagree")
         samples = r.get("samples"); gold_canon = None
-    else:                                        # drafts (dual) / drafts_qwen35_nothink
+    else:                                        # answerer drafts reused (dual-role): same model
+        src = "reused_answerer_draft"            # solved same items, no answer shown, same prompt
         canon = r.get("decision_answer"); gold_canon = r.get("gold_answer")
         z = int(_norm(canon) == _norm(gold_canon)) if gold_canon is not None else None
         conf = r.get("verbalized_confidence")
@@ -134,7 +136,8 @@ def selfanswer_row(r, cond):
         neglp = round(-sum(lp) / len(lp), 4) if lp else None
         rlen = len(r.get("reasoning_text") or ""); scd = None; samples = r.get("samples")
     conf = float(conf) if conf is not None else None
-    return {"self_answer_canonical_id": canon, "gold_canonical_id": gold_canon,
+    return {"self_answer_source": src,
+            "self_answer_canonical_id": canon, "gold_canonical_id": gold_canon,
             "verifier_self_correct_Z": z, "self_confidence": conf,
             "self_neg_logprob_mean": neglp, "self_reasoning_len": rlen,
             "self_consistency_disagreement": scd, "answer_entropy": _entropy(samples),
