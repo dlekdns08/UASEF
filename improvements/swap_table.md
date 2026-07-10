@@ -58,6 +58,7 @@
 
 ### 세션 6 · **qwen3.6-T**
 - 매트릭스 qwen3.6-T→A2: `VERIFIER_MODEL=qwen/qwen3.6-27b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q36T_q35.jsonl --reload-every 100 --reload-context 13649 --reload-parallel 4`
+- **[Exp2] self-answer + features 재생성**: `SELFANSWER_MODEL=qwen/qwen3.6-27b … selfanswer.py --tag qwen27 --verifier-file data/raw/verifier_qwen27.jsonl --max-tokens 4096 --reload-every 100 --reload-context 13649 --reload-parallel 4`
 - 셔플판정×2: `… shuffle_judge.py --answerer gptoss --tag q36_T --max-tokens 4096` · `… --answerer qwen35 --tag q36_T --max-tokens 4096`
 - 원본판정×2: `… --answerer gptoss_orig --tag q36_T --max-tokens 4096` · `… --answerer qwen35_orig --tag q36_T --max-tokens 4096`
 
