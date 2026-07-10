@@ -107,23 +107,40 @@ def _parse_risk(text):
     return None
 
 
+def _row_extra(item_id, risk, text, finish, imap):
+    """Provenance/quality fields stored per judgment (for reasoning-mode ablation +
+    parser_failure_summary). dataset from the item (fallback: id prefix); parser_ok =
+    risk parsed; empty = blank response; truncated = model hit the token cap
+    (finish_reason 'length'); output_length in chars."""
+    it = imap.get(item_id)
+    ds = getattr(it, "dataset", None) or ("pubmedqa" if str(item_id).startswith("pubmedqa") else "medmcqa")
+    return {"dataset": ds, "parser_ok": int(risk is not None),
+            "empty": int(not (text or "").strip()),
+            "truncated": int(finish == "length"),
+            "output_length": len(text or "")}
+
+
 def _query_verifier(item, proposed, retries: int = 2, max_base: int = 4096):
     """Query the verifier with a budget large enough for the model's thinking phase.
     gemma/qwen3.6 fit in 4096 (~0.3% empty); heavy thinkers (Qwen3.5, ~16k reasoning)
     truncate at 4096 (~5% empty) -> pass --verifier-max-tokens 16000. Retry with an
-    even larger budget on the rare remaining empty. Returns (risk, raw_text)."""
-    last = ""
+    even larger budget on the rare remaining empty. Returns (risk, full_text, finish_reason)."""
+    last, finish = "", None
     for attempt in range(retries):
         r = query_model(backend="lmstudio", system_prompt=VSYS,
                         user_prompt=_prompt(item, proposed), temperature=0.0,
                         max_completion_tokens=max_base + 1024 * attempt, logprobs=False)
         last = r.text or ""
+        try:
+            finish = (r.raw.get("choices") or [{}])[0].get("finish_reason")
+        except Exception:
+            finish = None
         if last.strip():
-            return _parse_risk(last), last[:300]
+            return _parse_risk(last), last, finish
     # ~0.3% of items: the thinking model never emits a visible answer (non-terminating
     # reasoning even at the token cap). We leave these as None and report the rate
     # factually rather than force a different prompt (which would bias those items).
-    return _parse_risk(last), last[:300]
+    return _parse_risk(last), last, finish
 
 
 def main():
@@ -160,8 +177,9 @@ def main():
         for i, r in enumerate(bad):
             d = dmap.get(r["item_id"])
             try:
-                vr, vtext = _query_verifier(imap[r["item_id"]], d.decision_answer, max_base=a.verifier_max_tokens)
+                vr, vtext, vfin = _query_verifier(imap[r["item_id"]], d.decision_answer, max_base=a.verifier_max_tokens)
                 r["verifier_risk"] = vr; r["vtext"] = vtext
+                r.update(_row_extra(r["item_id"], vr, vtext, vfin, imap))
                 if vr is not None:
                     fixed += 1
             except Exception as e:
@@ -188,10 +206,13 @@ def main():
                     print(f"  [reload] {i}개 판정 후 {vmodel} 재로드(속도 리셋)...", flush=True)
                     reload_model(vmodel, a.reload_context, a.reload_parallel)
                 try:
-                    vr, vtext = _query_verifier(imap[d.item_id], d.decision_answer, max_base=a.verifier_max_tokens)
-                    f.write(json.dumps({"item_id": d.item_id, "verifier_risk": vr, "vtext": vtext,
-                                        "gpt_oss_conf": d.verbalized_confidence,
-                                        "error": error_label(d)}) + "\n"); f.flush()
+                    vr, vtext, vfin = _query_verifier(imap[d.item_id], d.decision_answer, max_base=a.verifier_max_tokens)
+                    row = {"item_id": d.item_id, "verifier_risk": vr, "vtext": vtext,
+                           "gpt_oss_conf": d.verbalized_confidence,        # answerer's confidence (kept name for back-compat)
+                           "answerer_conf": d.verbalized_confidence,       # clearer alias; consolidation reads this
+                           "error": error_label(d)}
+                    row.update(_row_extra(d.item_id, vr, vtext, vfin, imap))
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
                 except Exception as e:
                     print(f"  [skip {d.item_id}] {type(e).__name__}: {str(e)[:60]}")
                 if (i + 1) % 50 == 0:

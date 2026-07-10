@@ -41,7 +41,8 @@
 ## Phase 2 — verifier 판정 (매트릭스 + 셔플400 + 원본400)
 
 ### 세션 3 · **gpt-oss-N** (no-think 토글)
-- 매트릭스 gpt-oss-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptN_q35.jsonl --reload-every 100 --reload-parallel 4`
+- 매트릭스 gpt-oss-N→A2: `… cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptN_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- **[Exp2/B1] self-answer + features (gpt-oss-N, B-1b 대칭짝)**: `SELFANSWER_MODEL=openai/gpt-oss-120b … selfanswer.py --tag gptossN --verifier-file data/raw/verifier_gptN_q35.jsonl --max-tokens 4096 --reload-every 100 --reload-parallel 4` (no-think 자기답변 → drafts_qwen35_nothink의 대칭짝; **매트릭스 후 실행** → item set·verifier_risk 공급; B1 분해 + competence proxy)
 - 셔플판정: `… shuffle_judge.py --answerer qwen35 --tag gpt_N --max-tokens 1024`
 - 원본판정: `… shuffle_judge.py --answerer qwen35_orig --tag gpt_N --max-tokens 1024`
 
@@ -89,7 +90,8 @@
 
 **★ Exp2 (필수) 배포가능 verifier competence proxy** `phase2_competence_proxy.py` [만들 것]
 - q=P(verifier 자기정답 | verifier uncertainty features) 학습(logistic). features: verbalized conf·logprob·hedging·length·(k>0시 self-consistency).
-- gpt-oss(drafts_phase0_all 전체 feature) + Qwen3.5(drafts_qwen35_think 부분) = 무료. gemma·qwen3.6 = 세션4·6 self-answer 재생성(feature).
+- gpt-oss-T(drafts_phase0_all) + Qwen3.5-T(drafts_qwen35_think) + Qwen3.5-N(drafts_qwen35_nothink) = 무료(기존). gemma-T·qwen3.6-T = 세션4·6 self-answer 재생성(feature). **gpt-oss-N = 세션3 self-answer(selfanswer_gptossN, B-1b 대칭짝)**.
+- **no-think verifier 대칭 현황**: Qwen3.5-N ✅(drafts_qwen35_nothink) · gpt-oss-N ✅(세션3 추가) · gemma-N·qwen3.6-N = 보류(결과 나쁘면 세션5·7에 추가).
 - high/mid/low q tertile별 V lift 비교 + Y~pC+pV+q+pV×q → **gold 없이 competence로 signal 조절 가능**.
 
 **★ Exp3 threshold/shift transfer robustness** `phase2_threshold_transfer.py` [만들 것]
