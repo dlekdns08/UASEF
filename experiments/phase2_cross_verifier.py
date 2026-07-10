@@ -107,18 +107,16 @@ def _parse_risk(text):
     return None
 
 
-def _query_verifier(item, proposed, retries: int = 2):
-    """Query the verifier with a budget large enough for the model's thinking
-    phase (gemma-4-31b consumes ~1.3k tokens reasoning before the visible answer;
-    a 512-token cap truncated mid-thought -> finish_reason='length', empty text).
-    A 4096-token ceiling leaves ample headroom so the visible answer always
-    emerges; retry with an even larger budget on the rare remaining empty.
-    Returns (risk, raw_text)."""
+def _query_verifier(item, proposed, retries: int = 2, max_base: int = 4096):
+    """Query the verifier with a budget large enough for the model's thinking phase.
+    gemma/qwen3.6 fit in 4096 (~0.3% empty); heavy thinkers (Qwen3.5, ~16k reasoning)
+    truncate at 4096 (~5% empty) -> pass --verifier-max-tokens 16000. Retry with an
+    even larger budget on the rare remaining empty. Returns (risk, raw_text)."""
     last = ""
     for attempt in range(retries):
         r = query_model(backend="lmstudio", system_prompt=VSYS,
                         user_prompt=_prompt(item, proposed), temperature=0.0,
-                        max_completion_tokens=4096 + 1024 * attempt, logprobs=False)
+                        max_completion_tokens=max_base + 1024 * attempt, logprobs=False)
         last = r.text or ""
         if last.strip():
             return _parse_risk(last), last[:300]
@@ -139,6 +137,8 @@ def main():
                     help="unload+reload the SAME verifier model every N items to reset slowdown (0=off)")
     ap.add_argument("--reload-context", type=int, default=0)
     ap.add_argument("--reload-parallel", type=int, default=0)
+    ap.add_argument("--verifier-max-tokens", type=int, default=4096,
+                    help="verifier thinking budget; 4096 for gemma/qwen3.6, 16000 for Qwen3.5 (heavy thinker)")
     a = ap.parse_args()
     vmodel = os.getenv("VERIFIER_MODEL", "qwen/qwen3.6-35b-a3b")
     os.environ["LMSTUDIO_MODEL"] = vmodel
@@ -160,7 +160,7 @@ def main():
         for i, r in enumerate(bad):
             d = dmap.get(r["item_id"])
             try:
-                vr, vtext = _query_verifier(imap[r["item_id"]], d.decision_answer)
+                vr, vtext = _query_verifier(imap[r["item_id"]], d.decision_answer, max_base=a.verifier_max_tokens)
                 r["verifier_risk"] = vr; r["vtext"] = vtext
                 if vr is not None:
                     fixed += 1
@@ -188,7 +188,7 @@ def main():
                     print(f"  [reload] {i}개 판정 후 {vmodel} 재로드(속도 리셋)...", flush=True)
                     reload_model(vmodel, a.reload_context, a.reload_parallel)
                 try:
-                    vr, vtext = _query_verifier(imap[d.item_id], d.decision_answer)
+                    vr, vtext = _query_verifier(imap[d.item_id], d.decision_answer, max_base=a.verifier_max_tokens)
                     f.write(json.dumps({"item_id": d.item_id, "verifier_risk": vr, "vtext": vtext,
                                         "gpt_oss_conf": d.verbalized_confidence,
                                         "error": error_label(d)}) + "\n"); f.flush()

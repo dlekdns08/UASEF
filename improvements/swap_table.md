@@ -4,6 +4,7 @@
 > 생략형 = `.venv/bin/python experiments/<script>.py`.
 > **셔플 audit = 원본400 + 셔플400 둘 다 shuffle-judge 프롬프트**(prompt confound 0, self-contained). 재활용/sanity 없음.
 > think/no-think = **Jinja 템플릿 토글 후 로드**(수동). 리로드 CTX: qwen3.5=22272 · qwen3.6=13649 · gpt-oss/gemma=로드값.
+> **모든 cross_verifier(매트릭스) 명령에 `--verifier-max-tokens 16000` 추가** (Qwen3.5 heavy thinker 절단 방지; gemma/qwen3.6/gpt-oss는 조기종료라 무해). None율 5%→~0.3%.
 
 ## 모델 ID / 답변자 파일
 | 약칭 | 모델 ID | 답변자 | drafts |
