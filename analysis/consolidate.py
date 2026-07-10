@@ -102,18 +102,22 @@ def judgment_row(r, cond):
     err = r.get("error")
     if shuffle:
         v_pred_canon = r.get("verifier_pred_text"); v_pred_label = r.get("verifier_pred_label")
-        agree = r.get("agreement_by_text"); v_self_z = r.get("verifier_correct_by_text")
+        agree = r.get("agreement_by_text")
+        # judge_selected_correct != independent Z: chosen AFTER seeing the answerer's answer.
+        # Independent Z lives ONLY in 04_verifier_self_answers (join by item_id; note that
+        # joined Z measures competence under the ORIGINAL option order, not shuffle-specific).
+        judge_sel = r.get("judge_selected_correct")
         a_conf = None  # answerer conf lives in the shuffle_answer file (join if needed)
         raw = r.get("vtext") or ""
     else:  # matrix
-        v_pred_canon = None; v_pred_label = None; agree = None; v_self_z = None
+        v_pred_canon = None; v_pred_label = None; agree = None; judge_sel = None
         a_conf = r.get("answerer_conf", r.get("gpt_oss_conf")); raw = r.get("vtext") or ""
     a_conf = float(a_conf) if a_conf is not None else None
     return {"Y_error": err, "answerer_correct": (1 - err if err is not None else None),
             "verifier_risk_V": risk, "risk_C": (round(1 - a_conf, 4) if a_conf is not None else None),
             "verifier_pred_label": v_pred_label, "verifier_pred_canonical_id": v_pred_canon,
             "agreement_canonical": agree,
-            "verifier_self_correct_Z": v_self_z,
+            "judge_selected_correct": judge_sel,
             "parser_success": r.get("parser_ok", int(risk is not None)),
             "empty_output": r.get("empty", int(not raw.strip())),
             "truncated_output": r.get("truncated"),

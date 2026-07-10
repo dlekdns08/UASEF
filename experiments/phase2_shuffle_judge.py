@@ -130,7 +130,10 @@ def main():
                 # agreement computed on TEXT (safe under shuffle) + label (diagnostic)
                 "agreement_by_text": int(v_text != "" and _norm(v_text) == _norm(ans_text)),
                 "agreement_by_label": int(vlabel != "" and vlabel == prop_label),
-                "verifier_correct_by_text": int(v_text != "" and _norm(v_text) == _norm(s.get("gold_answer_text", ""))),
+                # NOT independent Z: the verifier chose this answer AFTER seeing the answerer's
+                # proposed answer (confirmation-bias-contaminated). Independent competence Z
+                # comes only from self-answer files (no proposed answer shown, original order).
+                "judge_selected_correct": int(v_text != "" and _norm(v_text) == _norm(s.get("gold_answer_text", ""))),
                 "error": 1 - int(s["correct_by_text"]),            # answerer error, TEXT-based
                 "vtext": last[:200],
             }

@@ -32,7 +32,7 @@
 - 매트릭스 Qwen3.5-T→A1 (재답변 후): `VERIFIER_MODEL=qwen3.5-122b-a10b … cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_q35T_gptoss.jsonl --reload-every 100 --reload-context 22272 --reload-parallel 4`
 
 ### 세션 2 · **gpt-oss-T**
-- 매트릭스 gpt-oss-T→A2 [음의앵커]: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptT_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- 매트릭스 gpt-oss-T→A2 [음의앵커]: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptT_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4` (구 B-2 부분실행 294행을 이 파일명으로 rename해둠 → **294 cached, 1206만 판정**)
 - **[baseline] self-verification 대각 (gpt-oss-T→gpt-oss 자기답, matrix만)**: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_gptT_gptoss.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4` (reviewer 방어용 대조군, **core 아님**; C vs self-verif vs cross-model 비교; 셔플엔 불필요)
 - **[self-answer Z/q] gpt-oss-T self-answer = A1 drafts(`drafts_phase0_all`) 재사용** — 별도 생성 불필요. A1은 gpt-oss가 답을 안 보고 같은 1500을 직접 푼 결과(reasoning_text·conf·samples·logprob 포함)라 gpt-oss-T self-answer와 동일. manifest DUAL_SELFANS가 자동 이중역할 처리 → gpt-oss-T→A2 셀의 **Δ·Z-gating·q 완비**. (⚠️ A1 mode = gpt-oss 기본 thinking = T)
 - 셔플 재답변: `ANSWERER_MODEL=openai/gpt-oss-120b … shuffle_answer.py --tag gptoss --n 400 --max-tokens 2048`
@@ -102,9 +102,9 @@
 - ⚠️ **self-verification(답 보고 평가) ≠ self-answer(답 안 보고 직접 풂, Z/q용)** — 둘은 다른 데이터.
 
 **★ Exp1 (최우선) calibration/sharpness 통제 후 ability gating** `phase2_calibration_gating.py` [완성]
-- 각 셀: V·C를 calibrated p로(isotonic) → ECE·Brier·sharpness·AUROC. 중첩 로짓 M0(pC)→M1(+pV)→M3(+Z)→M4(+Z×불일치).
-- Z(=verifier 자기정답, gold=mechanism)가 통제 후에도 유의(LRT)? → **"calibration/sharpness로 환원 안 됨" 방어**.
-- **부분 결과(gpt-oss row 2셀): ΔNLL +0.073/+0.072, LRT p=0.0 ✅** (전 셀은 매트릭스 완성 후).
+- 각 셀: 공통 fold로 cross-fitted isotonic p_C·p_V → held-out 중첩 로짓 M0(pC)→M1(+pV)→M2(+Z)→M3(+Z×불일치). 판정 = held-out NLL 개선 + item-bootstrap CI (LRT 폐기; analysis_plan §4). ECE/sharpness는 셀 수준 descriptive만.
+- Z(=verifier 자기정답, gold=mechanism)가 통제 후에도 개선? → **"calibration/sharpness로 환원 안 됨" 방어**.
+- **결과(gptoss×gemma-T, 신 설계): ΔNLL +0.0813 CI[0.0524,0.108] ✅** (전 셀은 매트릭스 완성 후).
 
 **★ Exp2 (필수) 배포가능 verifier competence proxy** `phase2_competence_proxy.py` [만들 것]
 - q=P(verifier 자기정답 | verifier uncertainty features) 학습(logistic). features: verbalized conf·logprob·hedging·length·(k>0시 self-consistency).
