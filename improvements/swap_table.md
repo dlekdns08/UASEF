@@ -1,6 +1,6 @@
 # 스왑 실행 표 (9 세션) — 운영자용 · Option B (400+400 clean paired)
 
-> 각 세션: **모델 로드(수동)** → 아래 명령 실행. 공통 앞머리: `cd /Users/idaun/PoC/UASEF && export UASEF_QUERY_TIMEOUT_S=400`
+> 각 세션: **모델 로드(수동)** → **provenance 기록**: `.venv/bin/python analysis/run_provenance.py --session <n> --mode <T|N>` → 아래 명령 실행. 공통 앞머리: `cd /Users/idaun/PoC/UASEF && export UASEF_QUERY_TIMEOUT_S=400`
 > 생략형 = `.venv/bin/python experiments/<script>.py`.
 > **셔플 audit = 원본400 + 셔플400 둘 다 shuffle-judge 프롬프트**(prompt confound 0, self-contained). 재활용/sanity 없음.
 > think/no-think = **Jinja 템플릿 토글 후 로드**(수동). 리로드 CTX: qwen3.5=22272 · qwen3.6=13649 · gpt-oss/gemma=로드값.
