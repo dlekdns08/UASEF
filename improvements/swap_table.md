@@ -6,8 +6,12 @@
 > think/no-think = **Jinja 템플릿 토글 후 로드**(수동). 리로드 CTX: qwen3.5=22272 · qwen3.6=13649 · gpt-oss/gemma=로드값.
 > **모든 cross_verifier(매트릭스) 명령에 `--verifier-max-tokens 16000` 추가** (Qwen3.5 heavy thinker 절단 방지; gemma/qwen3.6/gpt-oss는 조기종료라 무해). None율 5%→~0.3%.
 
-## 모델 ID / 답변자 파일
-| 약칭 | 모델 ID | 답변자 | drafts |
+## 모델 ID 레지스트리 (SINGLE source of truth — 논문·CSV·파일명 전부 이 문자열)
+> ⚠️ 실측 확정(`lms ps` + .env): 아래 `model_id`가 **정확한 LM Studio 런타임 문자열**. 옛 .tex의
+> `google/gemma-4-31b-it`·`Qwen3.5-122B-A10B`는 **틀림** → 논문을 이 문자열로 교정할 것.
+> `analysis/manifest.py`의 `MODELS`가 동일 레지스트리(정본).
+
+| 약칭(alias) | **model_id (= runtime_name, 정본)** | 답변자 | drafts |
 |---|---|---|---|
 | gpt-oss | `openai/gpt-oss-120b` | A1 | `data/raw/drafts_phase0_all.jsonl` |
 | gemma | `google/gemma-4-31b` | A2 | `data/raw/drafts_qwen35_think.jsonl` |
@@ -28,7 +32,9 @@
 - 매트릭스 Qwen3.5-T→A1 (재답변 후): `VERIFIER_MODEL=qwen3.5-122b-a10b … cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_q35T_gptoss.jsonl --reload-every 100 --reload-context 22272 --reload-parallel 4`
 
 ### 세션 2 · **gpt-oss-T**
-- 매트릭스 gpt-oss-T→A2 [음의앵커]: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptT_q35.jsonl --reload-every 100 --reload-parallel 4`
+- 매트릭스 gpt-oss-T→A2 [음의앵커]: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_gptT_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4`
+- **[baseline] self-verification 대각 (gpt-oss-T→gpt-oss 자기답, matrix만)**: `VERIFIER_MODEL=openai/gpt-oss-120b … cross_verifier.py --drafts data/raw/drafts_phase0_all.jsonl --n 1500 --out data/raw/verifier_gptT_gptoss.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-parallel 4` (reviewer 방어용 대조군, **core 아님**; C vs self-verif vs cross-model 비교; 셔플엔 불필요)
+- **[self-answer Z/q] gpt-oss-T self-answer = A1 drafts(`drafts_phase0_all`) 재사용** — 별도 생성 불필요. A1은 gpt-oss가 답을 안 보고 같은 1500을 직접 푼 결과(reasoning_text·conf·samples·logprob 포함)라 gpt-oss-T self-answer와 동일. manifest DUAL_SELFANS가 자동 이중역할 처리 → gpt-oss-T→A2 셀의 **Δ·Z-gating·q 완비**. (⚠️ A1 mode = gpt-oss 기본 thinking = T)
 - 셔플 재답변: `ANSWERER_MODEL=openai/gpt-oss-120b … shuffle_answer.py --tag gptoss --n 400 --max-tokens 2048`
 - 원본 재답변(--no-shuffle): `ANSWERER_MODEL=openai/gpt-oss-120b … shuffle_answer.py --tag gptoss_orig --no-shuffle --n 400 --max-tokens 2048`
 - 셔플판정 gpt-oss-T→Qwen3.5: `VERIFIER_MODEL=openai/gpt-oss-120b … shuffle_judge.py --answerer qwen35 --tag gpt_T --max-tokens 2048`
@@ -71,6 +77,7 @@
 - 원본판정×2: `… --answerer gptoss_orig --tag q36_N --max-tokens 1024` · `… --answerer qwen35_orig --tag q36_N --max-tokens 1024`
 
 ### 세션 8 · **Qwen3.5-T** (재방문, think)
+- **[baseline] self-verification 대각 (Qwen3.5-T→Qwen3.5 자기답, matrix만)**: `VERIFIER_MODEL=qwen3.5-122b-a10b … cross_verifier.py --drafts data/raw/drafts_qwen35_think.jsonl --n 1500 --out data/raw/verifier_q35T_q35.jsonl --verifier-max-tokens 16000 --reload-every 100 --reload-context 22272 --reload-parallel 4` (reviewer 방어용 대조군, **core 아님**; 셔플엔 불필요)
 - 셔플판정 Qwen3.5-T→gpt-oss: `VERIFIER_MODEL=qwen3.5-122b-a10b … shuffle_judge.py --answerer gptoss --tag q35_T --max-tokens 16000`
 - 원본판정: `… shuffle_judge.py --answerer gptoss_orig --tag q35_T --max-tokens 16000`
 
@@ -83,6 +90,13 @@
 
 ## Phase 3 — 분석 (LLM 0, 스왑 없음) — reviewer 방어 4실험 + 코어
 
+**★ Baseline (reviewer 방어) self-verification 대각 vs cross-model** [appendix/baseline 표, **core 아님**]
+- 질문 "cross-model이 정말 필요한가? answerer가 자기 답 재검토하면 안 되나?"를 막는 대조군.
+- **딱 2셀** (thinking만): `verifier_gptT_gptoss`(gpt-oss→gpt-oss-T) · `verifier_q35T_q35`(Qwen3.5-T→Qwen3.5-T). 세션2·8에서 생성. **셔플/전체 대각 확장은 안 함**(논문 중심 흐림).
+- 표: **C < self-verification ≤ cross-model V** 패턴 기대 (self-verif는 blind-spot·confirmation bias 공유 → C와 비슷/약함, cross-model만 추가 lift).
+- consolidation `verification_type`(self/cross)로 자동 분리 → 메인표엔 cross만, appendix에 self baseline.
+- ⚠️ **self-verification(답 보고 평가) ≠ self-answer(답 안 보고 직접 풂, Z/q용)** — 둘은 다른 데이터.
+
 **★ Exp1 (최우선) calibration/sharpness 통제 후 ability gating** `phase2_calibration_gating.py` [완성]
 - 각 셀: V·C를 calibrated p로(isotonic) → ECE·Brier·sharpness·AUROC. 중첩 로짓 M0(pC)→M1(+pV)→M3(+Z)→M4(+Z×불일치).
 - Z(=verifier 자기정답, gold=mechanism)가 통제 후에도 유의(LRT)? → **"calibration/sharpness로 환원 안 됨" 방어**.
@@ -91,7 +105,12 @@
 **★ Exp2 (필수) 배포가능 verifier competence proxy** `phase2_competence_proxy.py` [만들 것]
 - q=P(verifier 자기정답 | verifier uncertainty features) 학습(logistic). features: verbalized conf·logprob·hedging·length·(k>0시 self-consistency).
 - gpt-oss-T(drafts_phase0_all) + Qwen3.5-T(drafts_qwen35_think) + Qwen3.5-N(drafts_qwen35_nothink) = 무료(기존). gemma-T·qwen3.6-T = 세션4·6 self-answer 재생성(feature). **gpt-oss-N = 세션3 self-answer(selfanswer_gptossN, B-1b 대칭짝)**.
-- **no-think verifier 대칭 현황**: Qwen3.5-N ✅(drafts_qwen35_nothink) · gpt-oss-N ✅(세션3 추가) · gemma-N·qwen3.6-N = 보류(결과 나쁘면 세션5·7에 추가).
+- **no-think verifier self-answer 대칭 + 해석 규칙**:
+  - Qwen3.5-N ✅(drafts_qwen35_nothink) · gpt-oss-N ✅(selfanswer_gptossN, 세션3) · **gemma-N·qwen3.6-N = self-answer 없음**.
+  - **트리거(명시)**: gemma-N/qwen3.6-N이 **의미 있는 lift**를 보이면 → 세션5·7에 N self-answer 추가. (단순 "결과 나쁘면"이 아니라, N verifier가 신호가 있을 때만 Z/q 규명이 값어치)
+  - **해석 범위 분리(논문에 명시)**:
+    - **T verifier 셀** = Z-gating · q proxy · Δ-lift · calibration gating까지 **메인 분석**.
+    - **N verifier 셀(self-answer 없는)** = reasoning ablation · shuffle robustness · parser/empty 중심. **Z/q/Δ는 계산 안 함**(self-answer 없어 불가) → 논문에서 T셀 중심이라고 못박음.
 - high/mid/low q tertile별 V lift 비교 + Y~pC+pV+q+pV×q → **gold 없이 competence로 signal 조절 가능**.
 
 **★ Exp3 threshold/shift transfer robustness** `phase2_threshold_transfer.py` [만들 것]
