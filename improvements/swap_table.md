@@ -79,11 +79,31 @@
 
 ---
 
-## Phase 3 — 분석 (LLM 0, 스왑 없음)
-- **셔플 강건성 (셀별 clean paired)**: 원본400(`shuffle_judge_<a>_orig__<v>`) vs 셔플400(`shuffle_judge_<a>__<v>`)
-  → AUROC(risk→오류)·AUROC(불일치-text→오류)·P(오류\|불일치) 원본 vs 셔플 비교. think 유지 / no-think 붕괴(암기) 2×2.
-  *(비교 스크립트 `phase2_shuffle_compare.py` [만들 것, LLM0])*
-- **A9 lift≈f(Δ)** within-dataset · **4모델 추론 ablation 표** · **A8 전셀 정보이론** (매트릭스 데이터)
+## Phase 3 — 분석 (LLM 0, 스왑 없음) — reviewer 방어 4실험 + 코어
+
+**★ Exp1 (최우선) calibration/sharpness 통제 후 ability gating** `phase2_calibration_gating.py` [완성]
+- 각 셀: V·C를 calibrated p로(isotonic) → ECE·Brier·sharpness·AUROC. 중첩 로짓 M0(pC)→M1(+pV)→M3(+Z)→M4(+Z×불일치).
+- Z(=verifier 자기정답, gold=mechanism)가 통제 후에도 유의(LRT)? → **"calibration/sharpness로 환원 안 됨" 방어**.
+- **부분 결과(gpt-oss row 2셀): ΔNLL +0.073/+0.072, LRT p=0.0 ✅** (전 셀은 매트릭스 완성 후).
+
+**★ Exp2 (필수) 배포가능 verifier competence proxy** `phase2_competence_proxy.py` [만들 것]
+- q=P(verifier 자기정답 | verifier uncertainty features) 학습(logistic). features: verbalized conf·logprob·hedging·length·(k>0시 self-consistency).
+- gpt-oss(drafts_phase0_all 전체 feature) + Qwen3.5(drafts_qwen35_think 부분) = 무료. gemma·qwen3.6 = 세션4·6 self-answer 재생성(feature).
+- high/mid/low q tertile별 V lift 비교 + Y~pC+pV+q+pV×q → **gold 없이 competence로 signal 조절 가능**.
+
+**★ Exp3 threshold/shift transfer robustness** `phase2_threshold_transfer.py` [만들 것]
+- calibration split에서 τ 결정 → within-ds / cross-ds(Med↔Pub) / cross-answerer(gpt↔Qwen) / original→shuffled 이전.
+- Pr(공개|오답)·release rate·τ instability 측정. C vs V vs C+V vs C+V+q 안정성 비교 → **thresholded 운영 안정성 + shift 한계 명시**.
+
+**★ Exp4 option-shuffle audit (canonical-id 기준)** `phase2_shuffle_compare.py` [완성]
+- 원본400 vs 셔플400: AUROC(risk→오류)·AUROC(불일치-**text/canonical id**→오류)·P(오류|불일치). **think 유지 vs no-think 붕괴(2×2)** = reasoning-mediated 증거.
+- answerer robustness(원본/셔플 정확도·content-invariance) + verifier robustness(Δlift).
+
+**코어**: A9 lift≈f(Δ) **within-dataset(per-ds Δ 필수)** · A8 전셀 정보이론 · 4모델 추론 ablation.
+
+**논문 Results 재배치**: 4.1 self-conf 강하나 불완전 → 4.2 thinking cross-verifier 개선 → 4.3 item-level ability-gated →
+**4.4 gating≠calibration/sharpness(Exp1)** → 4.5 competence proxy로 부분 배포가능(Exp2) → 4.6 평균Δ만으론 불충분 →
+4.7 shuffle audit=reasoning 의존(Exp4) → 4.8 conformal gate로 불완전 신호 운용(+Exp3 robustness).
 
 ## 매트릭스 9 출력 체크리스트
 - [완료] verifier_cross(gemT→A1) · verifier_qwen27(q36T→A1) · verifier_qwen35_of_gptoss(q35N→A1=B-1b)
