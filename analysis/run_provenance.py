@@ -78,7 +78,7 @@ def _sha256(path, chunk=1 << 22):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", required=True, help="swap session number (1-9)")
-    ap.add_argument("--mode", required=True, choices=["T", "N"],
+    ap.add_argument("--mode", required=True, choices=["T", "N", "low", "medium", "high"],
                     help="thinking toggle state of the LOADED model (manual Jinja toggle — declare it)")
     ap.add_argument("--note", default="")
     ap.add_argument("--hash", action="store_true", help="also SHA-256 the model file(s) (slow: minutes for 50GB+)")

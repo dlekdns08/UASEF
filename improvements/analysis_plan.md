@@ -59,6 +59,7 @@ q proxy · CMI I(V;Y|C) · shuffle robustness · self-verification 비교 · con
 
 ## 7. Self-verification baseline (2셀 한정)
 - 비교: C · S(self-verif) · V(cross) · C+S · C+V · **C+S+V vs C+S** (핵심: S를 알고도 V가 증분 정보를 주는가).
+- **V 선택 규칙 (고정)**: V는 **verifier별 개별 평가** — A1행: C+S+V_gemma / C+S+V_qwen3.6 / C+S+V_Qwen3.5 각각 vs C+S; A2행: V_gptoss/V_gemma/V_qwen3.6 각각. **복수 V 조합·사후 best-verifier 선택 금지** (no-ensemble 방침 일치).
 - 2셀뿐이므로 self-verification 일반론 주장 금지. appendix/baseline 표.
 
 ## 8. CMI (A8) — 보조 결과로 격하 + 강건성 의무
@@ -66,7 +67,7 @@ q proxy · CMI I(V;Y|C) · shuffle robustness · self-verification 비교 · con
 - 헤드라인은 AUROC/lift/Z-gating. CMI는 해석 보조.
 
 ## 9. Shuffle audit
-- 결정론 확인됨: 답변자·판정자 모두 temperature=0 (중복 행 동일 출력으로 실증) → sampling noise confound 없음(Methods 명시).
+- 개입 서술 (고정): "옵션 순서(및 positional representation)만 의도 조작, prompt·decoding·parser·scoring 고정 → **비의도적 confound 최소화**" ("confound 0" 단정 금지). temperature=0은 "**평가된 로컬 배포 환경에서 사실상 결정적**(effectively deterministic; 중복 행 동일 출력 실증)"으로 서술 — bitwise determinism 일반 보장 주장 금지.
 - 통계는 전부 paired: 정확도=McNemar, lift=shuffle_group bootstrap, agreement=paired proportion. T/N 분리 보고.
 - **Z 표기 규칙 (고정)**: shuffle_judge의 `judge_selected_correct`(answerer 답 **노출 후** verifier가 고른 답의 정오)는 **독립 Z가 아님** — Z라 부르지 않는다. 독립 Z는 self-answer 파일에서만 오고, 셔플 행에 join 시 그 값은 "원본 옵션 순서에서 측정된 competence"임을 명시 (shuffle-specific competence 주장 금지). 셔플 core 분석(T/N lift·paired robustness)에는 Z 불필요.
 - 셀 구조: 12 (answerer×verifier-mode) 셀 × 원본/셔플 2 × 400 = 9,600 판정.
@@ -87,5 +88,21 @@ q proxy · CMI I(V;Y|C) · shuffle robustness · self-verification 비교 · con
 ## 12. Provenance
 - 모든 결과 행에 answerer_model/mode·verifier_model/mode·dataset·split·verification_type(cross/self_verification/self_answer) 필수.
 - self-answer 재사용 시 `self_answer_source=reused_answerer_draft` 표기 (gpt-oss-T=A1, Qwen3.5-T/N=drafts).
+- **결측 역할 = `NA`** (빈 문자열 금지): self_answer 행은 answerer_model/mode=NA, answerer 행은 verifier_model/mode=NA. **verifier를 answerer 자리에 복제 금지** (self_verification과 혼동). consolidation이 자동 적용.
 - 모델명 정본 = `analysis/manifest.py MODELS` (LM Studio 런타임 문자열). 논문·CSV 동일 문자열.
+- **소급 기록 규칙**: 헬퍼 도입(2026-07-10) 이전의 discovery/phase1 산출물은 `retrospective: true` 표시된 소급 레코드로 커버 (근거=파일 mtime+manifest 매핑; 실시간 캡처 아님을 명시). 이후 세션은 전부 실시간 기록.
 - **Run manifest (세션 시작마다 기록, `analysis/run_provenance.py`)**: run_id · 로드된 모델 identifier · 로컬 모델 파일 경로/크기/mtime (+옵션 SHA-256, `--hash`) · LM Studio(lms) 버전 · context length · parallel · thinking 토글 상태(T/N; Jinja 토글은 수동이므로 운영자가 --mode로 명시) · UASEF_QUERY_TIMEOUT_S · git commit · 기록 시각 → `results/consolidated/run_provenance.jsonl` append. Jinja 템플릿/프롬프트는 코드 정본(VSYS·VJSYS)이 git으로 버전관리되므로 commit hash가 프롬프트 해시를 겸함.
+
+## 13. gpt-oss reasoning-effort intervention (고정)
+- **명칭 (고정)**: "**a controlled within-model intervention on the reasoning-effort setting**" — "인과 축"·"negative-Δ effort recovery" 표현 금지 (effort 설정이 내부 추론량을 얼마나 바꿨는지 직접 측정한 것 아님; high의 Δ 부호도 self-answer 전에는 미정).
+- **잠금 문장 (EN)**: "GPT-OSS does not expose a no-thinking mode. We therefore treat its low- and high-reasoning-effort settings as a separate graded effort intervention, while the binary thinking/no-thinking analysis is restricted to Qwen3.5, Gemma, and Qwen3.6."
+- **연구 질문 (EN)**: "Does increasing GPT-OSS reasoning effort improve verifier informativeness on fixed strong-answerer outputs, and is any improvement mediated by changes in item-level competence?"
+- **결과 해석 4경우 (사전 고정)**: ① high도 Δ<0 + lift 회복 = 최강(약한 평균능력에도 effort가 residual signal 회복) ② high Δ>0 + lift 회복 = effort가 능력·신호 동반 개선 ③ 정확도↑ + lift 미회복 = solver vs judge competence 분리 ④ 둘 다 불변 = gpt-oss에서 effort 효과 제한적.
+- **분석 (전부 기존 데이터/세션3, 새 LLM 실행 없음)**:
+  - 매트릭스 effort 효과: V_low vs V_high (동일 A2 1500, **item-paired bootstrap**), AUROC·AUPRC·Brier·NLL.
+  - competence 효과: acc(self_H)−acc(self_L), Δ_high vs Δ_low, Z_H vs Z_L.
+  - 셔플 effort 강건성: low(orig vs shuf) vs high(orig vs shuf).
+  - **★ Z-전이 4그룹**: (Z_L,Z_H) = (0,0)/(0,1)/(1,1)/(1,0)로 문항 분할 → **lift 개선이 (0,1) competence-회복 문항에 집중되는가?** 집중되면 "effort는 독립적으로 풀 수 있게 된 문항에서 verifier 정보성을 높인다"; self-answer 회복에도 risk 미개선이면 solver/judge competence 분리.
+- **순수 effort 비교의 유효 범위 (고정)**: judgment 쪽은 조건 완전 동일(동일 VSYS·A2 출력·item set·temp0·16000 budget·parser — 차이는 effort 설정뿐) → **순수 비교 유효**. self-answer 쪽은 프롬프트·decision temp(0.0) 동일하나 **max_tokens 512(low, A1 재사용)→4096(high, 절단 방지) 및 k=5→0(샘플만, decision 무영향) 상이** → **low vs high self-answer 정확도 차이를 순수 effort ablation이라 부르지 않음** (각 조건의 Z/Δ 계산에는 유효). provenance: `self_answer_params_matched=false(detail: max_tokens, k)`.
+- **통계 family 분리 (고정)**: F3(T/N) = Qwen3.5·gemma·qwen3.6 3모델만. **F5 = gpt-oss effort L/H (별도 보조 family)**. 하나의 pooled 효과로 합산 금지. 방향 일치 시 보조 서술: "두 종류의 추론 제어 방식 모두에서 더 deliberative한 실행이 verifier 정보성을 높였다."
+- **self-verification 라벨**: 기존 대각(gpt-oss-low 답→low verifier) = "**same-model, matched-effort self-verification baseline**". gpt-oss-high 대각 추가 안 함 (동결; appendix baseline).

@@ -168,6 +168,15 @@ def collect(role, extractor, restrict=None):
                 base = {k: cond.get(k) for k in ("answerer_model", "answerer_mode",
                                                  "verifier_model", "verifier_mode", "split",
                                                  "verification_type")}
+                # locked key rule (analysis_plan §12): a role absent for this row type is
+                # "NA", never blank — and NEVER filled by duplicating the other role's model
+                # (a self_answer row with answerer==verifier would masquerade as
+                # self_verification). self_answer rows: answerer_* = NA; answerer rows:
+                # verifier_* = NA.
+                for k in ("answerer_model", "answerer_mode", "verifier_model",
+                          "verifier_mode", "verification_type"):
+                    if base.get(k) is None:
+                        base[k] = "NA"
                 base["dataset"] = dataset_of(r["item_id"])
                 base["item_id"] = r["item_id"]
                 base["source"] = stem

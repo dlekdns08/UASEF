@@ -34,6 +34,11 @@ MODELS = {          # alias -> model_id (== runtime_name here; LM Studio uses id
 }
 ALIAS = {v: k for k, v in MODELS.items()}   # model_id -> short alias (for display)
 
+# gpt-oss mode semantics: gpt-oss-120b CANNOT disable reasoning (no Jinja think toggle;
+# only a reasoning-effort config low/medium/high). Its "mode" values are therefore
+# "low"/"high" (effort ablation, auxiliary axis), NEVER "T"/"N". All gpt-oss data up to
+# session 2 was effort=low (operator-confirmed: never changed since install). The pure
+# T/N reasoning-toggle claims rest on Qwen3.5 / gemma / qwen3.6 only.
 ANSWERER = "answerer"
 JUDGMENT = "verifier_judgment"
 SELFANS  = "verifier_self_answer"
@@ -41,35 +46,35 @@ SELFANS  = "verifier_self_answer"
 # ── explicit fixed-name files: stem -> (a_model, a_mode, v_model, v_mode, role, split) ──
 FILES = {
     # core answerer sets (A1 = gpt-oss-T, A2 = Qwen3.5-T, A2-N = Qwen3.5-N ablation pair)
-    "drafts_phase0_all":     ("gptoss", "T", None, None, ANSWERER, "matrix"),
+    "drafts_phase0_all":     ("gptoss", "low", None, None, ANSWERER, "matrix"),
     "drafts_qwen35_think":   ("qwen35", "T", None, None, ANSWERER, "matrix"),
     "drafts_qwen35_nothink": ("qwen35", "N", None, None, ANSWERER, "matrix"),  # answerer T/N ablation (B-lite)
 
     # matrix verifier judgments (verifier judges an answerer set)
-    "verifier_cross":            ("gptoss", "T", "gemma",  "T", JUDGMENT, "matrix"),
-    "verifier_qwen27":           ("gptoss", "T", "qwen36", "T", JUDGMENT, "matrix"),
-    "verifier_qwen35_of_gptoss": ("gptoss", "T", "qwen35", "N", JUDGMENT, "matrix"),  # B-1b
-    "verifier_q35T_gptoss":      ("gptoss", "T", "qwen35", "T", JUDGMENT, "matrix"),
-    "verifier_gptT_q35":         ("qwen35", "T", "gptoss", "T", JUDGMENT, "matrix"),  # negative-Δ anchor
-    "verifier_gptN_q35":         ("qwen35", "T", "gptoss", "N", JUDGMENT, "matrix"),
+    "verifier_cross":            ("gptoss", "low", "gemma",  "T", JUDGMENT, "matrix"),
+    "verifier_qwen27":           ("gptoss", "low", "qwen36", "T", JUDGMENT, "matrix"),
+    "verifier_qwen35_of_gptoss": ("gptoss", "low", "qwen35", "N", JUDGMENT, "matrix"),  # B-1b
+    "verifier_q35T_gptoss":      ("gptoss", "low", "qwen35", "T", JUDGMENT, "matrix"),
+    "verifier_gptT_q35":         ("qwen35", "T", "gptoss", "low", JUDGMENT, "matrix"),  # negative-Δ anchor
+    "verifier_gptHigh_q35":      ("qwen35", "T", "gptoss", "high", JUDGMENT, "matrix"),
     "verifier_gemT_q35":         ("qwen35", "T", "gemma",  "T", JUDGMENT, "matrix"),
     "verifier_gemT_q35N":        ("qwen35", "N", "gemma",  "T", JUDGMENT, "matrix"),  # answerer T/N ablation
     "verifier_q36T_q35N":        ("qwen35", "N", "qwen36", "T", JUDGMENT, "matrix"),  # answerer T/N ablation
-    "verifier_gemN_gptoss":      ("gptoss", "T", "gemma",  "N", JUDGMENT, "matrix"),
+    "verifier_gemN_gptoss":      ("gptoss", "low", "gemma",  "N", JUDGMENT, "matrix"),
     "verifier_gemN_q35":         ("qwen35", "T", "gemma",  "N", JUDGMENT, "matrix"),
     "verifier_q36T_q35":         ("qwen35", "T", "qwen36", "T", JUDGMENT, "matrix"),
-    "verifier_q36N_gptoss":      ("gptoss", "T", "qwen36", "N", JUDGMENT, "matrix"),
+    "verifier_q36N_gptoss":      ("gptoss", "low", "qwen36", "N", JUDGMENT, "matrix"),
     "verifier_q36N_q35":         ("qwen35", "T", "qwen36", "N", JUDGMENT, "matrix"),
 
     # self-verification diagonal baselines (answerer==verifier, thinking) — reviewer
     # defense only, NOT core. verification_type resolves to "self" automatically.
-    "verifier_gptT_gptoss":      ("gptoss", "T", "gptoss", "T", JUDGMENT, "matrix"),  # session 2
+    "verifier_gptT_gptoss":      ("gptoss", "low", "gptoss", "low", JUDGMENT, "matrix"),  # session 2
     "verifier_q35T_q35":         ("qwen35", "T", "qwen35", "T", JUDGMENT, "matrix"),  # session 8
 
     # verifier self-answers (verifier solves items itself -> Z, competence proxy q)
     "selfanswer_gemma":      (None, None, "gemma",  "T", SELFANS, "matrix"),
     "selfanswer_qwen27":     (None, None, "qwen36", "T", SELFANS, "matrix"),
-    "selfanswer_gptossN":    (None, None, "gptoss", "N", SELFANS, "matrix"),  # session 3
+    "selfanswer_gptossHigh": (None, None, "gptoss", "high", SELFANS, "matrix"),  # session 3
     "selfanswer_gemmaN":     (None, None, "gemma",  "N", SELFANS, "matrix"),  # session 5
     "selfanswer_qwen27N":    (None, None, "qwen36", "N", SELFANS, "matrix"),  # session 7
 }
@@ -78,7 +83,7 @@ FILES = {
 # (drafts are the model solving items itself, no proposed answer shown — definitionally
 # a self-answer; provenance marked reused_answerer_draft in consolidation)
 DUAL_SELFANS = {
-    "drafts_phase0_all":     (None, None, "gptoss", "T", SELFANS, "matrix"),
+    "drafts_phase0_all":     (None, None, "gptoss", "low", SELFANS, "matrix"),
     "drafts_qwen35_think":   (None, None, "qwen35", "T", SELFANS, "matrix"),
     "drafts_qwen35_nothink": (None, None, "qwen35", "N", SELFANS, "matrix"),  # B-1b symmetric
 }
@@ -87,12 +92,12 @@ DUAL_SELFANS = {
 SHUF_ANS = {
     "qwen35":      ("qwen35", "T", "shuffled400"),
     "qwen35_orig": ("qwen35", "T", "original400"),
-    "gptoss":      ("gptoss", "T", "shuffled400"),
-    "gptoss_orig": ("gptoss", "T", "original400"),
+    "gptoss":      ("gptoss", "low", "shuffled400"),
+    "gptoss_orig": ("gptoss", "low", "original400"),
 }
 # shuffle judge --tag -> (v_model, v_mode)
 SHUF_VER = {
-    "gpt_T": ("gptoss", "T"), "gpt_N": ("gptoss", "N"),
+    "gpt_T": ("gptoss", "low"), "gpt_high": ("gptoss", "high"),
     "gem_T": ("gemma",  "T"), "gem_N": ("gemma",  "N"),
     "q36_T": ("qwen36", "T"), "q36_N": ("qwen36", "N"),
     "q35_T": ("qwen35", "T"), "q35_N": ("qwen35", "N"),
