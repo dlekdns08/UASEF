@@ -87,6 +87,13 @@ def answerer_row(r, cond):
         correct = int(_norm(ans_canon) == _norm(gold_canon)) if gold_canon is not None else None
         label = r.get("decision_answer"); conf = r.get("verbalized_confidence")
         raw = r.get("reasoning_text") or ""
+    # LOCKED POLICY (analysis_plan §2): an answerer that produced no valid option label is
+    # WRONG (answer_correct=0), never dropped and never regenerated — the failure to answer
+    # IS the measurement, and regenerating would desync the already-completed judgments.
+    # (Observed cause is not truncation: e.g. gpt-oss answering "None of the above" at a
+    # 16000 budget.) Rate reported separately in the failure table.
+    if not (label or ans_canon or "").strip():
+        correct = 0
     conf = float(conf) if conf is not None else None
     return {"answer_label": label, "answer_canonical_id": ans_canon, "gold_canonical_id": gold_canon,
             "answer_correct": int(correct) if correct is not None else None,

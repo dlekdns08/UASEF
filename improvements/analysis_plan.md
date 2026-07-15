@@ -30,6 +30,8 @@ q proxy · CMI I(V;Y|C) · shuffle robustness · self-verification 비교 · con
   - **mc·pm 결과는 같은 family 안에 함께 묶어** 보정한다 (dataset별 분리 family 아님).
 - 같은 문항이 여러 셀에 반복 → 셀들을 독립 점으로 취급한 단순 회귀 금지. 셀 통합 주장은 descriptive + item-cluster bootstrap 병기.
 - **Parser failure 정책 (고정)**: ① 예측 지표(주) = 유효 파싱 행 complete-case (기존 n=1495/1498 exclusion이 이 정책) ② 실패율은 role·mode·조건별 별도 보고(CSV 17) ③ **운영 게이트: parser failure/empty = 자동 escalation(최대 위험)** ④ 민감도: 실패 행 전부 오류 취급 시 release 성능 재계산.
+- **비종결 응답 (고정)**: 표준 예산(16000)에서도 **가시 응답이 전혀 없는**(vtext 빈값) 판정/self-answer는 **수리하지 않고 None 유지 + 실패로 보고**한다 — 예산을 더 키우면 그 항목만 다른 생성 조건이 되고, 원인이 절단이 아니라 비종결 추론이라 반복해도 동일하다. 현황: verifier_qwen27 2건(0.13%). complete-case 제외 + CSV 17 실패율 + 운영 게이트 자동 escalation.
+- **역할별 빈응답 처리 (고정)**: **verifier/self-answer 빈응답 = 수리 대상**(purge→재생성; 예산 절단 아티팩트). **answerer 빈답 = 절대 재생성 금지** — 답변 실패 자체가 측정 대상(error=1)이고, 재생성하면 고정 answerer 조건이 바뀌어 기존 판정 전체와 어긋남(진짜 오염). 현황: A1 6/3800, A2-T 1, A2-N 3, gptoss 셔플/원본 각 1 → 오답 처리 + 실패율 표.
 
 ## 3. Split 규칙
 - `results/consolidated/00_split_manifest.csv` (item-grouped, dataset-stratified K=5) 를 **모든** calibration·q 학습·threshold 선택·최종 평가가 공유.
@@ -84,6 +86,10 @@ q proxy · CMI I(V;Y|C) · shuffle robustness · self-verification 비교 · con
 - 동일 모델 T/N 비교(Jinja 토글만 변화)가 가장 causal한 대비임을 명시.
 - old-schema 4파일: truncated=unknown(0 아님), output_length 52행 우측검열, core 분석 미사용, failure appendix 각주.
 - **Conformal 문구 규칙 (고정)**: 이론 섹션 = 단일 split conformal의 finite-sample 보장(exchangeability 하). 실험 섹션 = 반복/cross-fitted 결과는 "**평가된 exchangeable split에서 관측 누출률이 목표 이하**"라는 경험적 제어로 서술 ("보장 성립" 단독 표기 금지 — 반복 split 평균에 자동으로 finite-sample 보장이 생기지 않음). shift transfer = 보장 아닌 stress test.
+
+## 12-a. 필드 의미 주의 (오해 방지, 고정)
+- **`reasoning_len` ≠ thinking trace 길이.** `_parse_reasoning`이 뽑는 것은 **가시 응답의 "Reasoning:" 섹션**(프롬프트가 요구한 서술)이며, 내부 사고 토큰이 아니다. → no-think(N) 조건에서도 100% 존재하는 것이 **정상**. 논문·CSV 표기는 "**verbal reasoning verbosity (visible)**"로 하고, Exp2 q feature 설명에도 이 이름을 쓴다. "추론 길이/사고량"으로 소개 금지.
+- **T/N 토글 적용 증거 (Methods에 보고)**: 내부 사고 여부는 응답 필드가 아니라 **속도와 결과**로 확인된다 — gemma self-answer 22.4s/item(T) vs 4.7s/item(N), 매트릭스 판정 23s(T) vs 4.2s(N) = 4.8~5.5배 차이. 사고를 수행하면 이 격차가 나올 수 없다.
 
 ## 12. Provenance
 - 모든 결과 행에 answerer_model/mode·verifier_model/mode·dataset·split·verification_type(cross/self_verification/self_answer) 필수.
