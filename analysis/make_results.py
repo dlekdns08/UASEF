@@ -81,7 +81,8 @@ def main07(jud, z):
     """Z-gating: does verifier lift concentrate where the verifier itself is correct?"""
     m = jud.merge(z, on=["verifier_model", "verifier_mode", "item_id"], how="inner")
     rows = []
-    for k, g in m.groupby(KEYS):
+    for key, g in m.groupby(KEYS):
+        k = dict(zip(KEYS, key))
         for zname, zval in [("Z1", 1), ("Z0", 0)]:
             sub = g[g["verifier_self_correct_Z"] == zval]
             y = sub["Y_error"].to_numpy(int)
